@@ -1,0 +1,6 @@
+{
+  "name": "DuoPlay",
+  "description": "Mini-hub de jeux de couple à distance en temps réel par webcam et PeerJS : Tu ris, tu perds et Les Funambules.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

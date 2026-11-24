@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-velvet-950: #0d0f17;
+  --color-velvet-900: #141724;
+  --color-velvet-850: #1a1e2e;
+  --color-velvet-800: #22273b;
+  --color-ivory-100: #f6f2e9;
+  --color-ivory-300: #cbc4b6;
+  --color-ivory-500: #8e887e;
+  --color-coral-500: #e86a58;
+  --color-coral-400: #f08272;
+  --color-amber-400: #e8b861;
+  --color-amber-300: #f2cb80;
+  --color-sage-400: #5cc29f;
+}
+
+@layer base {
+  :root {
+    --ease-fluid: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html,
+  body {
+    font-family: var(--font-sans);
+    background-color: #0d0f17;
+    background-image: radial-gradient(
+      900px 520px at 50% -12%,
+      rgba(232, 184, 97, 0.06),
+      transparent 70%
+    );
+    color: #f6f2e9;
+    overflow-x: hidden;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  html[lang="ar"],
+  html[lang="ar"] body,
+  html[lang="ar"] h1,
+  html[lang="ar"] h2,
+  html[lang="ar"] h3 {
+    font-family: "Cairo", var(--font-sans), sans-serif;
+  }
+
+  button:not(:disabled),
+  a[href] {
+    cursor: pointer;
+    transition-timing-function: var(--ease-fluid);
+  }
+
+  button:not(:disabled):active {
+    transform: scale(0.985);
+  }
+
+  :focus-visible {
+    outline: 2px solid #e8b861;
+    outline-offset: 2px;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.mirror-video {
+  transform: scaleX(-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
