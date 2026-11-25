@@ -1052,9 +1052,9 @@ export function NinjaFruitsGameView({
         : 'Glisse la souris ou le doigt sur l’arène';
 
   return (
-    <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 space-y-4">
+    <main className="flex-1 w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-4 space-y-2.5 sm:space-y-4">
       {/* Main Full-Bleed Canvas Stage */}
-      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0B0E1A] shadow-2xl shadow-black/50 h-[520px] sm:h-[580px] select-none touch-none">
+      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0B0E1A] shadow-2xl shadow-black/50 h-[58dvh] min-h-[390px] max-h-[530px] sm:h-[580px] sm:max-h-none select-none touch-none">
         <canvas
           ref={canvasRef}
           data-testid="ninja-canvas"
@@ -1064,89 +1064,91 @@ export function NinjaFruitsGameView({
           className="w-full h-full block cursor-crosshair"
         />
 
-        {/* Perimeter Top HUD — Solid dark surfaces, no backdrop-blur over live canvas */}
-        <div className="pointer-events-none absolute top-3 left-3 right-3 flex items-start justify-between gap-3">
-          {/* Left: Score & Record */}
-          <div className="rounded-xl bg-[#111524]/92 border border-white/12 px-3.5 py-2 shadow-lg">
-            <p className="text-[11px] uppercase tracking-wider text-[#A9A295]">Score Duo</p>
-            <div className="flex items-baseline gap-2.5">
-              <span
-                data-testid="ninja-score"
-                className="text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none"
-              >
-                {hud.score}
-              </span>
-              <span className="text-xs text-[#E8B861] tabular-nums">Record {hud.bestScore}</span>
-            </div>
-          </div>
-
-          {/* Center: Combo Multiplier + 3 Lives */}
-          <div className="flex flex-col items-center gap-1.5">
-            <div className="flex items-center gap-3 rounded-xl bg-[#111524]/92 border border-white/12 px-4 py-2 shadow-lg">
-              <div className="flex items-center gap-1.5">
-                <Flame
-                  className={`w-4 h-4 ${hud.multiplier >= 3 ? 'text-[#E86A58]' : 'text-[#E8B861]'}`}
-                />
-                <span className="text-sm font-bold text-[#F6F2E9] tabular-nums">
-                  ×{hud.multiplier}
+        {/* Perimeter Top HUD — hidden during ready so mobile start card is completely clean */}
+        {hud.phase !== 'ready' && (
+          <div className="pointer-events-none absolute top-3 left-3 right-3 z-10 flex items-start justify-between gap-2 sm:gap-3">
+            {/* Left: Score & Record */}
+            <div className="rounded-xl bg-[#111524]/92 border border-white/12 px-2.5 sm:px-3.5 py-1.5 sm:py-2 shadow-lg">
+              <p className="text-[10px] sm:text-[11px] uppercase tracking-wider text-[#A9A295]">Score</p>
+              <div className="flex items-baseline gap-2">
+                <span
+                  data-testid="ninja-score"
+                  className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none"
+                >
+                  {hud.score}
                 </span>
-                {hud.combo >= 2 && (
-                  <span className="text-xs text-[#CBC4B6] tabular-nums">({hud.combo})</span>
-                )}
-              </div>
-
-              <span className="w-px h-4 bg-white/15" aria-hidden="true" />
-
-              <div className="flex items-center gap-1" aria-label={`${hud.lives} vies restantes`}>
-                {Array.from({ length: hud.maxLives }).map((_, idx) => (
-                  <Heart
-                    key={idx}
-                    className={`w-4 h-4 transition-colors ${
-                      idx < hud.lives
-                        ? 'text-[#E86A58] fill-[#E86A58]'
-                        : 'text-white/20 fill-transparent'
-                    }`}
-                  />
-                ))}
+                <span className="hidden sm:inline text-xs text-[#E8B861] tabular-nums">Record {hud.bestScore}</span>
               </div>
             </div>
 
-            {hud.callout && hud.phase === 'playing' && (
-              <div className="rounded-lg bg-[#161B2E]/95 border border-[#E8B861]/40 px-3 py-1 text-xs font-semibold text-[#F6F2E9] shadow-md">
-                {hud.callout}
-              </div>
-            )}
-          </div>
+            {/* Center: Combo Multiplier + 3 Lives */}
+            <div className="flex flex-col items-center gap-1.5">
+              <div className="flex items-center gap-2 sm:gap-3 rounded-xl bg-[#111524]/92 border border-white/12 px-2.5 sm:px-4 py-1.5 sm:py-2 shadow-lg">
+                <div className="flex items-center gap-1">
+                  <Flame
+                    className={`w-4 h-4 ${hud.multiplier >= 3 ? 'text-[#E86A58]' : 'text-[#E8B861]'}`}
+                  />
+                  <span className="text-sm font-bold text-[#F6F2E9] tabular-nums">
+                    ×{hud.multiplier}
+                  </span>
+                  {hud.combo >= 2 && (
+                    <span className="hidden sm:inline text-xs text-[#CBC4B6] tabular-nums">({hud.combo})</span>
+                  )}
+                </div>
 
-          {/* Right: Pause & Restart controls */}
-          <div className="pointer-events-auto flex items-center gap-2">
-            {(hud.phase === 'playing' || hud.phase === 'paused') && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => togglePause()}
-                  aria-label={hud.phase === 'paused' ? 'Reprendre' : 'Mettre en pause'}
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
-                >
-                  {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startOrRestart()}
-                  aria-label="Recommencer la partie"
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </>
-            )}
+                <span className="w-px h-4 bg-white/15" aria-hidden="true" />
+
+                <div className="flex items-center gap-1" aria-label={`${hud.lives} vies restantes`}>
+                  {Array.from({ length: hud.maxLives }).map((_, idx) => (
+                    <Heart
+                      key={idx}
+                      className={`w-4 h-4 transition-colors ${
+                        idx < hud.lives
+                          ? 'text-[#E86A58] fill-[#E86A58]'
+                          : 'text-white/20 fill-transparent'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {hud.callout && hud.phase === 'playing' && (
+                <div className="rounded-lg bg-[#161B2E]/95 border border-[#E8B861]/40 px-3 py-1 text-xs font-semibold text-[#F6F2E9] shadow-md">
+                  {hud.callout}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Pause & Restart controls */}
+            <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+              {(hud.phase === 'playing' || hud.phase === 'paused') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => togglePause()}
+                    aria-label={hud.phase === 'paused' ? 'Reprendre' : 'Mettre en pause'}
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                  >
+                    {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startOrRestart()}
+                    aria-label="Recommencer la partie"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Title Overlay */}
         {hud.phase === 'ready' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0B0E1A]/80 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-5 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/80 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3 sm:space-y-5 shadow-2xl">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E86A58]/18 border border-[#E86A58]/35 text-[#F08272] mx-auto">
                 <Swords className="w-6 h-6" />
               </div>
@@ -1159,12 +1161,12 @@ export function NinjaFruitsGameView({
                   centre et coupez les <span className="text-[#E8B861] font-medium">Fruits Géants</span> à deux lames en même temps !
                 </p>
               </div>
-              <p className="text-xs text-[#A9A295]">{sensorLabel}</p>
+              <p className="hidden sm:block text-xs text-[#A9A295]">{sensorLabel}</p>
               <button
                 type="button"
                 data-start="true"
                 onClick={() => startOrRestart()}
-                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors shadow-lg shadow-[#E86A58]/25"
+                className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-bold text-base bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors shadow-lg shadow-[#E86A58]/25"
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>Lancer la partie</span>
@@ -1175,8 +1177,8 @@ export function NinjaFruitsGameView({
 
         {/* Pause Overlay */}
         {hud.phase === 'paused' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0B0E1A]/75 p-4">
-            <div className="w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-4 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/75 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-4 shadow-2xl">
               <h2 className="text-2xl font-bold text-[#F6F2E9]">Partie en pause</h2>
               <p className="text-sm text-[#CBC4B6]">
                 Score actuel : <span className="font-semibold text-[#F6F2E9] tabular-nums">{hud.score}</span>
@@ -1185,7 +1187,7 @@ export function NinjaFruitsGameView({
                 <button
                   type="button"
                   onClick={() => togglePause()}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
+                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>Reprendre</span>
@@ -1193,7 +1195,7 @@ export function NinjaFruitsGameView({
                 <button
                   type="button"
                   onClick={() => startOrRestart()}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-white/8 hover:bg-white/14 text-[#F6F2E9] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Recommencer</span>
@@ -1201,7 +1203,7 @@ export function NinjaFruitsGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-transparent border border-white/12 hover:bg-white/6 text-[#CBC4B6] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-transparent border border-white/12 hover:bg-white/6 text-[#CBC4B6] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Changer de jeu</span>
@@ -1213,8 +1215,8 @@ export function NinjaFruitsGameView({
 
         {/* Game Over Overlay */}
         {hud.phase === 'gameover' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0B0E1A]/82 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-5 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/82 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3.5 sm:space-y-5 shadow-2xl">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
                 <Sparkles className="w-6 h-6" />
               </div>
@@ -1245,7 +1247,7 @@ export function NinjaFruitsGameView({
                   type="button"
                   data-start="true"
                   onClick={() => startOrRestart()}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors"
+                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Rejouer</span>
@@ -1253,7 +1255,7 @@ export function NinjaFruitsGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm bg-white/8 hover:bg-white/14 text-[#F6F2E9] transition-colors"
+                  className="flex-1 min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Retour au Hub</span>
@@ -1265,7 +1267,7 @@ export function NinjaFruitsGameView({
       </div>
 
       {/* Persistent Live Duo Cameras & Sensor Strip below canvas */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl mx-auto">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4 max-w-3xl mx-auto">
         <CameraFeedTile
           name={localName}
           subtitle={sensorLabel}

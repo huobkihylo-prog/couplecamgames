@@ -678,7 +678,7 @@ export function MiamManiaGameView({
     localStream && trackerStatus === 'ready' ? t.miamSensorReady : t.miamSensorFallback;
 
   return (
-    <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 space-y-4">
+    <main className="flex-1 w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-4 space-y-2.5 sm:space-y-4">
       <video
         ref={bgVideoRef}
         muted
@@ -689,7 +689,7 @@ export function MiamManiaGameView({
       />
 
       {/* Full-Bleed Falling-Food Catch Stage */}
-      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0D1020] shadow-2xl shadow-black/50 h-[520px] sm:h-[580px] select-none touch-none">
+      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0D1020] shadow-2xl shadow-black/50 h-[58dvh] min-h-[390px] max-h-[530px] sm:h-[580px] sm:max-h-none select-none touch-none">
         <canvas
           ref={canvasRef}
           data-testid="miam-canvas"
@@ -707,101 +707,103 @@ export function MiamManiaGameView({
           className="w-full h-full block cursor-crosshair"
         />
 
-        {/* Perimeter Top HUD — Solid dark panels, no backdrop-blur over live canvas */}
-        <div className="pointer-events-none absolute top-3 left-3 right-3 flex items-start justify-between gap-3">
-          {/* Left: Score (Duel vs Shared Couple Score) */}
-          <div className="rounded-xl bg-[#111524]/92 border border-white/12 px-3.5 py-2 shadow-lg">
-            <p className="text-[11px] uppercase tracking-wider text-[#A9A295]">
-              {hud.mode === 'coop' ? t.miamCoupleScore : `${localName} · ${t.scoreLabel}`}
-            </p>
-            <div className="flex items-baseline gap-2.5">
-              <span
-                data-testid="miam-score"
-                className="text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none"
-              >
-                {hud.mode === 'coop' ? combinedScore : hud.score}
-              </span>
-              {hud.mode === 'duel' && (
-                <span className="text-xs text-[#E8B861] tabular-nums">
-                  {partnerName}: {hud.partnerScore}
+        {/* Perimeter Top HUD — hidden during ready so mobile start card never clashes */}
+        {hud.phase !== 'ready' && (
+          <div className="pointer-events-none absolute top-3 left-3 right-3 z-10 flex items-start justify-between gap-2 sm:gap-3">
+            {/* Left: Score (Duel vs Shared Couple Score) */}
+            <div className="rounded-xl bg-[#111524]/92 border border-white/12 px-2.5 sm:px-3.5 py-1.5 sm:py-2 shadow-lg">
+              <p className="text-[10px] sm:text-[11px] uppercase tracking-wider text-[#A9A295]">
+                {hud.mode === 'coop' ? t.miamCoupleScore : t.scoreLabel}
+              </p>
+              <div className="flex items-baseline gap-2">
+                <span
+                  data-testid="miam-score"
+                  className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none"
+                >
+                  {hud.mode === 'coop' ? combinedScore : hud.score}
                 </span>
+                {hud.mode === 'duel' && (
+                  <span className="hidden sm:inline text-xs text-[#E8B861] tabular-nums">
+                    {partnerName}: {hud.partnerScore}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Center: Mouth State + Lives */}
+            <div className="flex items-center gap-2 sm:gap-3 rounded-xl bg-[#111524]/92 border border-white/12 px-2.5 sm:px-4 py-1.5 sm:py-2 shadow-lg">
+              <span
+                className={`text-[11px] sm:text-xs font-bold tracking-wide ${
+                  hud.mouthOpen ? 'text-[#5CC29F]' : 'text-[#E8B861]'
+                }`}
+              >
+                {hud.mouthOpen ? t.miamMouthOpen : t.miamMouthClosed}
+              </span>
+
+              <span className="w-px h-4 bg-white/15" aria-hidden="true" />
+
+              <div className="flex items-center gap-1" aria-label={`${hud.lives} ${t.miamLivesLeft}`}>
+                {Array.from({ length: hud.maxLives }).map((_, idx) => (
+                  <Heart
+                    key={idx}
+                    className={`w-4 h-4 ${
+                      idx < hud.lives
+                        ? 'text-[#E86A58] fill-[#E86A58]'
+                        : 'text-white/20 fill-transparent'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Right: Pause & Restart */}
+            <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+              {(hud.phase === 'playing' || hud.phase === 'paused') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={togglePause}
+                    aria-label={hud.phase === 'paused' ? t.resume : t.pause}
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                  >
+                    {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startOrRestart()}
+                    aria-label={t.restart}
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </>
               )}
             </div>
           </div>
-
-          {/* Center: Mouth State + Lives */}
-          <div className="flex items-center gap-3 rounded-xl bg-[#111524]/92 border border-white/12 px-4 py-2 shadow-lg">
-            <span
-              className={`text-xs font-bold tracking-wide ${
-                hud.mouthOpen ? 'text-[#5CC29F]' : 'text-[#E8B861]'
-              }`}
-            >
-              {hud.mouthOpen ? t.miamMouthOpen : t.miamMouthClosed}
-            </span>
-
-            <span className="w-px h-4 bg-white/15" aria-hidden="true" />
-
-            <div className="flex items-center gap-1" aria-label={`${hud.lives} ${t.miamLivesLeft}`}>
-              {Array.from({ length: hud.maxLives }).map((_, idx) => (
-                <Heart
-                  key={idx}
-                  className={`w-4 h-4 ${
-                    idx < hud.lives
-                      ? 'text-[#E86A58] fill-[#E86A58]'
-                      : 'text-white/20 fill-transparent'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Right: Pause & Restart */}
-          <div className="pointer-events-auto flex items-center gap-2">
-            {(hud.phase === 'playing' || hud.phase === 'paused') && (
-              <>
-                <button
-                  type="button"
-                  onClick={togglePause}
-                  aria-label={hud.phase === 'paused' ? t.resume : t.pause}
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
-                >
-                  {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startOrRestart()}
-                  aria-label={t.restart}
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+        )}
 
         {/* Title Overlay with Duel / Coop Mode Selector */}
         {hud.phase === 'ready' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0D1020]/82 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-5 shadow-2xl">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
-                <Utensils className="w-6 h-6" />
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0D1020]/82 p-3 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3 sm:space-y-5 shadow-2xl">
+              <div className="inline-flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
+                <Utensils className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
 
               <div className="space-y-1.5">
-                <h1 className="text-2xl sm:text-3xl font-bold text-[#F6F2E9] tracking-tight">
+                <h1 className="text-xl sm:text-3xl font-bold text-[#F6F2E9] tracking-tight">
                   {t.miamTitle}
                 </h1>
-                <p className="text-sm text-[#CBC4B6] leading-relaxed">{t.miamDesc}</p>
+                <p className="text-xs sm:text-sm text-[#CBC4B6] leading-relaxed">{t.miamDesc}</p>
               </div>
 
-              {/* Duel vs Co-op Mode Picker */}
-              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-[#0D0F17] border border-white/10">
+              {/* Duel vs Co-op Mode Picker — 48px touch targets */}
+              <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-[#0D0F17] border border-white/10">
                 <button
                   type="button"
                   data-miam-mode="duel"
                   onClick={() => selectMode('duel')}
-                  className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${
+                  className={`min-h-[48px] py-2.5 px-3 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1.5 ${
                     hud.mode === 'duel'
                       ? 'bg-[#E86A58] text-[#11131E]'
                       : 'text-[#CBC4B6] hover:text-[#F6F2E9]'
@@ -814,7 +816,7 @@ export function MiamManiaGameView({
                   type="button"
                   data-miam-mode="coop"
                   onClick={() => selectMode('coop')}
-                  className={`py-2 px-3 rounded-lg text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center gap-1.5 ${
+                  className={`min-h-[48px] py-2.5 px-3 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-1.5 ${
                     hud.mode === 'coop'
                       ? 'bg-[#E8B861] text-[#11131E]'
                       : 'text-[#CBC4B6] hover:text-[#F6F2E9]'
@@ -825,13 +827,13 @@ export function MiamManiaGameView({
                 </button>
               </div>
 
-              <p className="text-xs text-[#A9A295]">{sensorHint}</p>
+              <p className="hidden sm:block text-xs text-[#A9A295]">{sensorHint}</p>
 
               <button
                 type="button"
                 data-start="true"
                 onClick={() => startOrRestart()}
-                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors shadow-lg shadow-[#E8B861]/25"
+                className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-bold text-base bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors shadow-lg shadow-[#E8B861]/25"
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>{t.miamStartBtn}</span>
@@ -842,14 +844,14 @@ export function MiamManiaGameView({
 
         {/* Pause Overlay */}
         {hud.phase === 'paused' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0D1020]/78 p-4">
-            <div className="w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-4 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0D1020]/78 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-4 shadow-2xl">
               <h2 className="text-2xl font-bold text-[#F6F2E9]">{t.pausedTitle}</h2>
               <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={togglePause}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-[#E8B861] text-[#11131E]"
+                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] text-[#11131E]"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>{t.resume}</span>
@@ -857,7 +859,7 @@ export function MiamManiaGameView({
                 <button
                   type="button"
                   onClick={() => startOrRestart()}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-white/8 text-[#F6F2E9]"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white/10 text-[#F6F2E9]"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>{t.restart}</span>
@@ -865,7 +867,7 @@ export function MiamManiaGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm border border-white/12 text-[#CBC4B6]"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm border border-white/12 text-[#CBC4B6]"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>{t.changeGame}</span>
@@ -877,8 +879,8 @@ export function MiamManiaGameView({
 
         {/* Game Over Overlay */}
         {hud.phase === 'gameover' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0D1020]/84 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-5 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0D1020]/84 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3.5 sm:space-y-5 shadow-2xl">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E86A58]/18 border border-[#E86A58]/35 text-[#F08272] mx-auto">
                 <Sparkles className="w-6 h-6" />
               </div>
@@ -886,7 +888,7 @@ export function MiamManiaGameView({
 
               <div className="grid grid-cols-3 gap-2.5">
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">
+                  <p className="text-[11px] text-[#A9A295] truncate">
                     {hud.mode === 'coop' ? t.miamCoupleScore : localName}
                   </p>
                   <p className="text-xl font-bold text-[#F6F2E9] tabular-nums">
@@ -894,11 +896,11 @@ export function MiamManiaGameView({
                   </p>
                 </div>
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">{partnerName}</p>
+                  <p className="text-[11px] text-[#A9A295] truncate">{partnerName}</p>
                   <p className="text-xl font-bold text-[#E8B861] tabular-nums">{hud.partnerScore}</p>
                 </div>
                 <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">{t.miamCaughtLabel}</p>
+                  <p className="text-[11px] text-[#A9A295] truncate">{t.miamCaughtLabel}</p>
                   <p className="text-xl font-bold text-[#5CC29F] tabular-nums">{hud.caughtCount}</p>
                 </div>
               </div>
@@ -908,7 +910,7 @@ export function MiamManiaGameView({
                   type="button"
                   data-start="true"
                   onClick={() => startOrRestart()}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E]"
+                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E]"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>{t.playAgain}</span>
@@ -916,7 +918,7 @@ export function MiamManiaGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm bg-white/8 hover:bg-white/14 text-[#F6F2E9]"
+                  className="flex-1 min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9]"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>{t.backToHub}</span>
@@ -928,7 +930,7 @@ export function MiamManiaGameView({
       </div>
 
       {/* Live Duo Cameras + Partner Live Score / Mouth Sync Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl mx-auto">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4 max-w-3xl mx-auto">
         <CameraFeedTile
           name={localName}
           subtitle={sensorHint}

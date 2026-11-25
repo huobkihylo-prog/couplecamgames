@@ -63,7 +63,6 @@ export function CameraFeedTile({
     }
   }, [stream, showLiveVideo]);
 
-  // Lightweight 10Hz live face/expression/tilt feedback when physical webcam tracking is active
   useEffect(() => {
     if (!showTrackingReadout || !isLocal || !showLiveVideo) return;
     const id = window.setInterval(() => {
@@ -91,12 +90,14 @@ export function CameraFeedTile({
 
   const borderClass =
     highlightState === 'danger'
-      ? 'border-[#E86A58] ring-2 ring-[#E86A58]/40'
+      ? 'border-[#EF4444] ring-2 ring-[#EF4444]/45'
       : highlightState === 'warning'
-        ? 'border-[#E8B861] ring-1 ring-[#E8B861]/30'
+        ? 'border-[#FACC15] ring-2 ring-[#FACC15]/35'
         : highlightState === 'winner'
-          ? 'border-[#5CC29F] ring-2 ring-[#5CC29F]/40'
-          : 'border-white/12';
+          ? 'border-[#34D399] ring-2 ring-[#34D399]/45'
+          : isLocal
+            ? 'border-[#FF4D8D]/40 ring-1 ring-white/10'
+            : 'border-[#38BDF8]/40 ring-1 ring-white/10';
 
   const aspectClass = compact ? 'aspect-[16/10]' : 'aspect-[4/3]';
 
@@ -121,7 +122,7 @@ export function CameraFeedTile({
 
   return (
     <div
-      className={`relative w-full ${aspectClass} rounded-xl overflow-hidden bg-[#141724] border transition-colors ${borderClass}`}
+      className={`relative w-full ${aspectClass} rounded-3xl overflow-hidden bg-[#1A1533] border shadow-lg shadow-black/30 transition-all duration-300 ${borderClass}`}
     >
       {showLiveVideo ? (
         <video
@@ -131,7 +132,6 @@ export function CameraFeedTile({
           }}
           autoPlay
           playsInline
-          // Local preview MUST always be muted to avoid audio echo!
           muted={isLocal}
           className={`w-full h-full object-cover ${isLocal ? 'mirror-video' : ''}`}
         />
@@ -139,29 +139,29 @@ export function CameraFeedTile({
         <AvatarCanvas
           name={name}
           metricsRef={metricsRef}
-          accentColor={isLocal ? '#C95A49' : '#B5893D'}
-          bgTop={isLocal ? '#1D2236' : '#241C31'}
-          bgBottom={isLocal ? '#111420' : '#131422'}
+          accentColor={isLocal ? '#FF4D8D' : '#38BDF8'}
+          bgTop={isLocal ? '#2C1E59' : '#1E2C59'}
+          bgBottom={isLocal ? '#15102B' : '#111833'}
           isAi={isAi}
         />
       )}
 
-      {/* Measured contrast scrim for legible text over any video luminance */}
+      {/* Measured contrast scrim for crisp legibility over any video luminance */}
       <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#0D0F17]/92 via-[#0D0F17]/45 to-transparent"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#0D0A1E]/92 via-[#0D0A1E]/50 to-transparent"
         aria-hidden="true"
       />
 
-      <div className="absolute inset-x-3 bottom-2.5 flex items-end justify-between gap-2">
+      <div className="absolute inset-x-2.5 sm:inset-x-3.5 bottom-2 sm:bottom-2.5 flex items-end justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-[#F6F2E9] truncate">
+          <p className="text-xs sm:text-sm font-bold text-white truncate">
             {name}
-            {isLocal && <span className="text-xs font-normal text-[#CBC4B6] ms-1.5">{t.youTag}</span>}
+            {isLocal && <span className="text-[11px] font-medium text-white/75 ms-1">{t.youTag}</span>}
           </p>
           {(liveLabel || subtitle) && (
             <p
-              className={`text-xs truncate tabular-nums ${
-                liveLabel && liveTrack.faceDetected ? 'text-[#8AE0C0]' : 'text-[#CBC4B6]'
+              className={`text-[11px] sm:text-xs truncate tabular-nums ${
+                liveLabel && liveTrack.faceDetected ? 'text-[#34D399]' : 'text-white/75'
               }`}
             >
               {liveLabel || subtitle}
@@ -169,10 +169,10 @@ export function CameraFeedTile({
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           {micMuted && isLocal && (
             <span
-              className="inline-flex items-center gap-1 text-xs font-medium text-[#F08272]"
+              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#EF4444]/85 text-white"
               title={t.micMuted}
             >
               <MicOff className="w-3.5 h-3.5" />
@@ -182,10 +182,12 @@ export function CameraFeedTile({
             <button
               type="button"
               onClick={onRequestCamera}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium bg-[#141724]/90 text-[#F6F2E9] border border-white/15 hover:bg-[#22273B] transition-colors whitespace-nowrap"
+              title={t.enableCamera}
+              aria-label={t.enableCamera}
+              className="min-h-[32px] inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-white/15 backdrop-blur-md text-white border border-white/25 hover:bg-white/25 transition-colors whitespace-nowrap"
             >
-              <Camera className="w-3.5 h-3.5" />
-              <span>{t.enableCamera}</span>
+              <Camera className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">{t.enableCamera}</span>
             </button>
           )}
           {footerOverlay}

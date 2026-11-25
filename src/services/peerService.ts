@@ -19,8 +19,28 @@ const JOIN_RETRY_PING_MS = 1000;
 const HEARTBEAT_INTERVAL_MS = 4000;
 const ICE_DISCONNECT_GRACE_MS = 6000;
 
-export function generateRoomCode(): string {
-  return String(Math.floor(1000 + Math.random() * 9000));
+const ROOM_CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
+const ROOM_CODE_DIGITS = '23456789';
+const ROOM_CODE_ALPHABET = `${ROOM_CODE_LETTERS}${ROOM_CODE_DIGITS}`;
+
+/**
+ * Generates a human-friendly 4-character alphanumeric room code (uppercase letters + digits),
+ * excluding ambiguous characters (0/O, 1/I/L) and guaranteeing at least 1 letter and 1 digit.
+ */
+export function generateRoomCode(rng: () => number = Math.random): string {
+  const pick = (pool: string) => pool[Math.floor(rng() * pool.length)];
+  const chars = [
+    pick(ROOM_CODE_LETTERS),
+    pick(ROOM_CODE_DIGITS),
+    pick(ROOM_CODE_ALPHABET),
+    pick(ROOM_CODE_ALPHABET),
+  ];
+  // Fisher-Yates shuffle
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 /**

@@ -321,22 +321,43 @@ export function LaughGameView({
   const threshold = getSmileThreshold(gameState.sensitivity);
 
   return (
-    <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 sm:py-6 flex flex-col gap-5">
+    <main className="flex-1 w-full max-w-6xl mx-auto px-2.5 sm:px-6 py-2.5 sm:py-6 flex flex-col gap-3 sm:gap-5">
       {/* Top Scoreboard & Sensitivity Strip */}
-      <section className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-semibold text-[#F6F2E9] tracking-tight">
-            Tu ris, tu perds
-          </h1>
-          <p className="text-xs sm:text-sm text-[#CBC4B6] mt-0.5 tabular-nums">
-            Manche {gameState.round} · Premier à {gameState.targetWins} points
-            {gameState.phase === 'playing' && ` · Chrono ${meterDisplay.elapsedSec.toFixed(1)} s`}
-          </p>
+      <section className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 sm:gap-4 pb-2.5 sm:pb-4 border-b border-white/10">
+        <div className="flex items-center justify-between gap-2 md:block">
+          <div>
+            <h1 className="text-lg sm:text-3xl font-semibold text-[#F6F2E9] tracking-tight">
+              Tu ris, tu perds
+            </h1>
+            <p className="text-[11px] sm:text-sm text-[#CBC4B6] mt-0.5 tabular-nums">
+              Manche {gameState.round} · Premier à {gameState.targetWins} points
+              {gameState.phase === 'playing' && ` · Chrono ${meterDisplay.elapsedSec.toFixed(1)} s`}
+            </p>
+          </div>
+          {/* Compact Score on Mobile Row 1 */}
+          <div
+            className="flex md:hidden items-center gap-3 px-3 py-1.5 rounded-xl bg-[#141724] border border-white/10 shrink-0"
+            aria-label="Score du duel"
+          >
+            <div className="text-center">
+              <p className="text-[10px] text-[#A9A295] truncate max-w-[54px]">{localName}</p>
+              <p className="font-mono text-lg font-bold text-[#E86A58] tabular-nums leading-none">
+                {gameState.localScore}
+              </p>
+            </div>
+            <span className="text-sm font-mono text-white/25" aria-hidden="true">—</span>
+            <div className="text-center">
+              <p className="text-[10px] text-[#A9A295] truncate max-w-[54px]">{partnerName}</p>
+              <p className="font-mono text-lg font-bold text-[#E8B861] tabular-nums leading-none">
+                {gameState.partnerScore}
+              </p>
+            </div>
+          </div>
         </div>
 
-        {/* Score Readout */}
+        {/* Desktop Score Readout */}
         <div
-          className="flex items-center gap-6 px-5 py-2.5 rounded-xl bg-[#141724] border border-white/10 self-start md:self-auto"
+          className="hidden md:flex items-center gap-6 px-5 py-2.5 rounded-xl bg-[#141724] border border-white/10 self-start md:self-auto"
           aria-label="Score du duel"
         >
           <div className="text-center min-w-[68px]">
@@ -371,7 +392,7 @@ export function LaughGameView({
                 key={lvl}
                 type="button"
                 onClick={() => handleSelectSensitivity(lvl)}
-                className={`relative z-10 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                className={`relative z-10 min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
                   active ? 'text-[#F6F2E9]' : 'text-[#A9A295] hover:text-[#F6F2E9]'
                 }`}
               >
@@ -389,8 +410,8 @@ export function LaughGameView({
         </div>
       </section>
 
-      {/* Main Face-Off Video Stage */}
-      <section className="relative grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* Main Face-Off Video Stage — side-by-side on mobile too so controls fit above the fold */}
+      <section className="relative grid grid-cols-2 gap-2.5 sm:gap-5">
         {/* Local Player Card */}
         <div className="space-y-3">
           <CameraFeedTile
@@ -540,21 +561,21 @@ export function LaughGameView({
       </section>
 
       {/* Bottom Interactive Prompt Deck & Primary Actions */}
-      <section className="rounded-2xl bg-[#141724] border border-white/12 p-5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-        <div className="space-y-1.5 max-w-2xl">
+      <section className="rounded-2xl bg-[#141724] border border-white/12 p-3.5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-5">
+        <div className="space-y-1 max-w-2xl">
           <p className="text-xs font-medium text-[#E8B861]">
             Défi complicité · {gameState.currentPrompt.category}
           </p>
-          <p data-testid="laugh-prompt-text" className="text-base sm:text-lg font-medium text-[#F6F2E9] leading-snug">
+          <p data-testid="laugh-prompt-text" className="text-sm sm:text-lg font-medium text-[#F6F2E9] leading-snug">
             « {gameState.currentPrompt.text} »
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
+        <div className="w-full lg:w-auto flex flex-row sm:flex-wrap items-stretch sm:items-center gap-2 sm:gap-3 shrink-0">
           <button
             type="button"
             onClick={handleNewPrompt}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium bg-white/8 text-[#F6F2E9] border border-white/12 hover:bg-white/14 transition-colors whitespace-nowrap"
+            className="min-h-[48px] sm:min-h-[52px] inline-flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl text-xs sm:text-sm font-semibold bg-white/10 text-[#F6F2E9] border border-white/15 hover:bg-white/16 transition-colors whitespace-nowrap"
           >
             <RefreshCw className="w-4 h-4 shrink-0" />
             <span>Nouveau défi</span>
@@ -565,7 +586,7 @@ export function LaughGameView({
               type="button"
               data-start="true"
               onClick={handleStartRound}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
+              className="flex-1 sm:flex-none min-h-[48px] sm:min-h-[54px] inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-3 rounded-2xl text-sm font-bold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
             >
               <Play className="w-4 h-4 shrink-0" />
               <span>Lancer la manche</span>
@@ -597,10 +618,10 @@ export function LaughGameView({
                 setIsHoldingSmileTest(false);
                 onManualSmileChange(false);
               }}
-              className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors whitespace-nowrap ${
+              className={`min-h-[54px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm font-bold border transition-colors whitespace-nowrap ${
                 isHoldingSmileTest
                   ? 'bg-[#E86A58] text-[#0D0F17] border-[#E86A58]'
-                  : 'bg-[#E86A58]/15 text-[#F08272] border-[#E86A58]/40 hover:bg-[#E86A58]/25'
+                  : 'bg-[#E86A58]/18 text-[#F08272] border-[#E86A58]/45 hover:bg-[#E86A58]/28'
               }`}
             >
               <Smile className="w-4 h-4 shrink-0" />
@@ -613,12 +634,12 @@ export function LaughGameView({
       {/* Round Over / Match Over Focused Modal */}
       {(gameState.phase === 'round_over' || gameState.phase === 'match_over') && (
         <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-[#0D0F17]/80 px-4"
+          className="fixed inset-0 z-40 flex justify-center bg-[#0D0F17]/80 p-4 overflow-y-auto"
           role="dialog"
           aria-modal="true"
           aria-labelledby="laugh-result-heading"
         >
-          <div className="w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-6 sm:p-7 space-y-5 shadow-2xl">
+          <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-5 sm:p-7 space-y-5 shadow-2xl">
             <div className="space-y-1.5 text-center">
               {gameState.phase === 'match_over' && (
                 <div className="mx-auto w-12 h-12 rounded-full bg-[#E8B861]/15 flex items-center justify-center text-[#E8B861] mb-2">
@@ -658,7 +679,7 @@ export function LaughGameView({
                 type="button"
                 data-start="true"
                 onClick={gameState.phase === 'match_over' ? handleResetMatch : handleStartRound}
-                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
+                className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
               >
                 {gameState.phase === 'match_over' ? (
                   <>
@@ -675,7 +696,7 @@ export function LaughGameView({
               <button
                 type="button"
                 onClick={onReturnToHub}
-                className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium bg-white/8 text-[#F6F2E9] border border-white/12 hover:bg-white/14 transition-colors whitespace-nowrap"
+                className="min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-white/10 text-[#F6F2E9] border border-white/12 hover:bg-white/16 transition-colors whitespace-nowrap"
               >
                 <LayoutGrid className="w-4 h-4 shrink-0" />
                 <span>Changer de jeu</span>

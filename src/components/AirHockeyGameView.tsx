@@ -811,9 +811,9 @@ export function AirHockeyGameView({
     hud.winner !== null && ((hud.winner === 'p1' && !isGuestP2P) || (hud.winner === 'p2' && isGuestP2P));
 
   return (
-    <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 space-y-4">
+    <main className="flex-1 w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-4 space-y-2.5 sm:space-y-4">
       {/* Main Full-Bleed Neon Rink Stage */}
-      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0C1120] shadow-2xl shadow-black/50 h-[520px] sm:h-[580px] select-none touch-none">
+      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0C1120] shadow-2xl shadow-black/50 h-[58dvh] min-h-[390px] max-h-[530px] sm:h-[580px] sm:max-h-none select-none touch-none">
         <canvas
           ref={canvasRef}
           data-testid="hockey-canvas"
@@ -822,76 +822,78 @@ export function AirHockeyGameView({
           className="w-full h-full block cursor-none"
         />
 
-        {/* Perimeter Top HUD — No backdrop-blur over live canvas */}
-        <div className="pointer-events-none absolute top-3 left-3 right-3 flex items-start justify-between gap-3">
-          {/* Left: Goal target / Rally */}
-          <div className="hidden sm:block rounded-xl bg-[#111524]/92 border border-white/12 px-3.5 py-2 shadow-lg">
-            <p className="text-[11px] uppercase tracking-wider text-[#A9A295]">Objectif</p>
-            <p className="text-sm font-semibold text-[#F6F2E9] tabular-nums">
-              Premier à {hud.targetGoals} buts
-            </p>
-          </div>
-
-          {/* Center Scoreboard */}
-          <div
-            data-testid="hockey-score"
-            className="mx-auto sm:mx-0 flex items-center gap-4 rounded-xl bg-[#111524]/94 border border-white/14 px-5 py-2 shadow-lg"
-          >
-            <div className="text-right">
-              <p className="text-[11px] text-[#E86A58] font-medium truncate max-w-[96px]">
-                {leftPlayerName}
-              </p>
-              <p className="text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none">
-                {hud.p1Score}
+        {/* Perimeter Top HUD — hidden during ready so mobile start card has full room */}
+        {hud.phase !== 'ready' && (
+          <div className="pointer-events-none absolute top-3 left-3 right-3 z-10 flex items-start justify-between gap-2 sm:gap-3">
+            {/* Left: Goal target / Rally */}
+            <div className="hidden sm:block rounded-xl bg-[#111524]/92 border border-white/12 px-3.5 py-2 shadow-lg">
+              <p className="text-[11px] uppercase tracking-wider text-[#A9A295]">Objectif</p>
+              <p className="text-sm font-semibold text-[#F6F2E9] tabular-nums">
+                Premier à {hud.targetGoals} buts
               </p>
             </div>
-            <span className="text-sm font-bold text-white/30">—</span>
-            <div className="text-left">
-              <p className="text-[11px] text-[#E8B861] font-medium truncate max-w-[96px]">
-                {rightPlayerName}
-              </p>
-              <p className="text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none">
-                {hud.p2Score}
-              </p>
+
+            {/* Center Scoreboard */}
+            <div
+              data-testid="hockey-score"
+              className="flex items-center gap-3 sm:gap-4 rounded-xl bg-[#111524]/94 border border-white/14 px-3.5 sm:px-5 py-1.5 sm:py-2 shadow-lg"
+            >
+              <div className="text-right">
+                <p className="text-[11px] text-[#E86A58] font-medium truncate max-w-[76px] sm:max-w-[96px]">
+                  {leftPlayerName}
+                </p>
+                <p className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none">
+                  {hud.p1Score}
+                </p>
+              </div>
+              <span className="text-sm font-bold text-white/30">—</span>
+              <div className="text-left">
+                <p className="text-[11px] text-[#E8B861] font-medium truncate max-w-[76px] sm:max-w-[96px]">
+                  {rightPlayerName}
+                </p>
+                <p className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none">
+                  {hud.p2Score}
+                </p>
+              </div>
+            </div>
+
+            {/* Right: Pause & Restart */}
+            <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+              {(hud.phase === 'playing' || hud.phase === 'paused' || hud.phase === 'goal_pause') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => togglePause()}
+                    aria-label={hud.phase === 'paused' ? 'Reprendre' : 'Mettre en pause'}
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                  >
+                    {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startOrRestart()}
+                    aria-label="Recommencer le match"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </>
+              )}
             </div>
           </div>
-
-          {/* Right: Pause & Restart */}
-          <div className="pointer-events-auto flex items-center gap-2">
-            {(hud.phase === 'playing' || hud.phase === 'paused' || hud.phase === 'goal_pause') && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => togglePause()}
-                  aria-label={hud.phase === 'paused' ? 'Reprendre' : 'Mettre en pause'}
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
-                >
-                  {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startOrRestart()}
-                  aria-label="Recommencer le match"
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+        )}
 
         {/* Crisp Goal Flash Banner during goal_pause */}
         {hud.phase === 'goal_pause' && hud.lastScorer && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
             <div
-              className={`rounded-2xl px-7 py-3.5 border-2 shadow-2xl bg-[#111524]/95 ${
+              className={`rounded-2xl px-6 py-3.5 border-2 shadow-2xl bg-[#111524]/95 ${
                 hud.lastScorer === 'p1'
                   ? 'border-[#E86A58] text-[#F08272]'
                   : 'border-[#E8B861] text-[#F2CB80]'
               }`}
             >
-              <p className="text-2xl sm:text-3xl font-extrabold tracking-tight text-center">
+              <p className="text-xl sm:text-3xl font-extrabold tracking-tight text-center">
                 BUT POUR {hud.lastScorer === 'p1' ? leftPlayerName.toUpperCase() : rightPlayerName.toUpperCase()} !
               </p>
             </div>
@@ -900,8 +902,8 @@ export function AirHockeyGameView({
 
         {/* Title Overlay */}
         {hud.phase === 'ready' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0B0E1A]/80 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-5 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/80 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3 sm:space-y-5 shadow-2xl">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
                 <Zap className="w-6 h-6" />
               </div>
@@ -915,12 +917,12 @@ export function AirHockeyGameView({
                   <span className="text-[#E8B861] font-semibold">7 buts</span> gagne !
                 </p>
               </div>
-              <p className="text-xs text-[#A9A295]">{sensorLabel}</p>
+              <p className="hidden sm:block text-xs text-[#A9A295]">{sensorLabel}</p>
               <button
                 type="button"
                 data-start="true"
                 onClick={() => startOrRestart()}
-                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors shadow-lg shadow-[#E8B861]/25"
+                className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-bold text-base bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors shadow-lg shadow-[#E8B861]/25"
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>Engager le palet</span>
@@ -931,8 +933,8 @@ export function AirHockeyGameView({
 
         {/* Pause Overlay */}
         {hud.phase === 'paused' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0B0E1A]/75 p-4">
-            <div className="w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-4 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/75 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-4 shadow-2xl">
               <h2 className="text-2xl font-bold text-[#F6F2E9]">Match en pause</h2>
               <p className="text-sm text-[#CBC4B6] tabular-nums">
                 {leftPlayerName} {hud.p1Score} — {hud.p2Score} {rightPlayerName}
@@ -941,7 +943,7 @@ export function AirHockeyGameView({
                 <button
                   type="button"
                   onClick={() => togglePause()}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
+                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>Reprendre</span>
@@ -949,7 +951,7 @@ export function AirHockeyGameView({
                 <button
                   type="button"
                   onClick={() => startOrRestart()}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-white/8 hover:bg-white/14 text-[#F6F2E9] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Recommencer</span>
@@ -957,7 +959,7 @@ export function AirHockeyGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-transparent border border-white/12 hover:bg-white/6 text-[#CBC4B6] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-transparent border border-white/12 hover:bg-white/6 text-[#CBC4B6] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Changer de jeu</span>
@@ -969,13 +971,13 @@ export function AirHockeyGameView({
 
         {/* Match Over Overlay */}
         {hud.phase === 'gameover' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#0B0E1A]/82 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-5 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/82 p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3.5 sm:space-y-5 shadow-2xl">
               <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
                 <Trophy className="w-6 h-6" />
               </div>
               <div className="space-y-1">
-                <h2 className="text-2xl font-bold text-[#F6F2E9]">
+                <h2 className="text-xl sm:text-2xl font-bold text-[#F6F2E9]">
                   {localIsWinner ? 'Victoire !' : `${hud.winner === 'p1' ? leftPlayerName : rightPlayerName} remporte le match`}
                 </h2>
                 <p className="text-sm text-[#CBC4B6] tabular-nums">
@@ -1001,7 +1003,7 @@ export function AirHockeyGameView({
                   type="button"
                   data-start="true"
                   onClick={() => startOrRestart()}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
+                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Revanche</span>
@@ -1009,7 +1011,7 @@ export function AirHockeyGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-medium text-sm bg-white/8 hover:bg-white/14 text-[#F6F2E9] transition-colors"
+                  className="flex-1 min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Retour au Hub</span>
@@ -1021,7 +1023,7 @@ export function AirHockeyGameView({
       </div>
 
       {/* Persistent Live Duo Cameras below table */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl mx-auto">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4 max-w-3xl mx-auto">
         <CameraFeedTile
           name={localName}
           subtitle={sensorLabel}

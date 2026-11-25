@@ -20,6 +20,7 @@ import {
   stepKissBouncePhysics,
 } from '../game/kissBouncePhysics';
 import { useI18n } from '../i18n/LanguageContext';
+import { computeUniformCanvasFit, mapClientPointToLogical } from '../utils/canvasViewport';
 import { soundFx } from '../utils/soundFx';
 import { CameraFeedTile } from './CameraFeedTile';
 
@@ -434,6 +435,27 @@ export function KissBounceGameView({
         const tSec = now * 0.001;
         const aurora = st.auroraLevel;
 
+        const cssW = canvas.clientWidth || KISS_ARENA_W;
+        const cssH = canvas.clientHeight || KISS_ARENA_H;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const fit = computeUniformCanvasFit(cssW, cssH, KISS_ARENA_W, KISS_ARENA_H, 0.62, dpr);
+        if (canvas.width !== fit.pixelW || canvas.height !== fit.pixelH) {
+          canvas.width = fit.pixelW;
+          canvas.height = fit.pixelH;
+        }
+
+        ctx.setTransform(fit.dpr, 0, 0, fit.dpr, 0, 0);
+        const fullSky = ctx.createLinearGradient(0, 0, 0, fit.cssH);
+        fullSky.addColorStop(0, aurora > 0.45 ? '#090D1C' : '#090C18');
+        fullSky.addColorStop(0.58, aurora > 0.45 ? '#13223A' : '#101426');
+        fullSky.addColorStop(1, aurora > 0.45 ? '#1E1A32' : '#1A172A');
+        ctx.fillStyle = fullSky;
+        ctx.fillRect(0, 0, fit.cssW, fit.cssH);
+
+        ctx.save();
+        ctx.translate(fit.offsetX, fit.offsetY);
+        ctx.scale(fit.scale, fit.scale);
+
         // 1. Cached midnight sky gradient that warms gently with aurora intensity
         if (!cachedSkyCalm) {
           cachedSkyCalm = ctx.createLinearGradient(0, 0, 0, KISS_ARENA_H);
@@ -583,6 +605,7 @@ export function KissBounceGameView({
           ctx.fill();
         }
         ctx.globalAlpha = 1;
+        ctx.restore();
       }
 
       hudTimer += dt;
@@ -608,8 +631,9 @@ export function KissBounceGameView({
   const updatePointerFromEvent = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    const normX = Math.max(0.05, Math.min(0.47, (e.clientX - rect.left) / rect.width));
-    const normY = Math.max(0.1, Math.min(0.88, (e.clientY - rect.top) / rect.height));
+    const pt = mapClientPointToLogical(e.clientX, e.clientY, rect, KISS_ARENA_W, KISS_ARENA_H, 0.62);
+    const normX = Math.max(0.05, Math.min(0.47, pt.x / KISS_ARENA_W));
+    const normY = Math.max(0.1, Math.min(0.88, pt.y / KISS_ARENA_H));
     pointerRef.current = { normX, normY, active: true };
     onLocalPointerHandChange(normX * 2, normY, true);
   };
@@ -617,7 +641,7 @@ export function KissBounceGameView({
   const hasCameraSensors = Boolean(localStream) && (faceTrackerStatus === 'ready' || handTrackerStatus === 'ready');
 
   return (
-    <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 space-y-4">
+    <main className="flex-1 w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-4 space-y-2.5 sm:space-y-4">
       {/* Main Aurora Borealis Canvas Stage */}
       <section className="relative rounded-2xl overflow-hidden bg-[#090C18] border border-white/12 shadow-2xl">
         <canvas
@@ -636,75 +660,81 @@ export function KissBounceGameView({
             pointerRef.current.active = false;
             onLocalPointerHandChange(pointerRef.current.normX * 2, pointerRef.current.normY, false);
           }}
-          className="block w-full aspect-[1000/560] touch-none cursor-crosshair"
+          className={`block w-full touch-none cursor-crosshair ${
+            hud.phase === 'ready' || hud.phase === 'paused'
+              ? 'absolute inset-0 h-full object-cover sm:static sm:h-auto sm:aspect-[1000/560]'
+              : 'min-h-[340px] h-[50dvh] max-h-[440px] sm:h-auto sm:max-h-none sm:aspect-[1000/560]'
+          }`}
         />
 
-        {/* Minimal perimeter HUD (no backdrop-blur over live canvas) */}
-        <div className="pointer-events-none absolute inset-x-3 top-3 flex items-start justify-between gap-2">
-          <div className="flex items-center gap-4 px-3.5 py-2 rounded-xl bg-[#0D0F17]/88 border border-white/12">
-            <div>
-              <p className="text-[11px] text-[#A9A295]">{t.kissExchangeLabel}</p>
-              <p
-                data-testid="kiss-rally-count"
-                className="font-mono text-2xl font-bold text-[#F2CB80] tabular-nums leading-tight"
-              >
-                {hud.rally}
-              </p>
+        {/* Minimal perimeter HUD (hidden during ready so mobile title card has full room) */}
+        {hud.phase !== 'ready' && (
+          <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex items-start justify-between gap-2">
+            <div className="flex items-center gap-3 sm:gap-4 px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-[#0D0F17]/88 border border-white/12">
+              <div>
+                <p className="text-[11px] text-[#A9A295]">{t.kissExchangeLabel}</p>
+                <p
+                  data-testid="kiss-rally-count"
+                  className="font-mono text-xl sm:text-2xl font-bold text-[#F2CB80] tabular-nums leading-tight"
+                >
+                  {hud.rally}
+                </p>
+              </div>
+              <div className="h-7 w-px bg-white/12" aria-hidden="true" />
+              <div>
+                <p className="text-[11px] text-[#A9A295]">{t.kissAuroraLabel}</p>
+                <p className="font-mono text-base sm:text-lg font-semibold text-[#7EE0B8] tabular-nums leading-tight">
+                  {hud.auroraPct}%
+                </p>
+              </div>
+              <div className="hidden sm:block h-7 w-px bg-white/12" aria-hidden="true" />
+              <div className="hidden sm:block">
+                <p className="text-[11px] text-[#A9A295]">{t.recordLabel}</p>
+                <p className="font-mono text-lg font-semibold text-[#F6F2E9] tabular-nums leading-tight">
+                  {hud.bestRally}
+                </p>
+              </div>
             </div>
-            <div className="h-7 w-px bg-white/12" aria-hidden="true" />
-            <div>
-              <p className="text-[11px] text-[#A9A295]">{t.kissAuroraLabel}</p>
-              <p className="font-mono text-lg font-semibold text-[#7EE0B8] tabular-nums leading-tight">
-                {hud.auroraPct}%
-              </p>
-            </div>
-            <div className="hidden sm:block h-7 w-px bg-white/12" aria-hidden="true" />
-            <div className="hidden sm:block">
-              <p className="text-[11px] text-[#A9A295]">{t.recordLabel}</p>
-              <p className="font-mono text-lg font-semibold text-[#F6F2E9] tabular-nums leading-tight">
-                {hud.bestRally}
-              </p>
-            </div>
-          </div>
 
-          <div className="pointer-events-auto flex items-center gap-1.5">
-            {hud.phase === 'playing' && (
-              <button
-                type="button"
-                data-testid="kiss-send-btn"
-                onClick={triggerManualKiss}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
-              >
-                <Heart className="w-4 h-4 shrink-0" />
-                <span>{t.kissSendBtn}</span>
-              </button>
-            )}
-            {(hud.phase === 'playing' || hud.phase === 'paused') && (
-              <>
+            <div className="pointer-events-auto flex items-center gap-1.5">
+              {hud.phase === 'playing' && (
                 <button
                   type="button"
-                  onClick={togglePause}
-                  aria-label={hud.phase === 'paused' ? t.resume : t.pause}
-                  className="p-2 rounded-xl bg-[#0D0F17]/88 text-[#F6F2E9] border border-white/12 hover:bg-[#1B2033] transition-colors"
+                  data-testid="kiss-send-btn"
+                  onClick={triggerManualKiss}
+                  className="hidden sm:inline-flex min-h-[44px] items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-semibold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
                 >
-                  {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                  <Heart className="w-4 h-4 shrink-0" />
+                  <span>{t.kissSendBtn}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => startSession(true)}
-                  aria-label={t.restart}
-                  className="p-2 rounded-xl bg-[#0D0F17]/88 text-[#F6F2E9] border border-white/12 hover:bg-[#1B2033] transition-colors"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </>
-            )}
+              )}
+              {(hud.phase === 'playing' || hud.phase === 'paused') && (
+                <>
+                  <button
+                    type="button"
+                    onClick={togglePause}
+                    aria-label={hud.phase === 'paused' ? t.resume : t.pause}
+                    className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl bg-[#0D0F17]/88 text-[#F6F2E9] border border-white/15 hover:bg-[#1B2033] transition-colors"
+                  >
+                    {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startSession(true)}
+                    aria-label={t.restart}
+                    className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-xl bg-[#0D0F17]/88 text-[#F6F2E9] border border-white/15 hover:bg-[#1B2033] transition-colors"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* Catch feedback toast along bottom safe margin */}
+        {/* Catch feedback toast along bottom safe margin (desktop only to keep mobile canvas clear) */}
         {hud.phase === 'playing' && (
-          <div className="pointer-events-none absolute inset-x-4 bottom-3 flex items-center justify-between text-xs text-[#CBC4B6]">
+          <div className="hidden sm:flex pointer-events-none absolute inset-x-4 bottom-3 items-center justify-between text-xs text-[#CBC4B6]">
             <span className="px-2.5 py-1 rounded-lg bg-[#0D0F17]/85 border border-white/10">
               {hasCameraSensors ? t.kissSensorReady : t.kissSensorFallback}
             </span>
@@ -714,64 +744,64 @@ export function KissBounceGameView({
                 <span>{hud.lastCatchKind === 'kiss' ? t.kissCaughtKiss : t.kissCaughtHand}</span>
               </span>
             ) : (
-              <span className="hidden sm:inline px-2.5 py-1 rounded-lg bg-[#0D0F17]/85 border border-white/10 text-[#A9A295]">
+              <span className="px-2.5 py-1 rounded-lg bg-[#0D0F17]/85 border border-white/10 text-[#A9A295]">
                 {t.kissPuckerHint}
               </span>
             )}
           </div>
         )}
 
-        {/* Title / Start Overlay */}
+        {/* Title / Start Overlay — normal flow on mobile so Start button is NEVER clipped */}
         {hud.phase === 'ready' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#090C18]/78 p-6">
-            <div className="max-w-md w-full rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-4 shadow-2xl">
-              <div className="mx-auto w-12 h-12 rounded-xl bg-[#E86A58]/18 border border-[#E86A58]/35 flex items-center justify-center text-[#F08272]">
-                <Sparkles className="w-6 h-6" />
+          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#090C18]/78 p-3.5 sm:p-5 sm:overflow-y-auto">
+            <div className="my-auto max-w-md w-full rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3 sm:space-y-4 shadow-2xl">
+              <div className="mx-auto w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-[#E86A58]/18 border border-[#E86A58]/35 flex items-center justify-center text-[#F08272]">
+                <Sparkles className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               <div className="space-y-1.5">
-                <h1 className="text-2xl font-semibold text-[#F6F2E9]">{t.kissTitle}</h1>
-                <p className="text-sm text-[#CBC4B6] leading-relaxed">{t.kissDesc}</p>
+                <h1 className="text-xl sm:text-2xl font-semibold text-[#F6F2E9]">{t.kissTitle}</h1>
+                <p className="text-xs sm:text-sm text-[#CBC4B6] leading-relaxed">{t.kissDesc}</p>
               </div>
               <button
                 type="button"
                 data-start="true"
                 onClick={() => startSession(true)}
-                className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-sm sm:text-base font-semibold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
+                className="w-full min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-base font-bold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap shadow-lg shadow-[#E86A58]/25"
               >
                 <Heart className="w-4 h-4 shrink-0" />
                 <span>{t.kissStartBtn}</span>
               </button>
-              <p className="text-xs text-[#A9A295]">
+              <p className="hidden sm:block text-xs text-[#A9A295]">
                 {hasCameraSensors ? t.kissSensorReady : t.kissSensorFallback}
               </p>
             </div>
           </div>
         )}
 
-        {/* Pause Modal */}
+        {/* Pause Modal — normal flow on mobile so all buttons stay 100% visible */}
         {hud.phase === 'paused' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#090C18]/78 p-6">
-            <div className="max-w-sm w-full rounded-2xl bg-[#141724] border border-white/15 p-6 text-center space-y-4 shadow-2xl">
+          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#090C18]/82 p-3.5 sm:p-6 sm:overflow-y-auto">
+            <div className="my-auto max-w-sm w-full rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-4 shadow-2xl">
               <h2 className="text-xl font-semibold text-[#F6F2E9]">{t.pausedTitle}</h2>
               <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={togglePause}
-                  className="w-full py-2.5 px-4 rounded-xl text-sm font-semibold bg-[#E8B861] text-[#0D0F17] hover:bg-[#F2CB80] transition-colors"
+                  className="w-full min-h-[50px] py-3 px-4 rounded-xl text-sm font-bold bg-[#E8B861] text-[#0D0F17] hover:bg-[#F2CB80] transition-colors"
                 >
                   {t.resume}
                 </button>
                 <button
                   type="button"
                   onClick={() => startSession(true)}
-                  className="w-full py-2.5 px-4 rounded-xl text-sm font-medium bg-white/8 text-[#F6F2E9] hover:bg-white/14 transition-colors"
+                  className="w-full min-h-[48px] py-2.5 px-4 rounded-xl text-sm font-semibold bg-white/10 text-[#F6F2E9] hover:bg-white/16 transition-colors"
                 >
                   {t.restart}
                 </button>
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-medium text-[#CBC4B6] hover:text-[#F6F2E9] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-medium text-[#CBC4B6] border border-white/12 hover:text-[#F6F2E9] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>{t.backToHub}</span>
@@ -782,8 +812,23 @@ export function KissBounceGameView({
         )}
       </section>
 
+      {/* Mobile ergonomic thumb button below the canvas so tapping never obstructs the hearts */}
+      {hud.phase === 'playing' && (
+        <div className="sm:hidden flex items-center gap-2.5">
+          <button
+            type="button"
+            data-testid="kiss-mobile-send-btn"
+            onClick={triggerManualKiss}
+            className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-base font-extrabold bg-[#E86A58] text-[#0D0F17] active:bg-[#F08272] shadow-lg shadow-[#E86A58]/25 transition-all whitespace-nowrap"
+          >
+            <Heart className="w-5 h-5 shrink-0 fill-current" />
+            <span>{t.kissSendBtn}</span>
+          </button>
+        </div>
+      )}
+
       {/* Compact live couple cameras underneath */}
-      <section className="max-w-3xl mx-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <section className="max-w-3xl mx-auto grid grid-cols-2 gap-2.5 sm:gap-4">
         <CameraFeedTile
           name={localName}
           subtitle={hud.puckerPct >= 30 ? `💋 ${hud.puckerPct}%` : t.kissPuckerHint}

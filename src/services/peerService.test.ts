@@ -26,10 +26,13 @@ test('getPeerRoomId produces identical PeerJS room IDs regardless of spaces or l
   assert.equal(getPeerRoomId('Ab12'), `${ROOM_PREFIX}ab12`);
 });
 
-test('generateRoomCode always produces a 4-digit numeric string', () => {
-  for (let i = 0; i < 20; i++) {
+test('generateRoomCode always produces a 4-character alphanumeric code with both letters and digits', () => {
+  for (let i = 0; i < 40; i++) {
     const code = generateRoomCode();
-    assert.match(code, /^\d{4}$/);
+    assert.match(code, /^[A-Z0-9]{4}$/);
+    assert.match(code, /[A-Z]/, `expected at least one letter in ${code}`);
+    assert.match(code, /[0-9]/, `expected at least one digit in ${code}`);
+    assert.doesNotMatch(code, /[0O1IL]/, `expected no ambiguous characters in ${code}`);
   }
 });
 

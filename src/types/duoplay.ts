@@ -7,9 +7,14 @@ export type GameId =
   | 'stare-duel'
   | 'miam-mania'
   | 'kiss-bounce'
-  | 'constellations';
+  | 'constellations'
+  | 'whisper-secrets'
+  | 'slingshot-duo'
+  | 'xo-neon'
+  | 'parchisi-duo'
+  | 'couple-jam';
 export type ScreenView = 'lobby' | 'hub' | GameId;
-export type HubCategory = 'all' | 'drole' | 'action' | 'aventure' | 'romantique' | 'amusant';
+export type HubCategory = 'all' | 'sensuel' | 'drole' | 'action' | 'aventure' | 'romantique' | 'amusant';
 export type ConnectionMode = 'idle' | 'p2p-host' | 'p2p-guest' | 'solo';
 export type ConnectionStatus = 'disconnected' | 'creating' | 'waiting' | 'connecting' | 'connected' | 'error';
 
@@ -57,6 +62,16 @@ export interface HandMetrics {
   /** Landmark 9 (palm center / middle MCP) in mirrored normalized 0..1 coords */
   palmX: number;
   palmY: number;
+  /** Anti-tremble (lerp 0.35) mirrored midpoint between thumb (4) and index (8) */
+  pinchX: number;
+  pinchY: number;
+  /** Anti-tremble (lerp 0.35) mirrored landmark 8 (index fingertip) */
+  smoothIndexX: number;
+  smoothIndexY: number;
+  /** Normalized pinch ratio: distance(4,8) / distance(0,9) */
+  pinchRatio: number;
+  /** Hysteresis pinch flag: engages < 0.38, releases > 0.55 */
+  isPinching: boolean;
   /** Whether a hand is currently detected by HandLandmarker (or pointer fallback active) */
   handDetected: boolean;
   /** Timestamp (ms) */
@@ -340,6 +355,10 @@ export interface ConstellationState {
   elapsedSec: number;
 }
 
+export type WhisperLevel = 'doux' | 'seduction' | 'intense';
+export type WhisperRole = 'whisperer' | 'guesser';
+export type WhisperStage = 'writing' | 'whispering' | 'revealed';
+
 export type PeerMessage =
   | { type: 'JOIN_REQUEST'; code: string; name: string; hasStream?: boolean }
   | { type: 'JOIN_CONFIRMED'; code: string; hostName: string; hasStream?: boolean }
@@ -462,4 +481,424 @@ export type PeerMessage =
       type: 'CONSTELLATION_NEXT';
       constellationIndex: number;
       promptIndex: number;
+    }
+  | {
+      type: 'WHISPER_START';
+      secretText: string;
+      showHint: boolean;
+      duration: number;
+      level: WhisperLevel;
+      round: number;
+    }
+  | {
+      type: 'WHISPER_LIP_POS';
+      x: number;
+      y: number;
+      ts: number;
+    }
+  | {
+      type: 'WHISPER_VALIDATED';
+      by: 'kiss' | 'button' | 'guess_match';
+      bonusPts: number;
+      secretText: string;
+    }
+  | {
+      type: 'WHISPER_VERDICT';
+      guessed: boolean;
+      dareText?: string;
+      pointsAwarded: number;
+      heatOutcome: 'early_bonus' | 'guessed' | 'dare';
+    }
+  | {
+      type: 'WHISPER_NEXT_ROUND';
+      nextRound: number;
+      nextWhispererIsHost: boolean;
+    }
+  | { type: 'SLING_START'; mode: SlingshotMode }
+  | { type: 'SLING_PAUSE'; paused: boolean }
+  | { type: 'SLING_PULL'; isPulling: boolean; pullX: number; pullY: number }
+  | { type: 'SLING_FIRE'; vx: number; vy: number }
+  | {
+      type: 'SLING_STATE';
+      phase: SlingshotDuoState['phase'];
+      mode: SlingshotMode;
+      timeLeftSec: number;
+      hostScore: number;
+      guestScore: number;
+      coopScore: number;
+      hostReloadSec: number;
+      guestReloadSec: number;
+      hostStunSec: number;
+      guestStunSec: number;
+      hostPull: SlingshotPullState;
+      guestPull: SlingshotPullState;
+      projectiles: SlingshotProjectile[];
+      targets: SlingshotTarget[];
+      lastCallout: string;
+      flashKind: SlingshotDuoState['flashKind'];
+    }
+  | { type: 'XO_START'; variant: XoVariant; symbolTheme: XoSymbolTheme; targetWins: number }
+  | { type: 'XO_CURSOR'; x: number; y: number; active: boolean }
+  | { type: 'XO_MOVE'; cellIndex: number }
+  | {
+      type: 'XO_STATE';
+      phase: XoNeonState['phase'];
+      variant: XoVariant;
+      symbolTheme: XoSymbolTheme;
+      board: XoMark[];
+      hostQueue: number[];
+      guestQueue: number[];
+      turn: 'host' | 'guest';
+      turnTimeLeftSec: number;
+      round: number;
+      targetWins: number;
+      hostWins: number;
+      guestWins: number;
+      winLine: number[] | null;
+      roundWinner: 'host' | 'guest' | 'draw' | null;
+      matchWinner: 'host' | 'guest' | null;
+      dareIndex: number;
+      lastPlacedCell: number | null;
+      moveSeq: number;
+    }
+  | { type: 'XO_REMATCH' }
+  | { type: 'PARCHISI_START'; mode: ParchisiMode }
+  | {
+      type: 'PARCHISI_ACTION';
+      action: 'ROLL' | 'MOVE_PAWN' | 'MERCY_DECISION' | 'DISMISS_CARD' | 'EMOTE';
+      pawnId?: number;
+      mercyChoice?: 'no_mercy' | 'offer_dare' | 'accept_dare' | 'decline_dare' | 'validate_dare';
+      emote?: ParchisiEmoteKind;
+    }
+  | {
+      type: 'PARCHISI_STATE';
+      state: ParchisiState;
+    }
+  | {
+      type: 'JAM_NOTE';
+      instrument: JamInstrumentId;
+      noteId: string;
+      player: JamPlayer;
+    }
+  | {
+      type: 'BLINDTEST_START';
+      source: JamBlindSource;
+      previewUrl?: string;
+      artworkUrl?: string;
+      trackName: string;
+      artistName: string;
+      playbackRate: JamPlaybackRate;
+      duration: number;
+    }
+  | {
+      type: 'JAM_STATE';
+      state: JamState;
+    }
+  | {
+      type: 'JAM_ACTION';
+      action:
+        | 'PREP_LAUNCH_INSTRUMENT'
+        | 'PREP_LAUNCH_BLINDTEST'
+        | 'GUESS'
+        | 'BUZZER'
+        | 'HINT_ARTIST'
+        | 'HINT_UNBLUR'
+        | 'HINT_CATEGORY'
+        | 'FOUND_ORAL'
+        | 'REVEAL_NOW'
+        | 'TOGGLE_PAUSE'
+        | 'NEXT_ROUND'
+        | 'EMOTE'
+        | 'SET_INSTRUMENT';
+      text?: string;
+      emote?: JamEmoteKind;
+      instrument?: JamInstrumentId;
+      songId?: string;
+      songTitle?: string;
+      songArtist?: string;
+      songCategory?: string;
+      antiCheat?: boolean;
+      blindTrack?: JamBlindTrack;
     };
+
+export type SlingshotMode = 'coop' | 'duel';
+export type SlingshotTargetKind =
+  | 'classic-pink'
+  | 'classic-cyan'
+  | 'classic-violet'
+  | 'fusion'
+  | 'explosive'
+  | 'heart'
+  | 'bomb';
+
+export interface SlingshotPullState {
+  isPulling: boolean;
+  /** Pull displacement relative to anchor (px, clamped <= 140) */
+  pullX: number;
+  pullY: number;
+}
+
+export interface SlingshotProjectile {
+  id: number;
+  owner: 'host' | 'guest';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  bounces: number;
+  maxBounces: number;
+  alive: boolean;
+  trail: { x: number; y: number }[];
+}
+
+export interface SlingshotTarget {
+  id: number;
+  kind: SlingshotTargetKind;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  baseY: number;
+  bobPhase: number;
+  radius: number;
+  points: number;
+  /** For Golden Fusion target: tracks which side already struck it */
+  hitByHost: boolean;
+  hitByGuest: boolean;
+  fusionGlowSec: number;
+  alive: boolean;
+}
+
+export interface SlingshotDuoState {
+  phase: 'ready' | 'playing' | 'paused' | 'gameover';
+  mode: SlingshotMode;
+  durationSec: number;
+  timeLeftSec: number;
+  elapsedSec: number;
+  hostScore: number;
+  guestScore: number;
+  coopScore: number;
+  bestScore: number;
+  hostReloadSec: number;
+  guestReloadSec: number;
+  hostStunSec: number;
+  guestStunSec: number;
+  hostPull: SlingshotPullState;
+  guestPull: SlingshotPullState;
+  projectiles: SlingshotProjectile[];
+  targets: SlingshotTarget[];
+  nextId: number;
+  spawnTimerSec: number;
+  fusionRespawnSec: number;
+  trickShots: number;
+  fusionCount: number;
+  hitstopSec: number;
+  trauma: number;
+  flashKind: 'none' | 'bomb' | 'fusion' | 'heart' | 'explosive';
+  flashTimerSec: number;
+  lastCallout: string;
+  calloutTimerSec: number;
+}
+
+export type XoVariant = 'infinite' | 'classic';
+export type XoSymbolTheme = 'xo' | 'hearts';
+export type XoMark = 'host' | 'guest' | null;
+
+export interface XoNeonState {
+  phase: 'ready' | 'playing' | 'round_over' | 'match_over';
+  variant: XoVariant;
+  symbolTheme: XoSymbolTheme;
+  board: XoMark[];
+  /** FIFO placement order for Infinite Mode (max 3 pieces per player) */
+  hostQueue: number[];
+  guestQueue: number[];
+  turn: 'host' | 'guest';
+  turnDurationSec: number;
+  turnTimeLeftSec: number;
+  round: number;
+  targetWins: number;
+  hostWins: number;
+  guestWins: number;
+  winLine: number[] | null;
+  roundWinner: 'host' | 'guest' | 'draw' | null;
+  matchWinner: 'host' | 'guest' | null;
+  dareIndex: number;
+  lastPlacedCell: number | null;
+  moveSeq: number;
+}
+
+export type ParchisiPlayer = 'host' | 'guest';
+export type ParchisiMode = 'express' | 'classic';
+export type ParchisiPhase =
+  | 'READY'
+  | 'WAIT_ROLL'
+  | 'WAIT_MOVE'
+  | 'BONUS_20'
+  | 'BONUS_10'
+  | 'MERCY_OFFER'
+  | 'KARMA_CARD'
+  | 'GAME_OVER';
+
+export type ParchisiEmoteKind = 'yum' | 'mercy' | 'blocked' | 'lucky';
+
+export interface ParchisiPawn {
+  /** 0..3 per player */
+  id: number;
+  owner: ParchisiPlayer;
+  /** -1 = in base, 0..63 = outer 68-square loop relative to exit, 64..70 = 7-square final corridor, 71 = Central Throne */
+  progress: number;
+  /** Remaining turns of Love Shield capture immunity */
+  shieldTurns: number;
+}
+
+export interface ParchisiMoveOption {
+  pawnId: number;
+  fromProgress: number;
+  toProgress: number;
+  steps: number;
+  /** Sequence of progress values visited step-by-step for 120ms hop animation */
+  path: number[];
+  isExit: boolean;
+  captures: { owner: ParchisiPlayer; pawnId: number; square: number } | null;
+  reachesThrone: boolean;
+  landsOnSafe: boolean;
+  landsOnKarma: boolean;
+  breaksBlockade: boolean;
+}
+
+export interface ParchisiPendingMercy {
+  capturer: ParchisiPlayer;
+  capturerPawnId: number;
+  victim: ParchisiPlayer;
+  victimPawnId: number;
+  square: number;
+  dareIndex: number;
+  stage: 'choose' | 'waiting_partner' | 'partner_performing';
+  /** Remaining countdown seconds during the 8s decision stage */
+  countdownSec: number;
+}
+
+export type ParchisiKarmaEffect = 'shield' | 'turbo3' | 'free_roll' | 'complicity';
+
+export interface ParchisiActiveKarma {
+  cardId: number;
+  effect: ParchisiKarmaEffect;
+  triggeredBy: ParchisiPlayer;
+  pawnId: number;
+  square: number;
+}
+
+export interface ParchisiMoveAnimation {
+  seq: number;
+  owner: ParchisiPlayer;
+  pawnId: number;
+  path: number[];
+}
+
+export interface ParchisiPlayerStats {
+  captures: number;
+  daresCompleted: number;
+  sixesRolled: number;
+  tenderHearts: number;
+  karmaCards: number;
+}
+
+export interface ParchisiState {
+  phase: ParchisiPhase;
+  mode: ParchisiMode;
+  turn: ParchisiPlayer;
+  dieValue: number | null;
+  effectiveSteps: number;
+  rollSeq: number;
+  consecutiveSixes: number;
+  extraTurnPending: boolean;
+  lastMovedPawnId: Record<ParchisiPlayer, number | null>;
+  pawns: Record<ParchisiPlayer, ParchisiPawn[]>;
+  pendingMercy: ParchisiPendingMercy | null;
+  activeKarma: ParchisiActiveKarma | null;
+  usedKarmaIds: number[];
+  lastMoveAnim: ParchisiMoveAnimation | null;
+  lastEventText: string;
+  history: string[];
+  winner: ParchisiPlayer | null;
+  finalDareIndex: number;
+  stats: Record<ParchisiPlayer, ParchisiPlayerStats>;
+  stateSeq: number;
+}
+
+export type JamInstrumentId = 'darbouka' | 'guitar' | 'piano' | 'oud';
+export type JamMode = 'guess-instrument' | 'blind-test' | 'concert-duo';
+export type JamFormat = 5 | 10 | 0;
+export type JamPlaybackRate = 0.8 | 1 | 1.35;
+export type JamBlindSource = 'itunes' | 'free';
+export type JamPlayer = 'host' | 'guest';
+export type JamEmoteKind = 'bravo' | 'fuego' | 'encore';
+export type JamPhase = 'LOBBY' | 'PREP' | 'PLAYING' | 'BUZZER' | 'REVEAL' | 'MATCH_OVER';
+
+export interface JamBlindTrack {
+  source: JamBlindSource;
+  previewUrl?: string;
+  artworkUrl?: string;
+  trackName: string;
+  artistName: string;
+  playbackRate: JamPlaybackRate;
+  duration: number;
+}
+
+export interface JamRoundOutcome {
+  guessed: boolean;
+  winner: JamPlayer | null;
+  pointsAwarded: number;
+  fastBonus: boolean;
+  answerText?: string;
+  dareText?: string;
+  revealTitle: string;
+  revealArtist?: string;
+  revealArtworkUrl?: string;
+}
+
+export interface JamState {
+  phase: JamPhase;
+  mode: JamMode;
+  /** 5, 10, or 0 for Free / unlimited */
+  totalRounds: JamFormat;
+  round: number;
+  /** Who is the active Musician / DJ this round */
+  performer: JamPlayer;
+  /** Scores support .5 increments from -0.5 hint deductions */
+  scores: Record<JamPlayer, number>;
+  /** Current instrument per player (used in Mode 1 & Mode 3) */
+  instruments: Record<JamPlayer, JamInstrumentId>;
+  /** Mode 1 secret song metadata */
+  secretSongId: string | null;
+  secretTitle: string;
+  secretArtist: string;
+  secretCategory: string;
+  antiCheatMute: boolean;
+  /** Mode 2 blind test track */
+  blindTrack: JamBlindTrack | null;
+  /** Round countdown remaining (45s Mode 1, 30s Mode 2) */
+  roundDurationSec: number;
+  timeLeftSec: number;
+  /** Paused by DJ or Buzzer */
+  isPaused: boolean;
+  buzzerLeftSec: number;
+  buzzerBy: JamPlayer | null;
+  /** Hints used in current round */
+  hintCategoryUsed: boolean;
+  hintArtistUsed: boolean;
+  hintUnblurUsed: boolean;
+  hintsCount: number;
+  /** Last guess feedback */
+  lastWrongGuess: string | null;
+  /** Reveal outcome */
+  outcome: JamRoundOutcome | null;
+  /** Solo AI training flag */
+  soloAiPerformer: boolean;
+  /** Final match dare for loser */
+  finalDareText: string;
+  stateSeq: number;
+}
+
+

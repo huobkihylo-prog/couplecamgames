@@ -1,15 +1,26 @@
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import type { HandMetrics, TrackerStatus } from '../types/duoplay';
 
-const MEDIAPIPE_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm';
+const MEDIAPIPE_WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm';
+const MEDIAPIPE_WASM_FALLBACK_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm';
 const HAND_LANDMARKER_MODEL_URL =
-  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+  'https://storage.googleapis.com/mediapipe-models/hand_land_marker/hand_land_marker/float16/1/hand_landmarker.task';
+
+export const PINCH_ENGAGE_RATIO = 0.38;
+export const PINCH_RELEASE_RATIO = 0.55;
+export const PRECISION_LERP = 0.35;
 
 export const EMPTY_HAND_METRICS: HandMetrics = {
   indexX: 0.5,
   indexY: 0.5,
   palmX: 0.5,
   palmY: 0.5,
+  pinchX: 0.5,
+  pinchY: 0.5,
+  smoothIndexX: 0.5,
+  smoothIndexY: 0.5,
+  pinchRatio: 1,
+  isPinching: false,
   handDetected: false,
   timestamp: 0,
 };
@@ -20,9 +31,22 @@ export type HandDetectionResult =
   | { kind: 'not-ready' };
 
 /**
+ * Pure pinch hysteresis helper:
+ * Engages when ratio < 0.38, releases only when ratio > 0.55 (prevents jitter misfires).
+ */
+export function computePinchHysteresis(prevPinching: boolean, ratio: number): boolean {
+  if (!Number.isFinite(ratio)) return false;
+  if (prevPinching) {
+    return ratio <= PINCH_RELEASE_RATIO;
+  }
+  return ratio < PINCH_ENGAGE_RATIO;
+}
+
+/**
  * Lazy-loaded MediaPipe HandLandmarker tracker providing:
- * - Landmark 8 (index fingertip) for "Ninja Fruits en Duo"
- * - Landmark 9 (middle finger MCP / palm center) for "Air Hockey des Mains"
+ * - Landmark 8 (index fingertip) for "Ninja Fruits", "Constellations", and "X O Néon"
+ * - Landmark 9 (middle finger MCP / palm center) for "Air Hockey" & "Kiss Bounce"
+ * - Landmarks 4 & 8 pinch midpoint + normalized ratio(4,8)/distance(0,9) with hysteresis for "Slingshot Duo" & "X O Néon"
  *
  * Mirrored horizontally (1 - x) to match the natural front-camera self-view.
  */
@@ -43,6 +67,12 @@ export class DuoHandTracker {
   private smoothedIndexY = 0.5;
   private smoothedPalmX = 0.5;
   private smoothedPalmY = 0.5;
+  private precisionPinchX = 0.5;
+  private precisionPinchY = 0.5;
+  private precisionIndexX = 0.5;
+  private precisionIndexY = 0.5;
+  private lastPinchRatio = 1;
+  private pinchingState = false;
 
   public getStatus(): TrackerStatus {
     return this.status;
@@ -73,7 +103,14 @@ export class DuoHandTracker {
     this.status = 'loading';
     this.initPromise = (async () => {
       try {
-        const vision = this.vision ?? (await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL));
+        let vision = this.vision;
+        if (!vision) {
+          try {
+            vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_URL);
+          } catch {
+            vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_WASM_FALLBACK_URL);
+          }
+        }
         this.vision = vision;
 
         let landmarker: HandLandmarker;
@@ -154,6 +191,8 @@ export class DuoHandTracker {
       const hand = result.landmarks?.[0];
 
       if (!hand || hand.length < 10) {
+        this.pinchingState = false;
+        this.lastPinchRatio = 1;
         return {
           kind: 'frame',
           metrics: {
@@ -161,24 +200,51 @@ export class DuoHandTracker {
             indexY: this.smoothedIndexY,
             palmX: this.smoothedPalmX,
             palmY: this.smoothedPalmY,
+            pinchX: this.precisionPinchX,
+            pinchY: this.precisionPinchY,
+            smoothIndexX: this.precisionIndexX,
+            smoothIndexY: this.precisionIndexY,
+            pinchRatio: 1,
+            isPinching: false,
             handDetected: false,
             timestamp: tsMs,
           },
         };
       }
 
-      // Landmark 8 = index fingertip; Landmark 9 = middle MCP (palm center)
-      // Mirror X (1 - x) so moving hand right moves blade/paddle right on screen
-      const rawIndexX = Math.max(0, Math.min(1, 1 - hand[8].x));
-      const rawIndexY = Math.max(0, Math.min(1, hand[8].y));
-      const rawPalmX = Math.max(0, Math.min(1, 1 - hand[9].x));
-      const rawPalmY = Math.max(0, Math.min(1, hand[9].y));
+      const wrist = hand[0];
+      const thumbTip = hand[4];
+      const indexTip = hand[8];
+      const middleMcp = hand[9];
 
-      // Ultra-snappy smoothing (72% new) so slashes & hockey strikes feel immediate
+      // Mirror X (1 - x) so moving hand right moves cursor/blade/paddle right on screen
+      const rawIndexX = Math.max(0, Math.min(1, 1 - indexTip.x));
+      const rawIndexY = Math.max(0, Math.min(1, indexTip.y));
+      const rawPalmX = Math.max(0, Math.min(1, 1 - middleMcp.x));
+      const rawPalmY = Math.max(0, Math.min(1, middleMcp.y));
+
+      // Midpoint between thumb tip (4) and index tip (8)
+      const rawPinchX = Math.max(0, Math.min(1, 1 - (thumbTip.x + indexTip.x) * 0.5));
+      const rawPinchY = Math.max(0, Math.min(1, (thumbTip.y + indexTip.y) * 0.5));
+
+      // Normalized pinch ratio: distance(4, 8) / distance(wrist 0, middle MCP 9)
+      const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+      const handScale = Math.max(0.02, Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y));
+      const pinchRatio = pinchDist / handScale;
+      this.lastPinchRatio = pinchRatio;
+      this.pinchingState = computePinchHysteresis(this.pinchingState, pinchRatio);
+
+      // Ultra-snappy smoothing (72% new) for Ninja Fruits / Air Hockey
       this.smoothedIndexX = this.smoothedIndexX * 0.28 + rawIndexX * 0.72;
       this.smoothedIndexY = this.smoothedIndexY * 0.28 + rawIndexY * 0.72;
       this.smoothedPalmX = this.smoothedPalmX * 0.28 + rawPalmX * 0.72;
       this.smoothedPalmY = this.smoothedPalmY * 0.28 + rawPalmY * 0.72;
+
+      // Anti-tremble exponential smoothing (lerp = 0.35) for Slingshot Duo & X O Néon
+      this.precisionPinchX += (rawPinchX - this.precisionPinchX) * PRECISION_LERP;
+      this.precisionPinchY += (rawPinchY - this.precisionPinchY) * PRECISION_LERP;
+      this.precisionIndexX += (rawIndexX - this.precisionIndexX) * PRECISION_LERP;
+      this.precisionIndexY += (rawIndexY - this.precisionIndexY) * PRECISION_LERP;
 
       return {
         kind: 'frame',
@@ -187,6 +253,12 @@ export class DuoHandTracker {
           indexY: this.smoothedIndexY,
           palmX: this.smoothedPalmX,
           palmY: this.smoothedPalmY,
+          pinchX: this.precisionPinchX,
+          pinchY: this.precisionPinchY,
+          smoothIndexX: this.precisionIndexX,
+          smoothIndexY: this.precisionIndexY,
+          pinchRatio: this.lastPinchRatio,
+          isPinching: this.pinchingState,
           handDetected: true,
           timestamp: tsMs,
         },
@@ -211,5 +283,7 @@ export class DuoHandTracker {
     this.lastVideoTime = -1;
     this.lastTimestampMs = 0;
     this.consecutiveErrors = 0;
+    this.pinchingState = false;
+    this.lastPinchRatio = 1;
   }
 }

@@ -215,7 +215,166 @@ class DuoSoundFx {
       this.playTone(n, 0.72, 'sine', 0.055, undefined, idx * 0.085);
     });
   }
+
+  /**
+   * Subtle synthesized heartbeat (lub-dub) for the final 5 seconds of Murmures Secrets.
+   */
+  public heartbeatPulse(urgency = 0.5) {
+    const ctx = this.ensureCtx();
+    if (!ctx) return;
+    const clamped = Math.max(0.2, Math.min(1, urgency));
+    const gain1 = 0.085 + clamped * 0.05;
+    const gain2 = 0.065 + clamped * 0.04;
+    // Lub (low warm thump)
+    this.playTone(72, 0.14, 'sine', gain1, 44, 0);
+    // Dub (slightly higher secondary beat 170ms later)
+    this.playTone(62, 0.16, 'sine', gain2, 38, 0.17);
+  }
+
+  /**
+   * Soft warm velvet chime when the secret whisper is revealed.
+   */
+  public whisperReveal() {
+    const chord = [293.66, 369.99, 440.0, 587.33];
+    chord.forEach((n, idx) => {
+      this.playTone(n, 0.58, 'sine', 0.05, undefined, idx * 0.07);
+    });
+  }
+
+  /**
+   * Shimmering romantic bloom when validated early by kiss or exact guess (+2 pts).
+   */
+  public kissBonusBloom() {
+    const notes = [392.0, 493.88, 587.33, 783.99, 987.77];
+    notes.forEach((n, idx) => {
+      this.playTone(n, 0.45, 'triangle', 0.055, undefined, idx * 0.055);
+    });
+  }
+
+  // --- Slingshot Duo SFX ---
+  public slingGrab() {
+    this.playTone(340, 0.07, 'sine', 0.05, 440);
+  }
+
+  public slingFire(powerRatio = 0.7) {
+    const p = Math.max(0.2, Math.min(1, powerRatio));
+    this.playTone(220 + p * 140, 0.14, 'triangle', 0.08, 620 + p * 260);
+    this.playTone(160, 0.09, 'sine', 0.045, 95, 0.02);
+  }
+
+  public slingRicochet() {
+    this.playTone(760, 0.09, 'triangle', 0.065, 1180);
+  }
+
+  public slingTargetPop(pts = 20) {
+    const base = pts >= 30 ? 640 : pts >= 20 ? 540 : 460;
+    this.playTone(base, 0.11, 'triangle', 0.07, base * 1.45);
+  }
+
+  public slingFusionFireworks() {
+    const chord = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    chord.forEach((n, i) => {
+      this.playTone(n, 0.32, 'triangle', 0.075, n * 1.06, i * 0.055);
+    });
+  }
+
+  public slingOrangeExplosion() {
+    this.playTone(190, 0.28, 'sawtooth', 0.08, 68);
+    this.playTone(420, 0.18, 'triangle', 0.07, 150, 0.03);
+  }
+
+  public slingHeartBonus() {
+    this.playTone(587.33, 0.14, 'sine', 0.065, 880);
+    this.playTone(880, 0.22, 'triangle', 0.065, 1174.66, 0.07);
+  }
+
+  public slingBombStun() {
+    this.playTone(150, 0.36, 'sawtooth', 0.095, 44);
+    this.playTone(108, 0.42, 'triangle', 0.085, 38, 0.06);
+  }
+
+  // --- X O Néon SFX ---
+  public xoHover() {
+    this.playTone(480, 0.045, 'sine', 0.028, 560);
+  }
+
+  public xoPlaceX() {
+    this.playTone(523.25, 0.11, 'triangle', 0.075, 783.99);
+    this.playTone(783.99, 0.12, 'sine', 0.05, 1046.5, 0.05);
+  }
+
+  public xoPlaceO() {
+    this.playTone(392.0, 0.12, 'sine', 0.075, 587.33);
+    this.playTone(587.33, 0.14, 'triangle', 0.055, 493.88, 0.055);
+  }
+
+  public xoTimerTick(secLeft: number) {
+    const freq = secLeft <= 1 ? 920 : secLeft <= 2 ? 780 : 660;
+    this.playTone(freq, 0.08, 'square', 0.035, freq * 0.92);
+  }
+
+  public xoWin() {
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    notes.forEach((n, idx) => {
+      this.playTone(n, 0.3, 'triangle', 0.08, undefined, idx * 0.09);
+    });
+  }
+
+  public xoDraw() {
+    this.playTone(440, 0.16, 'sine', 0.06, 392);
+    this.playTone(392, 0.22, 'sine', 0.055, 349.23, 0.14);
+  }
+
+  // --- Parchisi Duo (Royal Love Edition) SFX ---
+  public parchisiDiceRoll() {
+    const clicks = [340, 480, 390, 560, 440, 620];
+    clicks.forEach((f, idx) => {
+      this.playTone(f, 0.045, 'triangle', 0.048, f * 0.82, idx * 0.055);
+    });
+  }
+
+  public parchisiPawnHop(stepIndex = 0) {
+    const base = 420 + Math.min(10, stepIndex) * 26;
+    this.playTone(base, 0.065, 'sine', 0.06, base * 1.25);
+  }
+
+  public parchisiCaptureDrama() {
+    this.playTone(520, 0.14, 'sawtooth', 0.065, 290, 0);
+    this.playTone(310, 0.16, 'sawtooth', 0.07, 165, 0.11);
+    this.playTone(190, 0.28, 'triangle', 0.08, 95, 0.22);
+  }
+
+  public parchisiMercySaved() {
+    const notes = [440, 554.37, 659.25, 880];
+    notes.forEach((n, idx) => {
+      this.playTone(n, 0.24, 'sine', 0.065, undefined, idx * 0.075);
+    });
+  }
+
+  public parchisiKarmaChime() {
+    const sparkle = [659.25, 830.61, 987.77, 1318.5];
+    sparkle.forEach((n, idx) => {
+      this.playTone(n, 0.28, 'sine', 0.058, n * 1.03, idx * 0.065);
+    });
+  }
+
+  public parchisiThroneArrival() {
+    const fanfare = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    fanfare.forEach((n, idx) => {
+      this.playTone(n, 0.28, 'triangle', 0.08, undefined, idx * 0.08);
+    });
+  }
+
+  public parchisiCurseTripleSix() {
+    this.playTone(392, 0.16, 'sawtooth', 0.06, 260, 0);
+    this.playTone(260, 0.24, 'sawtooth', 0.065, 130, 0.14);
+  }
+
+  public parchisiEmotePop() {
+    this.playTone(580, 0.075, 'triangle', 0.055, 880);
+  }
 }
 
 export const soundFx = new DuoSoundFx();
+
 

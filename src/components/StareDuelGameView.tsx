@@ -337,60 +337,60 @@ export function StareDuelGameView({
     localStream && trackerStatus === 'ready' ? t.stareSensorReady : t.stareSensorFallback;
 
   return (
-    <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-4 space-y-5">
+    <main className="flex-1 w-full max-w-6xl mx-auto px-2.5 sm:px-6 py-2.5 sm:py-4 space-y-3 sm:space-y-5">
       {/* Top Scoreboard & Central Precision Stopwatch */}
-      <section className="rounded-2xl bg-[#141724] border border-white/12 p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#E86A58]/16 border border-[#E86A58]/35 flex items-center justify-center text-[#F08272] shrink-0">
-            <Eye className="w-5 h-5" />
+      <section className="rounded-2xl bg-[#141724] border border-white/12 p-3 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-4 shadow-xl">
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#E86A58]/16 border border-[#E86A58]/35 flex items-center justify-center text-[#F08272] shrink-0">
+            <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
           <div>
-            <h1 className="text-lg sm:text-xl font-bold text-[#F6F2E9] leading-tight">
+            <h1 className="text-base sm:text-xl font-bold text-[#F6F2E9] leading-tight">
               {t.stareTitle}
             </h1>
-            <p className="text-xs text-[#A9A295]">{sensorHint}</p>
+            <p className="hidden sm:block text-xs text-[#A9A295]">{sensorHint}</p>
           </div>
         </div>
 
         {/* Live Stopwatch + Score */}
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-4 sm:gap-5">
           <div className="text-center">
-            <p className="text-[11px] uppercase tracking-wider text-[#A9A295]">
+            <p className="text-[10.5px] sm:text-[11px] uppercase tracking-wider text-[#A9A295]">
               {t.roundLabel} {hud.round}
             </p>
             <p
               data-testid="stare-timer"
-              className="font-mono text-3xl sm:text-4xl font-bold text-[#E8B861] tabular-nums leading-none mt-0.5"
+              className="font-mono text-2xl sm:text-4xl font-bold text-[#E8B861] tabular-nums leading-none mt-0.5"
             >
               {hud.elapsedSec.toFixed(1)}s
             </p>
           </div>
 
-          <span className="w-px h-10 bg-white/12" aria-hidden="true" />
+          <span className="w-px h-8 sm:h-10 bg-white/12" aria-hidden="true" />
 
           <div
             data-testid="stare-score"
-            className="flex items-center gap-3 text-center"
+            className="flex items-center gap-2.5 sm:gap-3 text-center"
           >
             <div>
-              <p className="text-[11px] text-[#E86A58] font-medium truncate max-w-[82px]">
+              <p className="text-[10.5px] sm:text-[11px] text-[#E86A58] font-medium truncate max-w-[74px] sm:max-w-[82px]">
                 {localName}
               </p>
-              <p className="text-2xl font-bold text-[#F6F2E9] tabular-nums">{hud.localScore}</p>
+              <p className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none mt-0.5">{hud.localScore}</p>
             </div>
             <span className="text-white/30 font-bold">—</span>
             <div>
-              <p className="text-[11px] text-[#E8B861] font-medium truncate max-w-[82px]">
+              <p className="text-[10.5px] sm:text-[11px] text-[#E8B861] font-medium truncate max-w-[74px] sm:max-w-[82px]">
                 {partnerName}
               </p>
-              <p className="text-2xl font-bold text-[#F6F2E9] tabular-nums">{hud.partnerScore}</p>
+              <p className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none mt-0.5">{hud.partnerScore}</p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Large Close-Up Side-by-Side Face Feeds + Visual Traps */}
-      <section className="relative grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* Large Close-Up Side-by-Side Face Feeds + Visual Traps (side-by-side on mobile too so buttons sit above the fold) */}
+      <section className="relative grid grid-cols-2 gap-2.5 sm:gap-5">
         {/* Local Face Close-Up */}
         <div className="relative rounded-2xl overflow-hidden border border-white/15 bg-[#111524] shadow-2xl">
           <CameraFeedTile
@@ -407,16 +407,16 @@ export function StareDuelGameView({
           />
 
           {/* Live Blink Gauge Strip */}
-          <div className="px-4 py-2.5 bg-[#111524] border-t border-white/10 flex items-center justify-between gap-3">
-            <span className="text-xs font-medium text-[#CBC4B6] flex items-center gap-1.5">
+          <div className="px-2.5 sm:px-4 py-2 sm:py-2.5 bg-[#111524] border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-3">
+            <span className="text-[11px] sm:text-xs font-medium text-[#CBC4B6] flex items-center gap-1.5 truncate">
               {hud.localEyeRatio >= 0.56 ? (
-                <EyeOff className="w-3.5 h-3.5 text-[#E86A58]" />
+                <EyeOff className="w-3.5 h-3.5 text-[#E86A58] shrink-0" />
               ) : (
-                <Eye className="w-3.5 h-3.5 text-[#5CC29F]" />
+                <Eye className="w-3.5 h-3.5 text-[#5CC29F] shrink-0" />
               )}
-              <span>{hud.localEyeRatio >= 0.56 ? t.stareEyeBlinked : t.stareEyeOpen}</span>
+              <span className="truncate">{hud.localEyeRatio >= 0.56 ? t.stareEyeBlinked : t.stareEyeOpen}</span>
             </span>
-            <div className="flex-1 max-w-[160px] h-2 rounded-full bg-white/10 overflow-hidden">
+            <div className="w-full sm:flex-1 sm:max-w-[160px] h-2 rounded-full bg-white/10 overflow-hidden">
               <div
                 className={`h-full transition-all duration-75 ${
                   hud.localEyeRatio >= 0.48 ? 'bg-[#E86A58]' : 'bg-[#5CC29F]'
@@ -432,8 +432,8 @@ export function StareDuelGameView({
               data-testid="stare-trap-fly"
               className="pointer-events-none absolute inset-0 z-20 overflow-hidden"
             >
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-lg bg-[#E8B861] text-[#11131E] px-3 py-1 text-xs font-bold shadow-lg flex items-center gap-1.5">
-                <Bug className="w-3.5 h-3.5" />
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 rounded-lg bg-[#E8B861] text-[#11131E] px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs font-bold shadow-lg flex items-center gap-1.5 whitespace-nowrap">
+                <Bug className="w-3.5 h-3.5 shrink-0" />
                 <span>{t.stareFlyAlert}</span>
               </div>
               <div
@@ -456,13 +456,13 @@ export function StareDuelGameView({
           {hud.activeTrap === 'flash' && hud.phase === 'playing' && (
             <div
               data-testid="stare-trap-flash"
-              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center p-2"
               style={{
                 backgroundColor: `rgba(255, 248, 220, ${Math.min(0.88, hud.activeTrapProgress * 0.95)})`,
               }}
             >
-              <div className="rounded-xl bg-[#111524] border-2 border-[#E8B861] px-4 py-2 text-sm font-extrabold text-[#E8B861] shadow-2xl flex items-center gap-2">
-                <Zap className="w-4 h-4" />
+              <div className="rounded-xl bg-[#111524] border-2 border-[#E8B861] px-3 sm:px-4 py-2 text-xs sm:text-sm font-extrabold text-[#E8B861] shadow-2xl flex items-center gap-1.5 sm:gap-2">
+                <Zap className="w-4 h-4 shrink-0" />
                 <span>{t.stareFlashAlert}</span>
               </div>
             </div>
@@ -479,16 +479,16 @@ export function StareDuelGameView({
             metricsRef={partnerMetricsRef}
           />
 
-          <div className="px-4 py-2.5 bg-[#111524] border-t border-white/10 flex items-center justify-between gap-3">
-            <span className="text-xs font-medium text-[#CBC4B6] flex items-center gap-1.5">
-              <Eye className="w-3.5 h-3.5 text-[#E8B861]" />
-              <span>
+          <div className="px-2.5 sm:px-4 py-2 sm:py-2.5 bg-[#111524] border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-3">
+            <span className="text-[11px] sm:text-xs font-medium text-[#CBC4B6] flex items-center gap-1.5 truncate">
+              <Eye className="w-3.5 h-3.5 text-[#E8B861] shrink-0" />
+              <span className="truncate">
                 {hud.phase === 'playing'
                   ? `${t.stareNextTrap} ${hud.nextAutoTrapInt}s`
                   : `${t.recordLabel}: ${hud.bestStareSec.toFixed(1)}s`}
               </span>
             </span>
-            <div className="flex-1 max-w-[160px] h-2 rounded-full bg-white/10 overflow-hidden">
+            <div className="w-full sm:flex-1 sm:max-w-[160px] h-2 rounded-full bg-white/10 overflow-hidden">
               <div
                 className="h-full bg-[#E8B861] transition-all duration-75"
                 style={{ width: `${Math.min(100, Math.round(hud.partnerEyeRatio * 100))}%` }}
@@ -497,9 +497,9 @@ export function StareDuelGameView({
           </div>
 
           {partnerDistractedFlash && (
-            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#E8B861]/25">
-              <div className="rounded-xl bg-[#111524]/95 border border-[#E8B861] px-4 py-2 text-xs font-bold text-[#E8B861] flex items-center gap-1.5 shadow-xl">
-                <Sparkles className="w-4 h-4" />
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[#E8B861]/25 p-2">
+              <div className="rounded-xl bg-[#111524]/95 border border-[#E8B861] px-3 py-1.5 text-xs font-bold text-[#E8B861] flex items-center gap-1.5 shadow-xl">
+                <Sparkles className="w-4 h-4 shrink-0" />
                 <span>{t.stareDistractionBtn} !</span>
               </div>
             </div>
@@ -521,16 +521,16 @@ export function StareDuelGameView({
         )}
       </section>
 
-      {/* Action Controls Bar */}
-      <section className="rounded-2xl bg-[#141724] border border-white/12 p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+      {/* Action Controls Bar — Enlarged >= 52px mobile thumb targets below the cameras */}
+      <section className="rounded-2xl bg-[#141724] border border-white/12 p-3.5 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3.5">
         {hud.phase === 'ready' && (
-          <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-sm text-[#CBC4B6] max-w-xl leading-relaxed">{t.stareDesc}</p>
+          <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-3.5">
+            <p className="hidden sm:block text-sm text-[#CBC4B6] max-w-xl leading-relaxed">{t.stareDesc}</p>
             <button
               type="button"
               data-start="true"
               onClick={() => launchRound(true)}
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors shadow-lg shadow-[#E86A58]/25 whitespace-nowrap shrink-0"
+              className="w-full sm:w-auto min-h-[54px] inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl font-bold text-base sm:text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors shadow-lg shadow-[#E86A58]/25 whitespace-nowrap shrink-0"
             >
               <Play className="w-4 h-4 fill-current" />
               <span>{t.stareStartBtn}</span>
@@ -539,15 +539,15 @@ export function StareDuelGameView({
         )}
 
         {(hud.phase === 'countdown' || hud.phase === 'playing') && (
-          <div className="w-full flex flex-wrap items-center justify-between gap-3">
+          <div className="w-full grid grid-cols-1 sm:flex sm:flex-wrap items-center justify-between gap-2.5 sm:gap-3">
             <button
               type="button"
               data-testid="send-distraction-btn"
               disabled={hud.phase !== 'playing' || hud.distractionCooldownSec > 0}
               onClick={sendDistraction}
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm bg-[#E8B861] hover:bg-[#F2C775] disabled:opacity-50 text-[#11131E] transition-colors whitespace-nowrap"
+              className="w-full sm:w-auto min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-bold text-sm sm:text-base bg-[#E8B861] hover:bg-[#F2C775] disabled:opacity-50 text-[#11131E] transition-colors whitespace-nowrap"
             >
-              <Zap className="w-4 h-4" />
+              <Zap className="w-4 h-4 shrink-0" />
               <span>
                 {hud.distractionCooldownSec > 0
                   ? `${t.stareDistractionCooldown} (${Math.ceil(hud.distractionCooldownSec)}s)`
@@ -566,9 +566,9 @@ export function StareDuelGameView({
               onPointerLeave={() => {
                 manualBlinkRef.current = false;
               }}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium bg-white/6 hover:bg-white/12 text-[#CBC4B6] border border-white/12 transition-colors whitespace-nowrap"
+              className="w-full sm:w-auto min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold bg-white/8 hover:bg-white/14 text-[#F6F2E9] border border-white/15 transition-colors whitespace-nowrap"
             >
-              <EyeOff className="w-4 h-4 text-[#E86A58]" />
+              <EyeOff className="w-4 h-4 text-[#E86A58] shrink-0" />
               <span>{t.stareTestBlinkBtn}</span>
             </button>
           </div>
@@ -576,7 +576,7 @@ export function StareDuelGameView({
 
         {(hud.phase === 'round_over' || hud.phase === 'match_over') && (
           <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 w-full sm:w-auto">
               <div className="w-10 h-10 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 flex items-center justify-center text-[#E8B861] shrink-0">
                 <Trophy className="w-5 h-5" />
               </div>
@@ -596,12 +596,12 @@ export function StareDuelGameView({
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 shrink-0">
+            <div className="w-full sm:w-auto flex items-center gap-2.5 shrink-0">
               <button
                 type="button"
                 data-start="true"
                 onClick={() => launchRound(true)}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors whitespace-nowrap"
+                className="flex-1 sm:flex-none min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl font-bold text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors whitespace-nowrap"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>{hud.phase === 'match_over' ? t.playAgain : t.stareNextRoundBtn}</span>
@@ -609,7 +609,7 @@ export function StareDuelGameView({
               <button
                 type="button"
                 onClick={onReturnToHub}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-white/8 hover:bg-white/14 text-[#F6F2E9] transition-colors whitespace-nowrap"
+                className="flex-1 sm:flex-none min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors whitespace-nowrap"
               >
                 <LayoutGrid className="w-4 h-4" />
                 <span>{t.backToHub}</span>
