@@ -1,10 +1,19 @@
-import { useId, useMemo } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ParchisiBonusAmount } from '../types/duoplay';
+import {
+  computeNextDieRotation,
+  computePreRollDieRotation,
+  getDieFaceAngle,
+  type DieRotation3D,
+} from '../game/parchisiAnimation';
+
+export const PARCHISI_DICE_ROLL_MS = 540;
 
 interface ParchisiDiceTrayProps {
   dice: [number, number] | null;
   usedDice: [boolean, boolean];
   pendingBonus: ParchisiBonusAmount | null;
+  rollSeq: number;
   rolling: boolean;
   shakeIntensity: number; // 0..1 from optional MediaPipe hand shake
   canRoll: boolean;
@@ -15,7 +24,7 @@ interface ParchisiDiceTrayProps {
   ariaLabel: string;
 }
 
-const PIP_LAYOUTS: Record<number, [number, number][]> = {
+const PIP_LAYOUTS: Record<number, readonly [number, number][]> = {
   1: [[50, 50]],
   2: [
     [28, 28],
@@ -49,90 +58,173 @@ const PIP_LAYOUTS: Record<number, [number, number][]> = {
   ],
 };
 
+/** Exact 3D CSS transforms positioning each face (1..6) onto the 6 sides of the cube. */
+const FACE_TRANSFORMS: readonly { face: number; transform: string }[] = [
+  { face: 1, transform: 'rotateY(0deg) translateZ(var(--die-half))' },
+  { face: 6, transform: 'rotateY(180deg) translateZ(var(--die-half))' },
+  { face: 2, transform: 'rotateY(90deg) translateZ(var(--die-half))' },
+  { face: 5, transform: 'rotateY(-90deg) translateZ(var(--die-half))' },
+  { face: 3, transform: 'rotateX(90deg) translateZ(var(--die-half))' },
+  { face: 4, transform: 'rotateX(-90deg) translateZ(var(--die-half))' },
+];
+
+function DieFaceSvg({ face }: { face: number }) {
+  const pips = PIP_LAYOUTS[face] ?? PIP_LAYOUTS[1];
+  const pipFill = face === 5 || face === 6 ? '#C62828' : '#241A13';
+
+  return (
+    <svg viewBox="0 0 100 100" className="w-full h-full pointer-events-none" aria-hidden="true">
+      {pips.map(([cx, cy], idx) => (
+        <g key={idx}>
+          <circle cx={cx} cy={cy + 2} r="9.2" fill="rgba(255,255,255,0.85)" />
+          <circle cx={cx} cy={cy} r="9.2" fill={pipFill} />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * True 6-face 3D CSS Cube die:
+ * - Never unmounts or flickers on landing
+ * - Never collapses edge-on into 0px thickness
+ * - Smoothly rotates at 60fps across multiple axes and stops dead-on the authoritative face (1..6)
+ */
 function SingleDie3D({
   value,
+  hasRealDice,
+  rollSeq,
   used,
   rolling,
   compact,
-  gradPrefix,
-  tiltDeg,
+  variant,
 }: {
   value: number;
+  hasRealDice: boolean;
+  rollSeq: number;
   used: boolean;
   rolling: boolean;
   compact: boolean;
-  gradPrefix: string;
-  tiltDeg: number;
+  variant: 'a' | 'b';
 }) {
-  const pips = useMemo(() => PIP_LAYOUTS[value] ?? PIP_LAYOUTS[5], [value]);
+  const initialFace = Math.max(1, Math.min(6, Math.round(value)));
+  const mountedRollingRef = useRef(rolling && hasRealDice && rollSeq > 0);
+  const initialRot = mountedRollingRef.current
+    ? computePreRollDieRotation(initialFace, variant)
+    : getDieFaceAngle(initialFace);
+
+  const [rotation, setRotation] = useState<DieRotation3D>(initialRot);
+  const [transitionMs, setTransitionMs] = useState<number>(0);
+  const [arcSeq, setArcSeq] = useState<number>(mountedRollingRef.current ? rollSeq : 0);
+
+  const rotRef = useRef<DieRotation3D>(initialRot);
+  const lastHandledSeqRef = useRef<number>(mountedRollingRef.current ? -1 : rollSeq);
+  const lastFaceRef = useRef<number>(initialFace);
+
+  useEffect(() => {
+    if (rollSeq <= 0) {
+      lastHandledSeqRef.current = 0;
+      return;
+    }
+    if (!hasRealDice) {
+      return;
+    }
+
+    if (rollSeq === lastHandledSeqRef.current) {
+      // Same rollSeq, ensure face matches if authoritative value ever changed
+      if (initialFace !== lastFaceRef.current) {
+        const snapped = getDieFaceAngle(initialFace);
+        rotRef.current = snapped;
+        lastFaceRef.current = initialFace;
+        setTransitionMs(0);
+        setRotation(snapped);
+      }
+      return;
+    }
+
+    const isFreshMountedRoll = lastHandledSeqRef.current === -1;
+    lastHandledSeqRef.current = rollSeq;
+    lastFaceRef.current = initialFace;
+
+    if (isFreshMountedRoll) {
+      // Start one rAF after pre-roll paint so the browser smoothly transitions into exact face
+      const target = getDieFaceAngle(initialFace);
+      const rafId = window.requestAnimationFrame(() => {
+        rotRef.current = target;
+        setTransitionMs(PARCHISI_DICE_ROLL_MS);
+        setRotation(target);
+        setArcSeq(rollSeq);
+      });
+      return () => window.cancelAnimationFrame(rafId);
+    }
+
+    const nextRot = computeNextDieRotation(rotRef.current, initialFace, variant, rollSeq);
+    rotRef.current = nextRot;
+    setTransitionMs(PARCHISI_DICE_ROLL_MS);
+    setRotation(nextRot);
+    setArcSeq(rollSeq);
+  }, [hasRealDice, initialFace, rollSeq, variant]);
+
+  const arcClass =
+    rolling && arcSeq > 0
+      ? variant === 'a'
+        ? 'parchisi-die-arc-a'
+        : 'parchisi-die-arc-b'
+      : '';
 
   return (
     <div
+      data-testid={`parchisi-die-${variant}`}
+      data-die-value={initialFace}
+      data-rolling={rolling ? 'true' : 'false'}
       style={{
-        transform: rolling ? `rotate(${tiltDeg}deg) scale(1.06)` : 'rotate(0deg) scale(1)',
+        transform: used && !rolling ? 'scale(0.88)' : 'scale(1)',
+        transition: 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease',
+        willChange: 'transform, opacity',
       }}
-      className={`relative ${
-        compact ? 'w-9 h-9 sm:w-11 sm:h-11' : 'w-10 h-10 sm:w-12 sm:h-12'
-      } transition-all duration-150 shrink-0 ${
-        used ? 'opacity-40 grayscale-[35%] scale-90' : 'opacity-100'
+      className={`relative shrink-0 ${
+        used && !rolling ? 'opacity-40 grayscale-[35%]' : 'opacity-100'
       }`}
     >
-      <svg
-        viewBox="0 0 100 100"
-        className={`w-full h-full drop-shadow-[0_3px_5px_rgba(0,0,0,0.48)] ${
-          rolling ? 'animate-spin' : ''
-        }`}
-        aria-hidden="true"
+      <div
+        className={`parchisi-die-scene ${compact ? 'parchisi-die-scene--compact' : ''}`}
+        style={{ filter: 'drop-shadow(0 3px 5px rgba(0,0,0,0.42))' }}
       >
-        <defs>
-          <linearGradient id={`${gradPrefix}-body`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#FFFFFF" />
-            <stop offset="55%" stopColor="#F6F0E6" />
-            <stop offset="100%" stopColor="#D7C3A8" />
-          </linearGradient>
-          <linearGradient id={`${gradPrefix}-rim`} x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#FFFDF8" />
-            <stop offset="100%" stopColor="#B69870" />
-          </linearGradient>
-        </defs>
-        <rect
-          x="4"
-          y="4"
-          width="92"
-          height="92"
-          rx="20"
-          fill={`url(#${gradPrefix}-body)`}
-          stroke={`url(#${gradPrefix}-rim)`}
-          strokeWidth="4"
-        />
-        <rect
-          x="10"
-          y="10"
-          width="80"
-          height="80"
-          rx="14"
-          fill="none"
-          stroke="rgba(255,255,255,0.85)"
-          strokeWidth="2"
-        />
-        {pips.map(([cx, cy], idx) => (
-          <g key={idx}>
-            <circle cx={cx} cy={cy + 1.5} r="8.5" fill="rgba(255,255,255,0.82)" />
-            <circle
-              cx={cx}
-              cy={cy}
-              r="8.5"
-              fill={value === 5 || value === 6 ? '#C62828' : '#241A13'}
-            />
-          </g>
-        ))}
-      </svg>
+        <div className={`parchisi-die-lift ${arcClass}`}>
+          <div
+            className="parchisi-die-cube"
+            style={{
+              transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
+              transition:
+                transitionMs > 0
+                  ? `transform ${transitionMs}ms cubic-bezier(0.18, 0.9, 0.24, 1)`
+                  : 'none',
+            }}
+          >
+            {/* Solid inner ivory cross-planes eliminate any micro-gap around rounded edges mid-spin */}
+            <div className="parchisi-die-core" style={{ transform: 'rotateY(0deg)' }} />
+            <div className="parchisi-die-core" style={{ transform: 'rotateY(90deg)' }} />
+            <div className="parchisi-die-core" style={{ transform: 'rotateX(90deg)' }} />
+
+            {/* All 6 real opaque ivory faces */}
+            {FACE_TRANSFORMS.map(({ face, transform }) => (
+              <div
+                key={face}
+                className="parchisi-die-face"
+                style={{ transform }}
+              >
+                <DieFaceSvg face={face} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* Crisp checkmark badge when this die has already been spent */}
       {used && !rolling && (
         <span
           aria-hidden="true"
-          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#1F2937] border border-white/70 text-[#4ADE80] flex items-center justify-center text-[10px] font-black shadow"
+          className="absolute -top-1 -right-1 z-10 w-4 h-4 rounded-full bg-[#1F2937] border border-white/70 text-[#4ADE80] flex items-center justify-center text-[10px] font-black shadow"
         >
           ✓
         </span>
@@ -143,13 +235,14 @@ function SingleDie3D({
 
 /**
  * Authentic Official Parcheesi 2-Dice Golden-Brown Pill Tray.
- * Large, well-spaced dice with instant touch response (zero 300ms delay),
- * clear "🎲 Lancer" action cue, spent-die dimming, and glowing +20/+10 bonus badge.
+ * Uses true 6-face 3D CSS cubes that smoothly rotate at 60fps and stop squarely
+ * on the synchronized face (1..6) for both Duo (PeerJS) and AI play.
  */
 export function ParchisiDice3D({
   dice,
   usedDice,
   pendingBonus,
+  rollSeq,
   rolling,
   shakeIntensity,
   canRoll,
@@ -159,7 +252,7 @@ export function ParchisiDice3D({
   onRoll,
   ariaLabel,
 }: ParchisiDiceTrayProps) {
-  const baseId = useId();
+  const hasRealDice = dice !== null;
   const d1 = dice ? dice[0] : 5;
   const d2 = dice ? dice[1] : 6;
 
@@ -185,8 +278,8 @@ export function ParchisiDice3D({
       }}
       className={`relative min-h-[46px] inline-flex items-center touch-manipulation select-none shrink-0 ${
         compact
-          ? 'gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5'
-          : 'gap-2 sm:gap-2.5 px-3 sm:px-3.5 py-1.5'
+          ? 'gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-1.5'
+          : 'gap-2.5 sm:gap-3 px-3 sm:px-3.5 py-1.5'
       } rounded-full transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FACC15] ${
         canRoll
           ? 'cursor-pointer hover:brightness-110 active:scale-95'
@@ -205,19 +298,21 @@ export function ParchisiDice3D({
 
       <SingleDie3D
         value={d1}
+        hasRealDice={hasRealDice}
+        rollSeq={rollSeq}
         used={Boolean(dice && usedDice[0])}
         rolling={rolling}
         compact={compact}
-        gradPrefix={`${baseId}-d1`}
-        tiltDeg={-16}
+        variant="a"
       />
       <SingleDie3D
         value={d2}
+        hasRealDice={hasRealDice}
+        rollSeq={rollSeq}
         used={Boolean(dice && usedDice[1])}
         rolling={rolling}
         compact={compact}
-        gradPrefix={`${baseId}-d2`}
-        tiltDeg={18}
+        variant="b"
       />
 
       {/* Glowing golden +20 / +10 bonus badge */}

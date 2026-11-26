@@ -204,6 +204,7 @@ export class DuoFaceTracker {
             mouthPucker: this.smoothedMouthPucker,
             isKissing: this.smoothedMouthPucker >= 0.45,
             faceDetected: false,
+            faceAnchor: null,
             timestamp: tsMs,
           },
         };
@@ -226,10 +227,11 @@ export class DuoFaceTracker {
         }
       }
 
-      // Landmarks 33 (viewer-left eye outer) & 263 (viewer-right eye outer)
+      // Landmarks 33 (viewer-left eye outer), 263 (viewer-right eye outer), 1 (nose tip), 152 (chin)
       const leftEye = landmarks[33];
       const rightEye = landmarks[263];
       const noseTip = landmarks[1];
+      const chin = landmarks[152] ?? noseTip;
       // Landmarks 13 (upper inner lip) & 14 (lower inner lip) give exact mouth center
       const upperLip = landmarks[13];
       const lowerLip = landmarks[14];
@@ -275,6 +277,17 @@ export class DuoFaceTracker {
           mouthPucker: this.smoothedMouthPucker,
           isKissing,
           faceDetected: true,
+          faceAnchor: {
+            noseX: noseTip.x,
+            noseY: noseTip.y,
+            leftEyeX: leftEye.x,
+            leftEyeY: leftEye.y,
+            rightEyeX: rightEye.x,
+            rightEyeY: rightEye.y,
+            chinX: chin.x,
+            chinY: chin.y,
+            headTiltRad: rawTiltRad,
+          },
           timestamp: tsMs,
         },
       };

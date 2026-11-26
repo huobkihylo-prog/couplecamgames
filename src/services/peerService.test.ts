@@ -14,6 +14,7 @@ import {
   MAX_GUEST_RETRIES,
   normalizeRoomCode,
   ROOM_PREFIX,
+  toPeerId,
 } from './peerService';
 import { buildRoomShareUrl, extractRoomCodeFromSearch } from '../utils/clipboard';
 
@@ -25,10 +26,12 @@ test('normalizeRoomCode strips spaces/punctuation, extracts ?room= URLs, and uni
   assert.equal(normalizeRoomCode('https://couplecam.example/?room=4829'), '4829');
 });
 
-test('getPeerRoomId produces identical PeerJS room IDs regardless of spaces or letter case', () => {
+test('toPeerId and getPeerRoomId produce identical uppercase PeerJS room IDs regardless of spaces or case', () => {
+  assert.equal(toPeerId(' 48 29 '), `${ROOM_PREFIX}4829`);
+  assert.equal(toPeerId('aB-3c'), `${ROOM_PREFIX}AB3C`);
   assert.equal(getPeerRoomId(' 48 29 '), `${ROOM_PREFIX}4829`);
   assert.equal(getPeerRoomId('aB3c'), getPeerRoomId(' AB 3C '));
-  assert.equal(getPeerRoomId('Ab12'), `${ROOM_PREFIX}ab12`);
+  assert.equal(getPeerRoomId('Ab12'), `${ROOM_PREFIX}AB12`);
 });
 
 test('generateRoomCode always produces a 4-character alphanumeric code with both letters and digits', () => {
@@ -41,39 +44,39 @@ test('generateRoomCode always produces a 4-character alphanumeric code with both
   }
 });
 
-test('ICE_SERVERS and buildIceServers configure the 4 STUN servers plus optional Vite TURN env vars', () => {
+test('ICE_SERVERS and buildIceServers configure the 6 public STUN servers plus optional Vite TURN env vars', () => {
   const urls = ICE_SERVERS.flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]));
-  assert.ok(urls.includes('stun:stun.l.google.com:19302'));
-  assert.ok(urls.includes('stun:stun1.l.google.com:19302'));
-  assert.ok(urls.includes('stun:stun2.l.google.com:19302'));
-  assert.ok(urls.includes('stun:stun.cloudflare.com:3478'));
-  assert.ok(
-    urls.every((u) => !u.includes('openrelay.metered.ca') && !u.includes('global.stun.twilio.com')),
-    'should not include unresolvable/unreachable STUN endpoints',
-  );
+  assert.deepEqual(urls, [
+    'stun:stun.l.google.com:19302',
+    'stun:stun1.l.google.com:19302',
+    'stun:stun2.l.google.com:19302',
+    'stun:stun3.l.google.com:19302',
+    'stun:stun4.l.google.com:19302',
+    'stun:global.stun.twilio.com:3478',
+  ]);
 
   const withoutTurn = buildIceServers({});
-  assert.equal(withoutTurn.length, 4);
+  assert.equal(withoutTurn.length, 6);
 
   const withTurn = buildIceServers({
     VITE_TURN_URL: 'turn:relay.example.com:3478',
     VITE_TURN_USER: 'demo-user',
     VITE_TURN_PASS: 'demo-pass',
   });
-  assert.equal(withTurn.length, 5);
-  assert.deepEqual(withTurn[4], {
+  assert.equal(withTurn.length, 7);
+  assert.deepEqual(withTurn[6], {
     urls: 'turn:relay.example.com:3478',
     username: 'demo-user',
     credential: 'demo-pass',
   });
 });
 
-test('Timeout, retry, and heartbeat constants match reliability guarantees', () => {
-  assert.equal(CONNECT_TIMEOUT_MS, 15000);
+test('Timeout, retry, and heartbeat constants match 10s timeout + 1.5s auto-retry guarantees', () => {
+  assert.equal(CONNECT_TIMEOUT_MS, 10000);
   assert.equal(HEARTBEAT_INTERVAL_MS, 20000);
-  assert.equal(MAX_GUEST_RETRIES, 3);
-  assert.equal(GUEST_RETRY_DELAY_MS, 3000);
-  assert.equal(GUEST_ATTEMPT_STALL_MS, 5000);
+  assert.equal(MAX_GUEST_RETRIES, 2);
+  assert.equal(GUEST_RETRY_DELAY_MS, 1500);
+  assert.equal(GUEST_ATTEMPT_STALL_MS, 4000);
 });
 
 test('isSignalingOnlyError distinguishes transient signaling issues from peer-unavailable', () => {
@@ -130,13 +133,13 @@ test('sendRealtime throttles per message type so HAND_FRAME never drops HOCKEY_S
   assert.deepEqual(sent, ['HAND_FRAME', 'HOCKEY_SYNC']);
 });
 
-test('Guest enters Hub immediately on JOIN_WELCOME without waiting for video MediaConnection', () => {
+test('Guest enters Hub immediately on JOIN_ACCEPTED without waiting for video MediaConnection', () => {
   const statuses: string[] = [];
-  const messages: string[] = [];
+  const messages: Array<{ type: string; currentGame?: string; scores?: Record<string, number> }> = [];
   const svc = new DuoPeerService({
     onStatusChange: (s) => statuses.push(s),
     onRemoteStream: () => {},
-    onMessage: (m) => messages.push(m.type),
+    onMessage: (m) => messages.push(m as { type: string; currentGame?: string; scores?: Record<string, number> }),
   });
 
   const internal = svc as unknown as {
@@ -153,21 +156,30 @@ test('Guest enters Hub immediately on JOIN_WELCOME without waiting for video Med
   internal.startHeartbeat = () => {};
 
   internal.handleIncomingPeerMessage(
-    { type: 'JOIN_WELCOME', code: 'A7K4', hostName: 'Alex', hasStream: false },
+    {
+      type: 'JOIN_ACCEPTED',
+      code: 'A7K4',
+      hostName: 'Alex',
+      currentGame: 'hub',
+      scores: { parchisiWins: 2 },
+      hasStream: false,
+    },
     internal.sessionGen,
     'peerjs',
-    'couplecam-room-a7k4',
+    'couplecam-room-A7K4',
   );
 
   assert.equal(internal.hasEnteredRoom, true);
   assert.ok(statuses.includes('connected'));
-  assert.ok(messages.includes('HELLO'));
+  assert.ok(messages.some((m) => m.type === 'JOIN_ACCEPTED' && m.currentGame === 'hub'));
+  assert.ok(messages.some((m) => m.type === 'HELLO'));
 });
 
-test('Host replies JOIN_WELCOME immediately on JOIN_HELLO and enters Hub without waiting for video', () => {
+test('Host replies JOIN_ACCEPTED with hostName/currentGame/scores on JOIN_REQUEST and enters Hub without camera', () => {
   const statuses: string[] = [];
-  const sentTypes: string[] = [];
+  const sentMessages: Array<{ type: string; hostName?: string; currentGame?: string; scores?: Record<string, number> }> = [];
   const svc = new DuoPeerService({
+    getHostRoomState: () => ({ currentGame: 'music-quiz', scores: { musicQuizBestScore: 18 } }),
     onStatusChange: (s) => statuses.push(s),
     onRemoteStream: () => {},
     onMessage: () => {},
@@ -190,18 +202,22 @@ test('Host replies JOIN_WELCOME immediately on JOIN_HELLO and enters Hub without
   internal.startHeartbeat = () => {};
   internal.dataConn = {
     open: true,
-    send: (m) => sentTypes.push(m.type),
+    send: (m) => sentMessages.push(m as { type: string; hostName?: string; currentGame?: string; scores?: Record<string, number> }),
   };
 
   internal.handleIncomingPeerMessage(
-    { type: 'JOIN_HELLO', code: 'A7K4', name: 'Léa', hasStream: false },
+    { type: 'JOIN_REQUEST', code: 'A7K4', name: 'Léa', hasStream: false },
     internal.sessionGen,
     'peerjs',
     'guest-peer-1',
   );
 
   assert.equal(internal.hasEnteredRoom, true);
-  assert.ok(sentTypes.includes('JOIN_WELCOME'));
+  const accepted = sentMessages.find((m) => m.type === 'JOIN_ACCEPTED');
+  assert.ok(accepted, 'Host should reply with JOIN_ACCEPTED');
+  assert.equal(accepted?.hostName, 'Alex');
+  assert.equal(accepted?.currentGame, 'music-quiz');
+  assert.deepEqual(accepted?.scores, { musicQuizBestScore: 18 });
   assert.ok(statuses.includes('connected'));
 });
 

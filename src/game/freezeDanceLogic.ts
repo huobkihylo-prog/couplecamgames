@@ -8,7 +8,80 @@ import type {
   FreezeDanceState,
   FreezeDanceVerdict,
   FreezeDanceVibe,
+  FreezeLandmarkAnchor,
 } from '../types/duoplay';
+
+/** 0.6s braking grace period right after the music cuts before locking baseline pose */
+export const FREEZE_GRACE_MS = 600;
+/** Normalized landmark micro-jitter deadzone ignored so natural webcam noise never false-triggers */
+export const FREEZE_MOTION_DEADZONE = 0.015;
+/** Fair normalized displacement threshold that triggers automatic "MOVED!" detection */
+export const FREEZE_MOTION_THRESHOLD = 0.056;
+/** Require 2 consecutive frames over threshold to eliminate single-frame landmark spikes */
+export const FREEZE_SUSTAINED_FRAMES_REQUIRED = 2;
+
+export interface FreezeMotionEvaluation {
+  delta: number;
+  stability: number; // 0..100
+  violationFrames: number;
+  caught: boolean;
+}
+
+/**
+ * Pure scale-normalized MediaPipe landmark displacement between baseline statue pose
+ * and live camera frame. Combines nose, eyes, chin translation and head roll tilt.
+ */
+export function computeFreezeLandmarkDelta(
+  baseline: FreezeLandmarkAnchor,
+  current: FreezeLandmarkAnchor,
+): number {
+  const noseDist = Math.hypot(current.noseX - baseline.noseX, current.noseY - baseline.noseY);
+  const leftEyeDist = Math.hypot(
+    current.leftEyeX - baseline.leftEyeX,
+    current.leftEyeY - baseline.leftEyeY,
+  );
+  const rightEyeDist = Math.hypot(
+    current.rightEyeX - baseline.rightEyeX,
+    current.rightEyeY - baseline.rightEyeY,
+  );
+  const chinDist = Math.hypot(current.chinX - baseline.chinX, current.chinY - baseline.chinY);
+  const tiltDelta = Math.abs(current.headTiltRad - baseline.headTiltRad) * 0.22;
+
+  const baseEyeSpan = Math.max(
+    0.05,
+    Math.hypot(baseline.rightEyeX - baseline.leftEyeX, baseline.rightEyeY - baseline.leftEyeY),
+  );
+  // Gentle distance-from-camera normalization so closer/farther players face the same fair bar
+  const normFactor = Math.min(1.55, Math.max(0.68, 0.14 / baseEyeSpan));
+
+  const meanPointDelta = (noseDist * 1.2 + leftEyeDist + rightEyeDist + chinDist * 0.8) / 4;
+  return meanPointDelta * normFactor + tiltDelta;
+}
+
+/**
+ * Evaluates live stability (0..100%) and automatic "MOVED!" detection with jitter deadzone
+ * and sustained-frame anti-glitch protection.
+ */
+export function evaluateFreezeMotion(
+  baseline: FreezeLandmarkAnchor,
+  current: FreezeLandmarkAnchor,
+  prevViolationFrames = 0,
+): FreezeMotionEvaluation {
+  const delta = computeFreezeLandmarkDelta(baseline, current);
+  const effective = Math.max(0, delta - FREEZE_MOTION_DEADZONE);
+  const span = Math.max(0.001, FREEZE_MOTION_THRESHOLD - FREEZE_MOTION_DEADZONE);
+  const stability = Math.round(Math.max(0, Math.min(100, (1 - effective / span) * 100)));
+
+  const violationFrames = delta >= FREEZE_MOTION_THRESHOLD ? prevViolationFrames + 1 : 0;
+  const caught = violationFrames >= FREEZE_SUSTAINED_FRAMES_REQUIRED;
+
+  return {
+    delta,
+    stability,
+    violationFrames,
+    caught,
+  };
+}
 
 export interface FreezeVibeSpec {
   id: FreezeDanceVibe;

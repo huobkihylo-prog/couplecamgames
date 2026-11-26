@@ -18,17 +18,21 @@ import type {
   FreezeDanceState,
   FreezeDanceVerdict,
   FreezeDanceVibe,
+  FreezeLandmarkAnchor,
   PeerMessage,
 } from '../types/duoplay';
 import {
   cancelPendingItunesJsonp,
+  DEFAULT_AUDIO_VOLUME,
   loadCategoryTracksJsonp,
   SharedMusicAudioPlayer,
   type ItunesTrack,
 } from '../services/itunesAudioEngine';
 import {
   createInitialFreezeState,
+  evaluateFreezeMotion,
   FREEZE_DANCE_VIBES,
+  FREEZE_GRACE_MS,
   FREEZE_HOLD_MS,
   FREEZE_VERDICT_MAX_MS,
   getFreezeVibeSpec,
@@ -38,6 +42,8 @@ import {
 import { useI18n } from '../i18n/LanguageContext';
 import { soundFx } from '../utils/soundFx';
 import { AvatarCanvas } from './AvatarCanvas';
+
+type FreezeStabilityStatus = 'idle' | 'grace' | 'tracking' | 'caught' | 'no-cam';
 
 interface FreezeDanceGameViewProps {
   localName: string;
@@ -75,6 +81,8 @@ function FreezeCameraCard({
   format,
   lives,
   points,
+  stability,
+  freezeStatus,
   onRequestCamera,
 }: {
   name: string;
@@ -87,6 +95,8 @@ function FreezeCameraCard({
   format: FreezeDanceFormat;
   lives: number;
   points: number;
+  stability: number;
+  freezeStatus: FreezeStabilityStatus;
   onRequestCamera?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -105,8 +115,13 @@ function FreezeCameraCard({
     }
   }, [stream, showLive]);
 
-  const frameRing =
-    phase === 'FREEZE'
+  const isCaught = freezeStatus === 'caught' && (phase === 'FREEZE' || phase === 'VERDICT');
+  const showStabilityMeter =
+    phase === 'FREEZE' || (phase === 'VERDICT' && freezeStatus === 'caught');
+
+  const frameRing = isCaught
+    ? 'border-[#EF4444] ring-4 ring-[#EF4444]/55 shadow-[0_8px_28px_rgba(239,68,68,0.32)]'
+    : phase === 'FREEZE'
       ? 'border-[#0EA5E9] ring-2 ring-[#38BDF8]/55 shadow-[0_8px_24px_rgba(14,165,233,0.18)]'
       : phase === 'DANCING'
         ? isLocal
@@ -114,9 +129,19 @@ function FreezeCameraCard({
           : 'border-[#7C5CFC] ring-2 ring-[#7C5CFC]/35 shadow-[0_8px_24px_rgba(124,92,252,0.16)]'
         : 'border-[#EAE4DC]';
 
+  const meterBarColor = isCaught
+    ? 'bg-[#EF4444]'
+    : freezeStatus === 'grace'
+      ? 'bg-[#38BDF8]'
+      : stability >= 65
+        ? 'bg-[#22C55E]'
+        : stability >= 35
+          ? 'bg-[#F59E0B]'
+          : 'bg-[#EF4444]';
+
   return (
     <div
-      className={`relative w-full h-full min-h-0 rounded-3xl overflow-hidden bg-white border-2 shadow-[0_6px_22px_rgba(31,36,45,0.08)] transition-all duration-300 ${frameRing}`}
+      className={`relative w-full h-full min-h-0 rounded-3xl overflow-hidden bg-white border-2 shadow-[0_6px_22px_rgba(31,36,45,0.08)] transition-all duration-200 ${frameRing}`}
     >
       {showLive ? (
         <video
@@ -146,8 +171,8 @@ function FreezeCameraCard({
         </div>
       )}
 
-      {/* Icy frost frame overlay during FREEZE */}
-      {phase === 'FREEZE' && (
+      {/* Icy frost frame overlay during FREEZE (turns red immediately when caught moving!) */}
+      {phase === 'FREEZE' && !isCaught && (
         <div
           className="pointer-events-none absolute inset-0 border-[5px] border-[#38BDF8]/65 rounded-3xl"
           style={{
@@ -155,6 +180,23 @@ function FreezeCameraCard({
           }}
           aria-hidden="true"
         />
+      )}
+
+      {isCaught && (
+        <>
+          <div
+            className="pointer-events-none absolute inset-0 border-[5px] border-[#EF4444]/85 rounded-3xl bg-[#EF4444]/15"
+            aria-hidden="true"
+          />
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-2">
+            <span
+              data-testid={isLocal ? 'freeze-caught-local' : 'freeze-caught-partner'}
+              className="px-4 py-1.5 rounded-full bg-[#EF4444] text-white font-black text-sm sm:text-lg tracking-wide shadow-[0_8px_24px_rgba(239,68,68,0.55)] border-2 border-white animate-bounce"
+            >
+              🚨 MOVED!
+            </span>
+          </div>
+        </>
       )}
 
       {/* Top overlay: Lives or Points */}
@@ -184,6 +226,53 @@ function FreezeCameraCard({
           )}
         </div>
       </div>
+
+      {/* Subtle Live MediaPipe Stability Meter bar during FREEZE */}
+      {showStabilityMeter && (
+        <div
+          data-testid={isLocal ? 'freeze-stability-local' : 'freeze-stability-partner'}
+          className={`pointer-events-none absolute bottom-2.5 start-2.5 ${
+            !showLive && isLocal && onRequestCamera ? 'end-40' : 'end-2.5'
+          } rounded-2xl bg-white/90 backdrop-blur-md border border-[#EAE4DC] px-2.5 py-1.5 shadow-xs space-y-1`}
+        >
+          <div className="flex items-center justify-between gap-2 text-[10px] sm:text-[11px] font-extrabold leading-none">
+            <span className={isCaught ? 'text-[#DC2626]' : 'text-[#1F242D]'}>
+              {isCaught
+                ? '🚨 MOVED!'
+                : freezeStatus === 'grace'
+                  ? '⏳ Freinage...'
+                  : freezeStatus === 'no-cam'
+                    ? '📷 Mode manuel'
+                    : '🎯 Stabilité'}
+            </span>
+            {freezeStatus !== 'no-cam' && (
+              <span
+                className={`tabular-nums ${
+                  isCaught ? 'text-[#DC2626]' : 'text-[#5A6270]'
+                }`}
+              >
+                {freezeStatus === 'grace' ? '0.6s' : `${stability}%`}
+              </span>
+            )}
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-[#EAE4DC] overflow-hidden">
+            <div
+              className={`h-full w-full origin-left rounded-full ${meterBarColor}`}
+              style={{
+                transform: `scaleX(${
+                  freezeStatus === 'no-cam'
+                    ? 1
+                    : freezeStatus === 'grace'
+                      ? 1
+                      : Math.max(0.02, stability / 100)
+                })`,
+                transition: 'transform 90ms linear, background-color 150ms ease',
+                willChange: 'transform',
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Local Camera Enable Fallback Button */}
       {!showLive && isLocal && onRequestCamera && (
@@ -231,17 +320,25 @@ export function FreezeDanceGameView({
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [freezeFlashKey, setFreezeFlashKey] = useState(0);
+  const [caughtRedFlashKey, setCaughtRedFlashKey] = useState(0);
+  const [localStability, setLocalStability] = useState(100);
+  const [localFreezeStatus, setLocalFreezeStatus] = useState<FreezeStabilityStatus>('idle');
+  const [partnerStability, setPartnerStability] = useState(100);
+  const [partnerFreezeStatus, setPartnerFreezeStatus] = useState<FreezeStabilityStatus>('idle');
   const [freezeCountdownSec, setFreezeCountdownSec] = useState(4);
   const [verdictCountdownSec, setVerdictCountdownSec] = useState(6);
   const [localVoted, setLocalVoted] = useState<FreezeDanceVerdict | null>(null);
 
   const audioPlayerRef = useRef<SharedMusicAudioPlayer | null>(null);
   const tracksPoolRef = useRef<ItunesTrack[]>([]);
+  const failedPreviewUrlsRef = useRef<Set<string>>(new Set());
   const trackCursorRef = useRef(0);
   const hostVoteRef = useRef<FreezeDanceVerdict | null>(null);
   const guestVoteRef = useRef<FreezeDanceVerdict | null>(null);
+  const autoCaughtRef = useRef<{ host: boolean; guest: boolean }>({ host: false, guest: false });
   const verdictResolvedRef = useRef(false);
   const mountedRef = useRef(true);
+  const handleTrackFailedRef = useRef<(failedUrl: string) => void>(() => {});
 
   const danceTimeoutRef = useRef<number | null>(null);
   const freezeTimeoutRef = useRef<number | null>(null);
@@ -272,6 +369,7 @@ export function FreezeDanceGameView({
     }
   }, []);
 
+  // Single persistent HTMLAudioElement controller (never recreated on re-renders)
   if (!audioPlayerRef.current) {
     audioPlayerRef.current = new SharedMusicAudioPlayer({
       onPlayingChange: (playing) => {
@@ -279,6 +377,9 @@ export function FreezeDanceGameView({
       },
       onAutoplayBlocked: (blocked) => {
         if (mountedRef.current) setAutoplayBlocked(blocked);
+      },
+      onTrackFailed: (failedUrl) => {
+        if (mountedRef.current) handleTrackFailedRef.current(failedUrl);
       },
     });
   }
@@ -297,7 +398,7 @@ export function FreezeDanceGameView({
     document.body.dataset.state = mapped;
   }, [state.phase]);
 
-  // Strict cleanup on unmount / switching game (NEVER stops PeerJS MediaStream tracks)
+  // Strict cleanup ONLY on unmount / switching game (NEVER stops PeerJS MediaStream tracks)
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -307,6 +408,173 @@ export function FreezeDanceGameView({
       audioPlayerRef.current?.stopAndCleanup();
     };
   }, [clearAllTimers]);
+
+  // Dedicated audio playback effect: triggers ONLY when (roundKey, previewUrl) changes during DANCING.
+  // NEVER re-triggers on countdowns, votes, scores, or unrelated React re-renders!
+  const activeDanceAudioKey =
+    state.phase === 'DANCING' && state.currentPreviewUrl
+      ? `${state.round}-${state.phaseStartedAt}`
+      : '';
+  const activeDancePreviewUrl = state.phase === 'DANCING' ? state.currentPreviewUrl : '';
+
+  useEffect(() => {
+    if (!activeDanceAudioKey || !activeDancePreviewUrl) return;
+    void audioPlayerRef.current?.playTrack(activeDancePreviewUrl, {
+      volume: DEFAULT_AUDIO_VOLUME,
+      loop: true,
+    });
+  }, [activeDanceAudioKey, activeDancePreviewUrl]);
+
+  // Reset MediaPipe Freeze stability telemetry when entering DANCING or LOBBY
+  useEffect(() => {
+    if (state.phase === 'DANCING' || state.phase === 'LOBBY' || state.phase === 'GAME_OVER') {
+      autoCaughtRef.current = { host: false, guest: false };
+      setLocalStability(100);
+      setLocalFreezeStatus('idle');
+      setPartnerStability(100);
+      setPartnerFreezeStatus('idle');
+    }
+  }, [state.phase, state.round]);
+
+  // Real-time MediaPipe FaceLandmarker motion detection during FREEZE!
+  // Waits 0.6s braking grace period, captures baseline face landmarks, updates live Stability Meter,
+  // and triggers automatic "🚨 MOVED!" with red flash + buzzer + PeerJS sync if movement exceeds threshold.
+  useEffect(() => {
+    if (state.phase !== 'FREEZE') return;
+
+    const currentRound = state.round;
+    const hasLocalCam = Boolean(localStream) && cameraEnabled;
+    const freezeStartedAt = performance.now();
+
+    let cancelled = false;
+    let rafId = 0;
+    let baseline: FreezeLandmarkAnchor | null = null;
+    let lastMetricTs = 0;
+    let violationFrames = 0;
+    let localCaught = false;
+    let lastBroadcastAt = 0;
+    let lastShownStability = 100;
+
+    if (hasLocalCam) {
+      setLocalFreezeStatus('grace');
+      setLocalStability(100);
+      if (!isSolo) {
+        onSendPeerMessage({
+          type: 'FREEZE_STABILITY',
+          round: currentRound,
+          stability: 100,
+          status: 'grace',
+        });
+      }
+    } else {
+      setLocalFreezeStatus('no-cam');
+      setLocalStability(100);
+      if (!isSolo) {
+        onSendPeerMessage({
+          type: 'FREEZE_STABILITY',
+          round: currentRound,
+          stability: 100,
+          status: 'no-cam',
+        });
+      }
+    }
+
+    if (isSolo) {
+      setPartnerFreezeStatus('grace');
+      setPartnerStability(100);
+    }
+
+    const tick = (now: number) => {
+      if (cancelled) return;
+      const elapsed = now - freezeStartedAt;
+
+      // Subtle simulated statue stability for Solo AI partner Camille
+      if (isSolo && elapsed >= FREEZE_GRACE_MS) {
+        setPartnerFreezeStatus((prev) => (prev === 'caught' ? 'caught' : 'tracking'));
+        if (now - lastBroadcastAt >= 180) {
+          const aiWave = Math.round(92 + Math.sin(now * 0.008) * 5);
+          setPartnerStability(aiWave);
+        }
+      }
+
+      if (hasLocalCam && !localCaught) {
+        if (elapsed >= FREEZE_GRACE_MS) {
+          const metrics = localMetricsRef.current;
+          const anchor = metrics.faceDetected ? metrics.faceAnchor ?? null : null;
+
+          if (!baseline) {
+            if (anchor) {
+              baseline = { ...anchor };
+              lastMetricTs = metrics.timestamp;
+              setLocalFreezeStatus('tracking');
+              setLocalStability(100);
+              if (!isSolo) {
+                onSendPeerMessage({
+                  type: 'FREEZE_STABILITY',
+                  round: currentRound,
+                  stability: 100,
+                  status: 'tracking',
+                });
+                lastBroadcastAt = now;
+              }
+            }
+          } else if (anchor && metrics.timestamp !== lastMetricTs) {
+            lastMetricTs = metrics.timestamp;
+            const evalRes = evaluateFreezeMotion(baseline, anchor, violationFrames);
+            violationFrames = evalRes.violationFrames;
+
+            if (evalRes.caught) {
+              localCaught = true;
+              const caughtPlayer = isHost ? 'host' : 'guest';
+              autoCaughtRef.current[caughtPlayer] = true;
+              setLocalFreezeStatus('caught');
+              setLocalStability(0);
+              setCaughtRedFlashKey((k) => k + 1);
+              soundFx.quizWrongBuzzer();
+
+              if (!isSolo) {
+                onSendPeerMessage({
+                  type: 'FREEZE_STABILITY',
+                  round: currentRound,
+                  stability: 0,
+                  status: 'caught',
+                });
+                onSendPeerMessage({
+                  type: 'FREEZE_AUTO_CAUGHT',
+                  round: currentRound,
+                  player: caughtPlayer,
+                });
+              }
+            } else {
+              if (Math.abs(evalRes.stability - lastShownStability) >= 2) {
+                lastShownStability = evalRes.stability;
+                setLocalStability(evalRes.stability);
+              }
+              if (!isSolo && now - lastBroadcastAt >= 100) {
+                lastBroadcastAt = now;
+                onSendPeerMessage({
+                  type: 'FREEZE_STABILITY',
+                  round: currentRound,
+                  stability: evalRes.stability,
+                  status: 'tracking',
+                });
+              }
+            }
+          }
+        }
+      } else if (isSolo && now - lastBroadcastAt >= 180) {
+        lastBroadcastAt = now;
+      }
+
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      if (rafId) window.cancelAnimationFrame(rafId);
+    };
+  }, [state.phase, state.round, localStream, cameraEnabled, isHost, isSolo, localMetricsRef, onSendPeerMessage]);
 
   const broadcastState = useCallback(
     (next: FreezeDanceState) => {
@@ -419,8 +687,21 @@ export function FreezeDanceGameView({
       setLocalVoted(null);
 
       const pool = tracksPoolRef.current;
-      const track = pool.length > 0 ? pool[trackCursorRef.current % pool.length] : null;
-      trackCursorRef.current += 1;
+      let track: ItunesTrack | null = null;
+      if (pool.length > 0) {
+        for (let step = 0; step < pool.length; step += 1) {
+          const candidate = pool[(trackCursorRef.current + step) % pool.length];
+          if (!failedPreviewUrlsRef.current.has(candidate.previewUrl)) {
+            track = candidate;
+            trackCursorRef.current = (trackCursorRef.current + step + 1) % pool.length;
+            break;
+          }
+        }
+        if (!track) {
+          track = pool[trackCursorRef.current % pool.length];
+          trackCursorRef.current += 1;
+        }
+      }
 
       const danceDurationMs = pickRandomDanceDurationMs();
       const prev = baseState ?? stateRef.current;
@@ -456,13 +737,6 @@ export function FreezeDanceGameView({
         });
       }
 
-      if (nextState.currentPreviewUrl) {
-        void audioPlayerRef.current?.playTrack(nextState.currentPreviewUrl, {
-          volume: 0.92,
-          loop: true,
-        });
-      }
-
       // Schedule sudden unpredictable FREEZE cut (4s..10s)
       danceTimeoutRef.current = window.setTimeout(() => {
         if (!mountedRef.current) return;
@@ -486,6 +760,16 @@ export function FreezeDanceGameView({
         // After 4s of FREEZE, transition to Verdict & Laughs
         freezeTimeoutRef.current = window.setTimeout(() => {
           if (!mountedRef.current) return;
+
+          // Apply any MediaPipe automatic "MOVED!" detections into verdicts while keeping manual fallback!
+          const caught = autoCaughtRef.current;
+          if (isSolo && caught.host) {
+            hostVoteRef.current = 'moved';
+          } else if (!isSolo) {
+            if (caught.guest) hostVoteRef.current = 'moved';
+            if (caught.host) guestVoteRef.current = 'moved';
+          }
+
           const verdictState: FreezeDanceState = {
             ...stateRef.current,
             phase: 'VERDICT',
@@ -495,10 +779,22 @@ export function FreezeDanceGameView({
           broadcastState(verdictState);
           enterVerdictPhase();
 
-          // Auto-advance verdict after 6s max
-          verdictTimeoutRef.current = window.setTimeout(() => {
-            resolveVerdictAsHostRef.current();
-          }, FREEZE_VERDICT_MAX_MS);
+          // If MediaPipe already resolved all needed verdicts automatically, show caught state briefly then resolve!
+          const fullyAutoResolved =
+            (isSolo && hostVoteRef.current !== null) ||
+            (!isSolo && hostVoteRef.current !== null && guestVoteRef.current !== null);
+
+          if (fullyAutoResolved) {
+            setLocalVoted('moved');
+            verdictTimeoutRef.current = window.setTimeout(() => {
+              resolveVerdictAsHostRef.current();
+            }, 1250);
+          } else {
+            // Manual vote fallback remains active up to 6s max
+            verdictTimeoutRef.current = window.setTimeout(() => {
+              resolveVerdictAsHostRef.current();
+            }, FREEZE_VERDICT_MAX_MS);
+          }
         }, FREEZE_HOLD_MS);
       }, danceDurationMs);
     },
@@ -514,6 +810,42 @@ export function FreezeDanceGameView({
   );
 
   startRoundAsHostRef.current = startRoundAsHost;
+
+  // Automatic anti-stall / onerror skip to the next cached track in the same vibe category
+  handleTrackFailedRef.current = (failedUrl: string) => {
+    const cur = stateRef.current;
+    if (cur.phase !== 'DANCING' || cur.currentPreviewUrl !== failedUrl) return;
+    failedPreviewUrlsRef.current.add(failedUrl);
+
+    if (!isHost) return;
+    const pool = tracksPoolRef.current;
+    const replacement = pool.find(
+      (t) => t.previewUrl !== failedUrl && !failedPreviewUrlsRef.current.has(t.previewUrl),
+    );
+    if (!replacement) return;
+
+    const swappedState: FreezeDanceState = {
+      ...cur,
+      currentTrackTitle: replacement.trackName,
+      currentTrackArtist: replacement.artistName,
+      currentPreviewUrl: replacement.previewUrl,
+      currentArtworkUrl: replacement.artworkUrlHiRes || replacement.artworkUrl,
+      phaseStartedAt: Date.now(),
+      stateSeq: cur.stateSeq + 1,
+    };
+    broadcastState(swappedState);
+    if (!isSolo) {
+      onSendPeerMessage({
+        type: 'FREEZE_PLAY',
+        round: swappedState.round,
+        previewUrl: swappedState.currentPreviewUrl,
+        artworkUrl: swappedState.currentArtworkUrl,
+        title: swappedState.currentTrackTitle,
+        artist: swappedState.currentTrackArtist,
+        startTime: swappedState.phaseStartedAt,
+      });
+    }
+  };
 
   // PeerJS incoming message handling
   useEffect(() => {
@@ -539,7 +871,26 @@ export function FreezeDanceGameView({
         }
       } else if (msg.type === 'FREEZE_PLAY') {
         if (!isHost && msg.previewUrl) {
-          void audioPlayerRef.current?.playTrack(msg.previewUrl, { volume: 0.92, loop: true });
+          // Update state if FREEZE_PLAY arrives before FREEZE_STATE; dedicated playback useEffect plays ONCE
+          const cur = stateRef.current;
+          if (
+            cur.phase !== 'DANCING' ||
+            cur.round !== msg.round ||
+            cur.currentPreviewUrl !== msg.previewUrl
+          ) {
+            const next: FreezeDanceState = {
+              ...cur,
+              phase: 'DANCING',
+              round: msg.round,
+              currentPreviewUrl: msg.previewUrl,
+              currentArtworkUrl: msg.artworkUrl,
+              currentTrackTitle: msg.title,
+              currentTrackArtist: msg.artist,
+              phaseStartedAt: msg.startTime,
+            };
+            stateRef.current = next;
+            setState(next);
+          }
         }
       } else if (msg.type === 'FREEZE_STOP') {
         if (!isHost) {
@@ -552,12 +903,36 @@ export function FreezeDanceGameView({
             resolveVerdictAsHostRef.current();
           }
         }
+      } else if (msg.type === 'FREEZE_STABILITY') {
+        if (msg.round === stateRef.current.round) {
+          setPartnerStability(msg.stability);
+          setPartnerFreezeStatus(msg.status);
+        }
+      } else if (msg.type === 'FREEZE_AUTO_CAUGHT') {
+        if (msg.round === stateRef.current.round) {
+          autoCaughtRef.current[msg.player] = true;
+          const partnerRole = isHost ? 'guest' : 'host';
+          if (msg.player === partnerRole) {
+            setPartnerFreezeStatus('caught');
+            setPartnerStability(0);
+            setCaughtRedFlashKey((k) => k + 1);
+            soundFx.quizWrongBuzzer();
+          }
+          if (isHost && stateRef.current.phase === 'VERDICT') {
+            if (msg.player === 'guest') hostVoteRef.current = 'moved';
+            if (msg.player === 'host') guestVoteRef.current = 'moved';
+            if (hostVoteRef.current && guestVoteRef.current) {
+              resolveVerdictAsHostRef.current();
+            }
+          }
+        }
       }
     });
     return () => registerPeerHandler(null);
   }, [clearAllTimers, enterVerdictPhase, isHost, onRecordVictory, registerPeerHandler, triggerFreezeEffects]);
 
   const handleSelectVibe = (nextVibe: FreezeDanceVibe) => {
+    audioPlayerRef.current?.unlock();
     if (!isHost) return;
     soundFx.click();
     const next = createInitialFreezeState(nextVibe, state.format);
@@ -565,6 +940,7 @@ export function FreezeDanceGameView({
   };
 
   const handleSelectFormat = (nextFormat: FreezeDanceFormat) => {
+    audioPlayerRef.current?.unlock();
     if (!isHost) return;
     soundFx.click();
     const next = createInitialFreezeState(state.vibe, nextFormat);
@@ -589,7 +965,12 @@ export function FreezeDanceGameView({
         const spec = getFreezeVibeSpec(loadingState.vibe);
         const tracks = allowSilentFallback
           ? []
-          : await loadCategoryTracksJsonp(spec.primaryTerms, spec.fallbackTerms, 10);
+          : await loadCategoryTracksJsonp(
+              spec.primaryTerms,
+              spec.fallbackTerms,
+              10,
+              `freeze:${loadingState.vibe}`,
+            );
 
         if (!mountedRef.current) return;
 
@@ -600,6 +981,7 @@ export function FreezeDanceGameView({
         }
 
         tracksPoolRef.current = tracks;
+        failedPreviewUrlsRef.current.clear();
         trackCursorRef.current = 0;
         startRoundAsHost(1, loadingState);
       } catch (err) {
@@ -695,6 +1077,15 @@ export function FreezeDanceGameView({
         <div
           key={freezeFlashKey}
           className="pointer-events-none fixed inset-0 z-50 bg-white animate-freeze-flash"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Red Alert Flash when MediaPipe automatically catches movement during FREEZE */}
+      {caughtRedFlashKey > 0 && (state.phase === 'FREEZE' || state.phase === 'VERDICT') && (
+        <div
+          key={`caught-flash-${caughtRedFlashKey}`}
+          className="pointer-events-none fixed inset-0 z-50 bg-[#EF4444]/60 animate-freeze-caught-flash"
           aria-hidden="true"
         />
       )}
@@ -952,6 +1343,8 @@ export function FreezeDanceGameView({
               format={state.format}
               lives={localLives}
               points={localPoints}
+              stability={localStability}
+              freezeStatus={localFreezeStatus}
               onRequestCamera={onRequestCamera}
             />
             <FreezeCameraCard
@@ -963,6 +1356,8 @@ export function FreezeDanceGameView({
               format={state.format}
               lives={partnerLives}
               points={partnerPoints}
+              stability={partnerStability}
+              freezeStatus={partnerFreezeStatus}
             />
           </div>
 

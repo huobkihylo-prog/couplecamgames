@@ -117,6 +117,22 @@ function CoupleCamApp() {
   const parchisiHandDiceEnabledRef = useRef(false);
   parchisiHandDiceEnabledRef.current = parchisiHandDiceEnabled;
 
+  const hostScoresRef = useRef<Record<string, number>>({});
+  hostScoresRef.current = {
+    laugh: laughMatchCount,
+    stareBestSec,
+    miamBestScore,
+    funambulesBestM,
+    ninjaBestScore,
+    airHockeyWins,
+    whisperBestHeat,
+    slingshotBestScore,
+    xoNeonWins,
+    parchisiWins,
+    musicQuizBestScore,
+    freezeDanceWins,
+  };
+
   // Refs shared across 60fps loops without triggering React re-renders
   const trackerVideoElRef = useRef<HTMLVideoElement | null>(null);
   const localVideoElRef = useRef<HTMLVideoElement | null>(null);
@@ -251,8 +267,7 @@ function CoupleCamApp() {
       screen === 'slingshot-duo' ||
       screen === 'xo-neon' ||
       screen === 'parchisi-duo' ||
-      screen === 'music-quiz' ||
-      screen === 'freeze-dance'
+      screen === 'music-quiz'
     ) {
       return;
     }
@@ -381,8 +396,7 @@ function CoupleCamApp() {
         activeScreen !== 'slingshot-duo' &&
         activeScreen !== 'xo-neon' &&
         activeScreen !== 'parchisi-duo' &&
-        activeScreen !== 'music-quiz' &&
-        activeScreen !== 'freeze-dance';
+        activeScreen !== 'music-quiz';
 
       if (needsHand) {
         const handTracker = handTrackerRef.current;
@@ -560,12 +574,18 @@ function CoupleCamApp() {
   const ensurePeerService = useCallback(() => {
     if (!peerServiceRef.current) {
       peerServiceRef.current = new DuoPeerService({
+        getHostRoomState: () => ({
+          currentGame: screenRef.current === 'lobby' ? 'hub' : screenRef.current,
+          scores: { ...hostScoresRef.current },
+        }),
         onStatusChange: (status, msg) => {
           setConnectionStatus(status);
           if (msg !== undefined) setStatusMessage(msg);
           if (status === 'connected') {
             setStatusMessage('');
-            setScreen('hub');
+            if (screenRef.current === 'lobby') {
+              setScreen('hub');
+            }
             soundFx.roundWin();
             pushToast(toastConnectedTextRef.current, 'success');
           } else if (
@@ -587,8 +607,21 @@ function CoupleCamApp() {
         onMessage: (msg) => {
           if (msg.type === 'HELLO') {
             setPartnerName(msg.name || 'Partenaire');
-          } else if (msg.type === 'JOIN_CONFIRMED' || msg.type === 'JOIN_WELCOME') {
+          } else if (
+            msg.type === 'JOIN_ACCEPTED' ||
+            msg.type === 'JOIN_CONFIRMED' ||
+            msg.type === 'JOIN_WELCOME'
+          ) {
             setPartnerName(msg.hostName || 'Hôte');
+            if (
+              msg.type === 'JOIN_ACCEPTED' &&
+              msg.currentGame &&
+              msg.currentGame !== 'lobby' &&
+              msg.currentGame !== 'hub'
+            ) {
+              pendingGameMessagesRef.current = [];
+              setScreen(msg.currentGame);
+            }
           } else if (msg.type === 'SELECT_GAME') {
             soundFx.click();
             pendingGameMessagesRef.current = [];

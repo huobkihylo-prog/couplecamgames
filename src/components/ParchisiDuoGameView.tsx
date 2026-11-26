@@ -36,7 +36,6 @@ import {
   createHandShakeState,
   createInitialParchisiState,
   getLegalParchisiMoves,
-  PARCHISI_STEP_ANIM_MS,
   PARCHISI_TURN_SECONDS,
   passParchisiTurnOrBonus,
   rollParchisiDice,
@@ -46,7 +45,7 @@ import {
 import { soundFx } from '../utils/soundFx';
 import { AvatarCanvas } from './AvatarCanvas';
 import { ParchisiBoardSvg, type FloatingReactionItem } from './ParchisiBoardSvg';
-import { ParchisiDice3D } from './ParchisiDice3D';
+import { PARCHISI_DICE_ROLL_MS, ParchisiDice3D } from './ParchisiDice3D';
 
 interface ParchisiDuoGameViewProps {
   localName: string;
@@ -305,16 +304,10 @@ export function ParchisiDuoGameView({
   stateRef.current = gameState;
 
   const [isRollingAnim, setIsRollingAnim] = useState(false);
-  const [tumbleDice, setTumbleDice] = useState<[number, number] | null>(null);
+  const [completedAnimSeq, setCompletedAnimSeq] = useState(0);
   const [selectedTokenId, setSelectedTokenId] = useState<number | null>(null);
   const [hoveredTokenId, setHoveredTokenId] = useState<number | null>(null);
   const [hoveredOption, setHoveredOption] = useState<ParchisiMoveOption | null>(null);
-  const [animOverride, setAnimOverride] = useState<{
-    color: ParchisiColor;
-    tokenId: number;
-    progress: number;
-    hopBoost: boolean;
-  } | null>(null);
   const [floatingReactions, setFloatingReactions] = useState<FloatingReactionItem[]>([]);
   const [openDrawer, setOpenDrawer] = useState<'none' | 'emoji' | 'chat'>('none');
   const [sfxMutedLocal, setSfxMutedLocal] = useState(() => soundFx.muted);
@@ -365,7 +358,6 @@ export function ParchisiDuoGameView({
   const handDetectorRef = useRef(createHandShakeState());
   const reactionIdRef = useRef(1);
   const lastRollSeqRef = useRef(0);
-  const lastAnimSeqRef = useRef(0);
   const victoryRecordedRef = useRef(false);
 
   // Attach local & remote MediaStreams cleanly into HUD avatar videos
@@ -456,94 +448,53 @@ export function ParchisiDuoGameView({
     gameState.turn === localColor &&
     (gameState.phase === 'WAIT_ROLL' || gameState.phase === 'WAIT_MOVE');
 
-  const canRollNow = isLocalTurn && gameState.phase === 'WAIT_ROLL' && !isRollingAnim && !animOverride;
+  // Synchronously detect pending move animation on Render #1 so pawns NEVER teleport before hopping!
+  const pendingMoveAnim =
+    gameState.lastMoveAnim && gameState.lastMoveAnim.seq > completedAnimSeq
+      ? gameState.lastMoveAnim
+      : null;
+  const isMoveAnimating = pendingMoveAnim !== null;
+
+  const handleMoveAnimComplete = useCallback((seq: number) => {
+    setCompletedAnimSeq((prev) => (seq > prev ? seq : prev));
+  }, []);
+
+  const handleTriggerCelebration = useCallback(() => {
+    setConfettiSeed((s) => s + 1);
+  }, []);
+
+  const canRollNow =
+    isLocalTurn && gameState.phase === 'WAIT_ROLL' && !isRollingAnim && !isMoveAnimating;
   const canInteractBoard =
     isLocalTurn &&
     gameState.phase === 'WAIT_MOVE' &&
     !isRollingAnim &&
-    !animOverride &&
+    !isMoveAnimating &&
     legalMoves.length > 0;
 
-  // Trigger dice tumbling visual + Web Audio rattle whenever rollSeq advances
+  // Trigger synchronized 3D cube dice roll duration + Web Audio rattle whenever rollSeq advances
   useEffect(() => {
-    if (gameState.rollSeq === 0 || gameState.rollSeq === lastRollSeqRef.current) return;
+    if (gameState.rollSeq === 0) {
+      lastRollSeqRef.current = 0;
+      setIsRollingAnim(false);
+      return;
+    }
+    if (gameState.rollSeq === lastRollSeqRef.current) return;
     lastRollSeqRef.current = gameState.rollSeq;
     soundFx.parchisiDiceRoll();
     setIsRollingAnim(true);
 
-    let tick = 0;
-    const tumbleInterval = window.setInterval(() => {
-      tick += 1;
-      setTumbleDice([
-        ((tick * 3 + 1) % 6) + 1,
-        ((tick * 5 + 2) % 6) + 1,
-      ]);
-    }, 65);
-
     const stopTimer = window.setTimeout(() => {
-      window.clearInterval(tumbleInterval);
-      setTumbleDice(null);
       setIsRollingAnim(false);
-      if (gameState.lastEventTone === 'warning') {
+      if (stateRef.current.lastEventTone === 'warning') {
         soundFx.parchisiCurseTripleSix();
       }
-    }, 390);
+    }, PARCHISI_DICE_ROLL_MS);
 
     return () => {
-      window.clearInterval(tumbleInterval);
       window.clearTimeout(stopTimer);
     };
-  }, [gameState.rollSeq, gameState.lastEventTone]);
-
-  // Smooth step-by-step 105ms tile hop animation + authentic Web Audio SFX
-  useEffect(() => {
-    const anim = gameState.lastMoveAnim;
-    if (!anim || anim.seq === lastAnimSeqRef.current) return;
-    lastAnimSeqRef.current = anim.seq;
-
-    if (anim.path.length === 0) return;
-
-    let stepIdx = 0;
-    let hopTimer: number | null = null;
-    let settleTimer: number | null = null;
-
-    const advanceStep = () => {
-      const prog = anim.path[stepIdx];
-      setAnimOverride({
-        color: anim.color,
-        tokenId: anim.tokenId,
-        progress: prog,
-        hopBoost: true,
-      });
-      soundFx.parchisiPawnHop(stepIdx);
-
-      stepIdx += 1;
-      if (stepIdx < anim.path.length) {
-        hopTimer = window.setTimeout(advanceStep, PARCHISI_STEP_ANIM_MS);
-      } else {
-        settleTimer = window.setTimeout(() => {
-          setAnimOverride(null);
-          if (anim.captured.length > 0) {
-            soundFx.parchisiCaptureDrama();
-            window.setTimeout(() => soundFx.parchisiBonusPowerChime(20), 210);
-          } else if (anim.reachedHome) {
-            soundFx.parchisiThroneArrival();
-            setConfettiSeed((s) => s + 1);
-            window.setTimeout(() => soundFx.parchisiBonusPowerChime(10), 220);
-          } else if (anim.landedSafe) {
-            soundFx.parchisiSafeStarChime();
-          }
-        }, PARCHISI_STEP_ANIM_MS);
-      }
-    };
-
-    advanceStep();
-
-    return () => {
-      if (hopTimer !== null) window.clearTimeout(hopTimer);
-      if (settleTimer !== null) window.clearTimeout(settleTimer);
-    };
-  }, [gameState.lastMoveAnim]);
+  }, [gameState.rollSeq]);
 
   // Record victory once + victory fanfare + confetti
   useEffect(() => {
@@ -567,7 +518,8 @@ export function ParchisiDuoGameView({
       setOpenDrawer('none');
       setNoMovesBanner(false);
       lastRollSeqRef.current = 0;
-      lastAnimSeqRef.current = 0;
+      setCompletedAnimSeq(0);
+      setIsRollingAnim(false);
       const fresh = startParchisiMatch(mode, Date.now());
       commitHostState(fresh);
       if (connectionMode === 'p2p-host') {
@@ -594,21 +546,21 @@ export function ParchisiDuoGameView({
   const handleRollDice = useCallback(() => {
     const st = stateRef.current;
     if (st.phase !== 'WAIT_ROLL' || st.turn !== localColor) return;
-    if (isRollingAnim || animOverride) return;
+    if (isRollingAnim || isMoveAnimating) return;
 
     if (isHost) {
       commitHostState(rollParchisiDice(st));
     } else {
       onSendPeerMessage({ type: 'PARCHISI_ACTION', action: 'ROLL' });
     }
-  }, [localColor, isRollingAnim, animOverride, isHost, commitHostState, onSendPeerMessage]);
+  }, [localColor, isRollingAnim, isMoveAnimating, isHost, commitHostState, onSendPeerMessage]);
 
   // Execute a chosen move option
   const handleExecuteMove = useCallback(
     (move: ParchisiMoveOption) => {
       const st = stateRef.current;
       if (st.phase !== 'WAIT_MOVE' || st.turn !== localColor) return;
-      if (isRollingAnim || animOverride) return;
+      if (isRollingAnim || isMoveAnimating) return;
 
       setSelectedTokenId(null);
       setHoveredTokenId(null);
@@ -625,7 +577,7 @@ export function ParchisiDuoGameView({
         });
       }
     },
-    [localColor, isRollingAnim, animOverride, isHost, commitHostState, onSendPeerMessage],
+    [localColor, isRollingAnim, isMoveAnimating, isHost, commitHostState, onSendPeerMessage],
   );
 
   // Token click: immediately execute if only 1 move option applies, else open crisp floating move picker
@@ -671,6 +623,13 @@ export function ParchisiDuoGameView({
   useEffect(() => {
     registerPeerHandler((msg) => {
       if (msg.type === 'PARCHISI_STATE' && !isHost) {
+        if (msg.state.lastMoveAnim === null) {
+          setCompletedAnimSeq(0);
+        }
+        if (msg.state.rollSeq === 0) {
+          lastRollSeqRef.current = 0;
+          setIsRollingAnim(false);
+        }
         stateRef.current = msg.state;
         setGameState(msg.state);
         setSelectedTokenId(null);
@@ -708,7 +667,7 @@ export function ParchisiDuoGameView({
 
   // Host Auto-Skip: if active player has 0 legal moves during WAIT_MOVE, show "No legal moves" for 1.1s & advance
   useEffect(() => {
-    if (gameState.phase !== 'WAIT_MOVE' || isRollingAnim || animOverride) {
+    if (gameState.phase !== 'WAIT_MOVE' || isRollingAnim || isMoveAnimating) {
       setNoMovesBanner(false);
       return;
     }
@@ -726,11 +685,11 @@ export function ParchisiDuoGameView({
     }, 1000);
 
     return () => window.clearTimeout(timer);
-  }, [gameState.phase, gameState.stateSeq, legalMoves.length, isRollingAnim, animOverride, isHost, commitHostState]);
+  }, [gameState.phase, gameState.stateSeq, legalMoves.length, isRollingAnim, isMoveAnimating, isHost, commitHostState]);
 
   // Host Smart AI Loop (~700ms natural pacing for Yellow AI in Solo & Blue/Green AI in 4-Player)
   useEffect(() => {
-    if (!isHost || isRollingAnim || animOverride) return;
+    if (!isHost || isRollingAnim || isMoveAnimating) return;
     if (!isBotTurn(gameState)) return;
 
     if (gameState.phase === 'WAIT_ROLL') {
@@ -760,7 +719,7 @@ export function ParchisiDuoGameView({
     gameState,
     legalMoves.length,
     isRollingAnim,
-    animOverride,
+    isMoveAnimating,
     isBotTurn,
     commitHostState,
   ]);
@@ -778,7 +737,7 @@ export function ParchisiDuoGameView({
       const rem = Math.max(0, PARCHISI_TURN_SECONDS - elapsedSec);
       setTurnSecondsLeft(rem);
 
-      if (rem <= 0 && isHost && !isRollingAnim && !animOverride) {
+      if (rem <= 0 && isHost && !isRollingAnim && !isMoveAnimating) {
         const cur = stateRef.current;
         if (cur.phase === 'WAIT_ROLL') {
           commitHostState(rollParchisiDice(cur));
@@ -803,7 +762,7 @@ export function ParchisiDuoGameView({
     gameState.stateSeq,
     isHost,
     isRollingAnim,
-    animOverride,
+    isMoveAnimating,
     commitHostState,
   ]);
 
@@ -855,7 +814,7 @@ export function ParchisiDuoGameView({
     [gameState.tokens],
   );
 
-  const displayedDice = isRollingAnim && tumbleDice ? tumbleDice : gameState.dice;
+  const displayedDice = gameState.dice;
   const activeBonus = gameState.pendingBonuses[0] ?? null;
   const turnFrac = turnSecondsLeft / PARCHISI_TURN_SECONDS;
   const isTopTurn = gameState.turn === 'yellow' || gameState.turn === 'blue';
@@ -925,6 +884,7 @@ export function ParchisiDuoGameView({
                   dice={displayedDice}
                   usedDice={gameState.usedDice}
                   pendingBonus={activeBonus}
+                  rollSeq={gameState.rollSeq}
                   rolling={isRollingAnim}
                   shakeIntensity={0}
                   canRoll={false}
@@ -966,6 +926,7 @@ export function ParchisiDuoGameView({
               dice={displayedDice}
               usedDice={gameState.usedDice}
               pendingBonus={activeBonus}
+              rollSeq={gameState.rollSeq}
               rolling={isRollingAnim}
               shakeIntensity={localColor === 'yellow' ? shakeIntensity : 0}
               canRoll={localColor === 'yellow' && canRollNow}
@@ -1002,7 +963,9 @@ export function ParchisiDuoGameView({
             canInteract={canInteractBoard}
             selectedTokenId={selectedTokenId}
             hoveredMove={activeHoveredMove}
-            animOverride={animOverride}
+            pendingMoveAnim={pendingMoveAnim}
+            onMoveAnimComplete={handleMoveAnimComplete}
+            onTriggerCelebration={handleTriggerCelebration}
             floatingReactions={floatingReactions}
             baseCamsEnabled={baseCamsEnabled}
             redBaseStream={redBaseStream}
@@ -1214,6 +1177,7 @@ export function ParchisiDuoGameView({
               dice={gameState.phase === 'READY' ? [5, 6] : displayedDice}
               usedDice={gameState.usedDice}
               pendingBonus={activeBonus}
+              rollSeq={gameState.rollSeq}
               rolling={isRollingAnim}
               shakeIntensity={localColor === 'red' ? shakeIntensity : 0}
               canRoll={localColor === 'red' && canRollNow}
@@ -1235,6 +1199,7 @@ export function ParchisiDuoGameView({
                   dice={displayedDice}
                   usedDice={gameState.usedDice}
                   pendingBonus={activeBonus}
+                  rollSeq={gameState.rollSeq}
                   rolling={isRollingAnim}
                   shakeIntensity={0}
                   canRoll={false}

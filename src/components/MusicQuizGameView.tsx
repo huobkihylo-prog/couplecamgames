@@ -24,11 +24,14 @@ import type {
 } from '../types/duoplay';
 import {
   cancelPendingItunesJsonp,
+  DEFAULT_AUDIO_VOLUME,
   loadCategoryTracksJsonp,
   SharedMusicAudioPlayer,
+  type ItunesTrack,
 } from '../services/itunesAudioEngine';
 import {
   buildQuizRoundsFromTracks,
+  buildSingleQuizRoundFromTrack,
   EMERGENCY_QUIZ_FALLBACK_TRACKS,
   getQuizCategorySpec,
   MUSIC_QUIZ_CATEGORIES,
@@ -175,8 +178,10 @@ export function MusicQuizGameView({
   const [loadingMessage, setLoadingMessage] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Refs for timers, host authoritative rounds, and audio player
+  // Refs for timers, host authoritative rounds, cached tracks, and persistent audio player
   const audioPlayerRef = useRef<SharedMusicAudioPlayer | null>(null);
+  const categoryTracksRef = useRef<ItunesTrack[]>([]);
+  const failedPreviewUrlsRef = useRef<Set<string>>(new Set());
   const roundsQueueRef = useRef<MusicQuizRoundPayload[]>([]);
   const roundIndexRef = useRef(0);
   const roundStartedPerfRef = useRef(0);
@@ -188,6 +193,7 @@ export function MusicQuizGameView({
   phaseRef.current = phase;
   const currentRoundRef = useRef<MusicQuizRoundPayload | null>(null);
   currentRoundRef.current = currentRound;
+  const handleTrackFailedRef = useRef<(failedUrl: string) => void>(() => {});
 
   const countdownIntervalRef = useRef<number | null>(null);
   const revealTimeoutRef = useRef<number | null>(null);
@@ -214,7 +220,7 @@ export function MusicQuizGameView({
     }
   }, []);
 
-  // Initialize dedicated native HTML5 <audio> controller once
+  // Single persistent HTMLAudioElement controller (created once, never recreated on re-renders)
   if (!audioPlayerRef.current) {
     audioPlayerRef.current = new SharedMusicAudioPlayer({
       onPlayingChange: (playing) => {
@@ -222,6 +228,9 @@ export function MusicQuizGameView({
       },
       onAutoplayBlocked: (blocked) => {
         if (mountedRef.current) setAutoplayBlocked(blocked);
+      },
+      onTrackFailed: (failedUrl) => {
+        if (mountedRef.current) handleTrackFailedRef.current(failedUrl);
       },
     });
   }
@@ -265,6 +274,23 @@ export function MusicQuizGameView({
   const launchRoundRef = useRef<(roundIdx: number) => void>(() => {});
   const finalizeRoundAsHostRef = useRef<() => void>(() => {});
 
+  // Dedicated audio playback effect: triggers ONLY when (roundKey, previewUrl) changes.
+  // NEVER depends on timeLeftSec, scores, or button state so music is NEVER interrupted!
+  const activeAudioRoundKey = currentRound ? `${currentRound.round}-${currentRound.startTime}` : '';
+  const activeAudioPreviewUrl = currentRound?.previewUrl ?? '';
+
+  useEffect(() => {
+    if (!activeAudioRoundKey || !activeAudioPreviewUrl) {
+      setIsAudioPlaying(false);
+      setAutoplayBlocked(false);
+      return;
+    }
+    void audioPlayerRef.current?.playTrack(activeAudioPreviewUrl, {
+      volume: DEFAULT_AUDIO_VOLUME,
+      loop: false,
+    });
+  }, [activeAudioRoundKey, activeAudioPreviewUrl]);
+
   const startRoundUiAndAudio = useCallback(
     (payload: MusicQuizRoundPayload) => {
       clearAllTimers();
@@ -279,13 +305,6 @@ export function MusicQuizGameView({
       setRevealInfo(null);
       setTimeLeftSec(MUSIC_QUIZ_ROUND_SECONDS);
       setPhase('PLAYING');
-
-      if (payload.previewUrl) {
-        void audioPlayerRef.current?.playTrack(payload.previewUrl, { volume: 0.9, loop: false });
-      } else {
-        setIsAudioPlaying(false);
-        setAutoplayBlocked(false);
-      }
 
       // Smooth 15s countdown bar tick (every 100ms)
       countdownIntervalRef.current = window.setInterval(() => {
@@ -409,6 +428,37 @@ export function MusicQuizGameView({
 
   launchRoundRef.current = launchRoundAsHost;
 
+  // Automatic anti-stall / onerror skip to the next cached track in the same category
+  handleTrackFailedRef.current = (failedUrl: string) => {
+    if (phaseRef.current !== 'PLAYING' || !currentRoundRef.current) return;
+    if (currentRoundRef.current.previewUrl !== failedUrl) return;
+    failedPreviewUrlsRef.current.add(failedUrl);
+
+    if (!isHost) return;
+    const pool = categoryTracksRef.current;
+    const usedUrls = new Set(roundsQueueRef.current.map((r) => r.previewUrl));
+    const replacement =
+      pool.find(
+        (t) =>
+          t.previewUrl !== failedUrl &&
+          !failedPreviewUrlsRef.current.has(t.previewUrl) &&
+          !usedUrls.has(t.previewUrl),
+      ) ??
+      pool.find((t) => t.previewUrl !== failedUrl && !failedPreviewUrlsRef.current.has(t.previewUrl));
+
+    if (!replacement) return;
+
+    const currentIdx = roundIndexRef.current;
+    const replacementRound = buildSingleQuizRoundFromTrack(
+      replacement,
+      pool,
+      currentRoundRef.current.round,
+      currentRoundRef.current.totalRounds,
+    );
+    roundsQueueRef.current[currentIdx] = replacementRound;
+    launchRoundRef.current(currentIdx);
+  };
+
   // Register PeerJS handler
   useEffect(() => {
     registerPeerHandler((msg) => {
@@ -482,6 +532,7 @@ export function MusicQuizGameView({
   }, [clearAllTimers, isHost, onRecordScore, registerPeerHandler, startRoundUiAndAudio]);
 
   const handleSelectCategory = (nextCat: MusicQuizCategory) => {
+    audioPlayerRef.current?.unlock();
     if (!isHost) return;
     soundFx.click();
     setCategory(nextCat);
@@ -491,6 +542,7 @@ export function MusicQuizGameView({
   };
 
   const handleSelectDuration = (nextDur: MusicQuizDuration) => {
+    audioPlayerRef.current?.unlock();
     if (!isHost) return;
     soundFx.click();
     setTotalRounds(nextDur);
@@ -513,7 +565,12 @@ export function MusicQuizGameView({
       try {
         let tracks = useOfflineFallback ? [...EMERGENCY_QUIZ_FALLBACK_TRACKS] : [];
         if (!useOfflineFallback) {
-          tracks = await loadCategoryTracksJsonp(spec.primaryTerms, spec.fallbackTerms, Math.max(12, totalRounds + 4));
+          tracks = await loadCategoryTracksJsonp(
+            spec.primaryTerms,
+            spec.fallbackTerms,
+            Math.max(12, totalRounds + 4),
+            `quiz:${category}`,
+          );
         }
 
         if (!mountedRef.current) return;
@@ -534,6 +591,8 @@ export function MusicQuizGameView({
           return;
         }
 
+        categoryTracksRef.current = tracks;
+        failedPreviewUrlsRef.current.clear();
         roundsQueueRef.current = rounds;
         roundIndexRef.current = 0;
         hostScoreRef.current = 0;

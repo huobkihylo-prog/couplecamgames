@@ -58,8 +58,22 @@ export interface FaceMetrics {
   isKissing: boolean;
   /** Whether a face is currently detected in the camera feed */
   faceDetected: boolean;
+  /** Raw MediaPipe landmark anchor snapshot for Freeze Dance motion tracking */
+  faceAnchor?: FreezeLandmarkAnchor | null;
   /** Timestamp (ms) of measurement */
   timestamp: number;
+}
+
+export interface FreezeLandmarkAnchor {
+  noseX: number;
+  noseY: number;
+  leftEyeX: number;
+  leftEyeY: number;
+  rightEyeX: number;
+  rightEyeY: number;
+  chinX: number;
+  chinY: number;
+  headTiltRad: number;
 }
 
 export interface HandMetrics {
@@ -311,6 +325,15 @@ export type PeerMessage =
   | { type: 'JOIN_HELLO'; code: string; name: string; hasStream?: boolean; peerId?: string }
   | { type: 'JOIN_WELCOME'; code: string; hostName: string; hasStream?: boolean; peerId?: string }
   | { type: 'JOIN_REQUEST'; code: string; name: string; hasStream?: boolean; peerId?: string }
+  | {
+      type: 'JOIN_ACCEPTED';
+      code: string;
+      hostName: string;
+      currentGame?: ScreenView;
+      scores?: Record<string, number>;
+      hasStream?: boolean;
+      peerId?: string;
+    }
   | { type: 'JOIN_CONFIRMED'; code: string; hostName: string; hasStream?: boolean; peerId?: string }
   | { type: 'HELLO'; name: string; role: 'host' | 'guest'; hasStream?: boolean; peerId?: string }
   | { type: 'PING'; ts: number }
@@ -563,6 +586,17 @@ export type PeerMessage =
       type: 'FREEZE_VERDICT';
       round: number;
       verdict: FreezeDanceVerdict;
+    }
+  | {
+      type: 'FREEZE_STABILITY';
+      round: number;
+      stability: number;
+      status: 'grace' | 'tracking' | 'caught' | 'no-cam';
+    }
+  | {
+      type: 'FREEZE_AUTO_CAUGHT';
+      round: number;
+      player: 'host' | 'guest';
     };
 
 export type SlingshotMode = 'coop' | 'duel';
@@ -714,8 +748,9 @@ export interface ParchisiMoveAnimation {
   seq: number;
   color: ParchisiColor;
   tokenId: number;
+  fromProgress: number;
   path: number[];
-  captured: { color: ParchisiColor; tokenId: number }[];
+  captured: { color: ParchisiColor; tokenId: number; fromProgress: number }[];
   reachedHome: boolean;
   landedSafe: boolean;
 }

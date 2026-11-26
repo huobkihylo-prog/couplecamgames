@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ParchisiColor,
+  ParchisiMoveAnimation,
   ParchisiMoveOption,
   ParchisiState,
   ParchisiToken,
@@ -17,8 +18,16 @@ import {
   PARCHISI_HOME_PROGRESS,
   PARCHISI_VIEWBOX,
   progressToOuterSquare,
+  type Point2D,
 } from '../game/parchisiBoard';
 import { ALL_PARCHISI_COLORS, getAllOuterBlockadeSquares } from '../game/parchisiLogic';
+import {
+  boardPointToGpuTranslatePct,
+  PARCHISI_TOKEN_BOX_PCT,
+  sampleKnockbackFrame,
+  samplePawnPathFrame,
+} from '../game/parchisiAnimation';
+import { soundFx } from '../utils/soundFx';
 
 export interface FloatingReactionItem {
   id: number;
@@ -27,13 +36,22 @@ export interface FloatingReactionItem {
   kind: 'emoji' | 'chat';
 }
 
+interface CaptureImpactBurst {
+  id: string;
+  x: number;
+  y: number;
+}
+
 interface ParchisiBoardSvgProps {
   state: ParchisiState;
   legalMoves: ParchisiMoveOption[];
   canInteract: boolean;
   selectedTokenId: number | null;
   hoveredMove: ParchisiMoveOption | null;
-  animOverride: { color: ParchisiColor; tokenId: number; progress: number; hopBoost: boolean } | null;
+  /** Synchronously non-null from Render #1 until the tile-by-tile hop + capture slide finishes */
+  pendingMoveAnim: ParchisiMoveAnimation | null;
+  onMoveAnimComplete: (seq: number) => void;
+  onTriggerCelebration: () => void;
   floatingReactions: FloatingReactionItem[];
   /** Base Camera Mode props (zero <foreignObject>, pure HTML z-0 layer behind SVG z-10) */
   baseCamsEnabled: boolean;
@@ -69,6 +87,76 @@ const BASE_VIDEO_BOUNDS = {
     height: `${(CORNER_BASES.yellow.size / PARCHISI_VIEWBOX) * 100}%`,
   },
 } as const;
+
+function tokenKey(color: ParchisiColor, id: number): string {
+  return `${color}-${id}`;
+}
+
+function getCellGroupKey(color: ParchisiColor, id: number, progress: number): string {
+  if (progress < 0) return `base-${color}-${id}`;
+  if (progress >= PARCHISI_HOME_PROGRESS) return `home-${color}-${id}`;
+  if (progress <= 63) return `outer-${progressToOuterSquare(color, progress)}`;
+  return `corr-${color}-${progress}`;
+}
+
+interface PositionedTokenLayout {
+  token: ParchisiToken;
+  effectiveProgress: number;
+  x: number;
+  y: number;
+  stackSize: number;
+  isMovable: boolean;
+  isSelected: boolean;
+}
+
+/**
+ * Compute positioned token coordinates while preserving a FIXED deterministic DOM order
+ * (color order -> tokenId 0..3) so React never reorders sibling token DOM nodes.
+ */
+function computeTokenLayoutMap(
+  tokensByColor: Record<ParchisiColor, ParchisiToken[]>,
+  progressOverrides: Map<string, number>,
+): Map<string, { x: number; y: number; stackSize: number; effectiveProgress: number }> {
+  const flat: { token: ParchisiToken; effectiveProgress: number }[] = [];
+  for (const color of ALL_PARCHISI_COLORS) {
+    for (const token of tokensByColor[color]) {
+      const k = tokenKey(color, token.id);
+      const effectiveProgress = progressOverrides.has(k)
+        ? progressOverrides.get(k)!
+        : token.progress;
+      flat.push({ token, effectiveProgress });
+    }
+  }
+
+  const groups = new Map<string, { token: ParchisiToken; effectiveProgress: number }[]>();
+  for (const item of flat) {
+    const gk = getCellGroupKey(item.token.color, item.token.id, item.effectiveProgress);
+    const list = groups.get(gk) ?? [];
+    list.push(item);
+    groups.set(gk, list);
+  }
+
+  const map = new Map<string, { x: number; y: number; stackSize: number; effectiveProgress: number }>();
+  for (const bucket of groups.values()) {
+    const stackSize = bucket.length;
+    bucket.forEach((item, idx) => {
+      const pt = getTokenBoardPoint(
+        item.token.color,
+        item.token.id,
+        item.effectiveProgress,
+        idx,
+        stackSize,
+      );
+      map.set(tokenKey(item.token.color, item.token.id), {
+        x: pt.x,
+        y: pt.y,
+        stackSize,
+        effectiveProgress: item.effectiveProgress,
+      });
+    });
+  }
+  return map;
+}
 
 /**
  * Helper to generate an evenodd SVG path for a rounded outer rectangle with an inner rectangular hole,
@@ -107,7 +195,9 @@ export function ParchisiBoardSvg({
   canInteract,
   selectedTokenId,
   hoveredMove,
-  animOverride,
+  pendingMoveAnim,
+  onMoveAnimComplete,
+  onTriggerCelebration,
   floatingReactions,
   baseCamsEnabled,
   redBaseStream,
@@ -126,6 +216,15 @@ export function ParchisiBoardSvg({
 
   const redVideoRef = useRef<HTMLVideoElement | null>(null);
   const yellowVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Direct DOM refs for 60fps GPU-composited rAF token animation (ZERO 60Hz setState, ZERO DOM reorder)
+  const tokenElRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [impactBursts, setImpactBursts] = useState<CaptureImpactBurst[]>([]);
+
+  const onMoveAnimCompleteRef = useRef(onMoveAnimComplete);
+  onMoveAnimCompleteRef.current = onMoveAnimComplete;
+  const onTriggerCelebrationRef = useRef(onTriggerCelebration);
+  onTriggerCelebrationRef.current = onTriggerCelebration;
 
   const showRedBaseVideo = baseCamsEnabled && Boolean(redBaseStream);
   const showYellowBaseVideo = baseCamsEnabled && Boolean(yellowBaseStream);
@@ -218,85 +317,272 @@ export function ParchisiBoardSvg({
     [state.tokens],
   );
 
-  // Build effective token positions (applying active step-hop animation override)
-  const renderTokens = useMemo(() => {
-    const effectiveList: (ParchisiToken & { hopBoost: boolean })[] = [];
+  // Final post-move layout map (used as exact landing point for the rAF animation)
+  const postMoveLayoutMap = useMemo(
+    () => computeTokenLayoutMap(state.tokens, new Map()),
+    [state.tokens],
+  );
+
+  // Synchronous pre-move layout map: whenever `pendingMoveAnim` is active, hold the moving pawn
+  // at `fromProgress` and captured victims at `cap.fromProgress` on Render #1 so ZERO teleport ever happens!
+  const displayedLayoutMap = useMemo(() => {
+    if (!pendingMoveAnim) return postMoveLayoutMap;
+    const overrides = new Map<string, number>();
+    overrides.set(
+      tokenKey(pendingMoveAnim.color, pendingMoveAnim.tokenId),
+      pendingMoveAnim.fromProgress,
+    );
+    for (const cap of pendingMoveAnim.captured) {
+      overrides.set(tokenKey(cap.color, cap.tokenId), cap.fromProgress);
+    }
+    return computeTokenLayoutMap(state.tokens, overrides);
+  }, [state.tokens, pendingMoveAnim, postMoveLayoutMap]);
+
+  // Fixed deterministic token array (NEVER reordered -> zero cancelled transitions, pure CSS z-index layering)
+  const renderTokens = useMemo<PositionedTokenLayout[]>(() => {
+    const list: PositionedTokenLayout[] = [];
     for (const color of ALL_PARCHISI_COLORS) {
       for (const token of state.tokens[color]) {
-        const isAnim =
-          animOverride && animOverride.color === color && animOverride.tokenId === token.id;
-        effectiveList.push({
-          ...token,
-          progress: isAnim ? animOverride.progress : token.progress,
-          hopBoost: Boolean(isAnim && animOverride.hopBoost),
-        });
-      }
-    }
-
-    // Group tokens sharing the exact same cell for clean side-by-side placement
-    const groups = new Map<string, (ParchisiToken & { hopBoost: boolean })[]>();
-    for (const t of effectiveList) {
-      let key: string;
-      if (t.progress < 0) {
-        key = `base-${t.color}-${t.id}`;
-      } else if (t.progress >= PARCHISI_HOME_PROGRESS) {
-        key = `home-${t.color}-${t.id}`;
-      } else if (t.progress <= 63) {
-        key = `outer-${progressToOuterSquare(t.color, t.progress)}`;
-      } else {
-        key = `corr-${t.color}-${t.progress}`;
-      }
-      const bucket = groups.get(key) ?? [];
-      bucket.push(t);
-      groups.set(key, bucket);
-    }
-
-    const positioned: {
-      token: ParchisiToken & { hopBoost: boolean };
-      x: number;
-      y: number;
-      stackSize: number;
-      isMovable: boolean;
-      isSelected: boolean;
-    }[] = [];
-
-    for (const bucket of groups.values()) {
-      const stackSize = bucket.length;
-      bucket.forEach((token, idx) => {
-        const pt = getTokenBoardPoint(token.color, token.id, token.progress, idx, stackSize);
+        const layout = displayedLayoutMap.get(tokenKey(color, token.id));
+        if (!layout) continue;
         const isMovable =
-          canInteract && token.color === state.turn && movesByTokenId.has(token.id);
+          canInteract && color === state.turn && movesByTokenId.has(token.id);
         const isSelected =
-          canInteract && token.color === state.turn && selectedTokenId === token.id;
-        positioned.push({
+          canInteract && color === state.turn && selectedTokenId === token.id;
+        list.push({
           token,
-          x: pt.x,
-          y: pt.y,
-          stackSize,
+          effectiveProgress: layout.effectiveProgress,
+          x: layout.x,
+          y: layout.y,
+          stackSize: layout.stackSize,
           isMovable,
           isSelected,
         });
-      });
+      }
+    }
+    return list;
+  }, [state.tokens, state.turn, displayedLayoutMap, canInteract, movesByTokenId, selectedTokenId]);
+
+  const layoutSnapshotsRef = useRef({
+    pre: displayedLayoutMap,
+    post: postMoveLayoutMap,
+  });
+  layoutSnapshotsRef.current = {
+    pre: displayedLayoutMap,
+    post: postMoveLayoutMap,
+  };
+
+  // True 60fps requestAnimationFrame tile-by-tile pawn hop + visible capture arc-slide back to base
+  useEffect(() => {
+    if (!pendingMoveAnim) return;
+    const anim = pendingMoveAnim;
+
+    if (anim.path.length === 0) {
+      onMoveAnimCompleteRef.current(anim.seq);
+      return;
     }
 
-    // Draw non-movable tokens first, then movable tokens, then selected/animating tokens on top
-    positioned.sort((a, b) => {
-      const score = (item: (typeof positioned)[number]) =>
-        (item.token.hopBoost ? 8 : 0) +
-        (item.isSelected ? 6 : 0) +
-        (item.isMovable ? 4 : 0);
-      return score(a) - score(b);
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const moverKey = tokenKey(anim.color, anim.tokenId);
+    const { pre, post } = layoutSnapshotsRef.current;
+
+    const startLayout = pre.get(moverKey);
+    const endLayout = post.get(moverKey);
+
+    const startPt: Point2D = startLayout
+      ? { x: startLayout.x, y: startLayout.y }
+      : getTokenBoardPoint(anim.color, anim.tokenId, anim.fromProgress, 0, 1);
+
+    const endPt: Point2D = endLayout
+      ? { x: endLayout.x, y: endLayout.y }
+      : getTokenBoardPoint(anim.color, anim.tokenId, anim.path[anim.path.length - 1], 0, 1);
+
+    const startScale = startLayout && startLayout.stackSize >= 2 ? 0.8 : 1;
+    const endScale = endLayout && endLayout.stackSize >= 2 ? 0.8 : 1;
+
+    // Build exact tile-by-tile waypoints: [startPt, ...intermediateTileCenters, exactFinalLandingPt]
+    const waypoints: Point2D[] = [startPt];
+    for (let i = 0; i < anim.path.length; i++) {
+      if (i === anim.path.length - 1) {
+        waypoints.push(endPt);
+      } else {
+        waypoints.push(getTokenBoardPoint(anim.color, anim.tokenId, anim.path[i], 0, 1));
+      }
+    }
+
+    const isBaseExit = anim.fromProgress < 0;
+    const stepDurationMs = prefersReducedMotion
+      ? 16
+      : isBaseExit
+        ? 250
+        : anim.path.length > 10
+          ? 84
+          : 128;
+
+    const knockbackDurationMs = prefersReducedMotion ? 16 : 520;
+
+    // Prepare captured victim arc-slides triggered at the exact step the attacker reaches their tile
+    interface ActiveCaptureAnim {
+      key: string;
+      color: ParchisiColor;
+      tokenId: number;
+      fromPt: Point2D;
+      toBasePt: Point2D;
+      triggerAtMs: number;
+      startedAtMs: number | null;
+      finished: boolean;
+    }
+
+    const captureAnims: ActiveCaptureAnim[] = anim.captured.map((cap) => {
+      const capKey = tokenKey(cap.color, cap.tokenId);
+      const capPre = pre.get(capKey);
+      const fromPt: Point2D = capPre
+        ? { x: capPre.x, y: capPre.y }
+        : getTokenBoardPoint(cap.color, cap.tokenId, cap.fromProgress, 0, 1);
+      const toBasePt = getTokenBoardPoint(cap.color, cap.tokenId, -1, 0, 1);
+
+      const capOuterSq = progressToOuterSquare(cap.color, cap.fromProgress);
+      let triggerStepIdx = anim.path.length - 1;
+      if (capOuterSq !== null) {
+        for (let i = 0; i < anim.path.length; i++) {
+          if (progressToOuterSquare(anim.color, anim.path[i]) === capOuterSq) {
+            triggerStepIdx = i;
+            break;
+          }
+        }
+      }
+
+      return {
+        key: capKey,
+        color: cap.color,
+        tokenId: cap.tokenId,
+        fromPt,
+        toBasePt,
+        triggerAtMs: (triggerStepIdx + 1) * stepDurationMs,
+        startedAtMs: null,
+        finished: false,
+      };
     });
 
-    return positioned;
-  }, [state.tokens, state.turn, animOverride, canInteract, movesByTokenId, selectedTokenId]);
+    let cancelled = false;
+    let rafId = 0;
+    let startedAt = 0;
+    let lastHopSoundStep = -1;
+    let moverFinished = false;
+    let bonusChimeTimer: number | null = null;
+    let burstCleanupTimer: number | null = null;
+
+    const totalMoverMs = (waypoints.length - 1) * stepDurationMs;
+
+    const tick = (now: number) => {
+      if (cancelled) return;
+      if (startedAt === 0) {
+        startedAt = now;
+      }
+      const elapsed = now - startedAt;
+
+      // 1. Animate moving pawn tile-by-tile strictly on top (zIndex = 50)
+      const moverEl = tokenElRefs.current.get(moverKey);
+      const sample = samplePawnPathFrame(waypoints, elapsed, stepDurationMs, isBaseExit);
+
+      if (sample.stepIndex > lastHopSoundStep) {
+        lastHopSoundStep = sample.stepIndex;
+        soundFx.parchisiPawnHop(sample.stepIndex);
+      }
+
+      if (moverEl) {
+        const overallT = totalMoverMs > 0 ? Math.min(1, elapsed / totalMoverMs) : 1;
+        const baseScale = startScale + (endScale - startScale) * overallT;
+        const { txPct, tyPct } = boardPointToGpuTranslatePct(sample.x, sample.y);
+        moverEl.style.transition = 'none';
+        moverEl.style.zIndex = '50';
+        moverEl.style.transform = sample.finished
+          ? `translate3d(${txPct.toFixed(3)}%, ${tyPct.toFixed(3)}%, 0) scale(${endScale})`
+          : `translate3d(${txPct.toFixed(3)}%, ${tyPct.toFixed(3)}%, 0) scale(${(
+              baseScale * sample.scaleX
+            ).toFixed(4)}, ${(baseScale * sample.scaleY).toFixed(4)})`;
+      }
+
+      if (sample.finished && !moverFinished) {
+        moverFinished = true;
+        if (anim.reachedHome) {
+          soundFx.parchisiThroneArrival();
+          onTriggerCelebrationRef.current();
+          bonusChimeTimer = window.setTimeout(() => soundFx.parchisiBonusPowerChime(10), 210);
+        } else if (anim.captured.length === 0 && anim.landedSafe) {
+          soundFx.parchisiSafeStarChime();
+        }
+      }
+
+      // 2. Trigger & animate captured victims sliding visibly back to their corner base (zIndex = 60)
+      let allCapturesDone = true;
+      for (const cap of captureAnims) {
+        if (cap.startedAtMs === null && elapsed >= cap.triggerAtMs) {
+          cap.startedAtMs = now;
+          soundFx.parchisiCaptureDrama();
+          const burstId = `burst-${anim.seq}-${cap.key}`;
+          setImpactBursts((prev) => [
+            ...prev.slice(-3),
+            { id: burstId, x: cap.fromPt.x, y: cap.fromPt.y },
+          ]);
+          burstCleanupTimer = window.setTimeout(() => {
+            if (!cancelled) {
+              setImpactBursts((prev) => prev.filter((b) => b.id !== burstId));
+            }
+          }, 520);
+          bonusChimeTimer = window.setTimeout(() => soundFx.parchisiBonusPowerChime(20), 220);
+        }
+
+        if (cap.startedAtMs !== null) {
+          const capEl = tokenElRefs.current.get(cap.key);
+          const kb = sampleKnockbackFrame(
+            cap.fromPt,
+            cap.toBasePt,
+            now - cap.startedAtMs,
+            knockbackDurationMs,
+          );
+          if (capEl) {
+            const { txPct, tyPct } = boardPointToGpuTranslatePct(kb.x, kb.y);
+            capEl.style.transition = 'none';
+            capEl.style.zIndex = '60';
+            capEl.style.transform = kb.finished
+              ? `translate3d(${txPct.toFixed(3)}%, ${tyPct.toFixed(3)}%, 0) scale(1)`
+              : `translate3d(${txPct.toFixed(3)}%, ${tyPct.toFixed(3)}%, 0) scale(${kb.scale.toFixed(4)}) rotate(${kb.rotationDeg.toFixed(1)}deg)`;
+          }
+          if (kb.finished) {
+            cap.finished = true;
+          } else {
+            allCapturesDone = false;
+          }
+        } else {
+          allCapturesDone = false;
+        }
+      }
+
+      if (moverFinished && allCapturesDone) {
+        onMoveAnimCompleteRef.current(anim.seq);
+        return;
+      }
+
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+
+    return () => {
+      cancelled = true;
+      if (rafId) window.cancelAnimationFrame(rafId);
+      if (bonusChimeTimer !== null) window.clearTimeout(bonusChimeTimer);
+      if (burstCleanupTimer !== null) window.clearTimeout(burstCleanupTimer);
+    };
+  }, [pendingMoveAnim]);
 
   /**
    * Direct-tap highlighted destination tiles (Double Validation: tap token OR tap destination tile!):
-   * - If a token is selected: highlight ALL of its legal landing tiles as directly clickable targets.
-   * - Else if a move is hovered: highlight that hovered move's exact landing tile.
-   * - Else if exactly 1 movable token exists on the board: pre-highlight its landing tile(s) immediately
-   *   so the player can tap EITHER the token OR the illuminated destination tile in one tap!
    */
   const clickableDestinations = useMemo(() => {
     if (!canInteract) return [];
@@ -311,7 +597,6 @@ export function ParchisiBoardSvg({
       sourceMoves = onlyMoves;
     }
 
-    // Deduplicate identical landing progress (keeping preferred option first)
     const seen = new Set<number>();
     const results: {
       move: ParchisiMoveOption;
@@ -374,6 +659,19 @@ export function ParchisiBoardSvg({
     }
   };
 
+  const activeMoverKey = pendingMoveAnim
+    ? tokenKey(pendingMoveAnim.color, pendingMoveAnim.tokenId)
+    : null;
+  const activeCapturedKeys = useMemo(() => {
+    const set = new Set<string>();
+    if (pendingMoveAnim) {
+      for (const c of pendingMoveAnim.captured) {
+        set.add(tokenKey(c.color, c.tokenId));
+      }
+    }
+    return set;
+  }, [pendingMoveAnim]);
+
   return (
     <div
       data-testid="parchisi-board-wrapper"
@@ -421,7 +719,7 @@ export function ParchisiBoardSvg({
         />
       </div>
 
-      {/* LAYER z-10: Crisp Official 68-Tile Wooden Parcheesi SVG Board + 100% Opaque 3D Crown Tokens */}
+      {/* LAYER z-10: Crisp Official 68-Tile Wooden Parcheesi SVG Board */}
       <svg
         viewBox={`0 0 ${PARCHISI_VIEWBOX} ${PARCHISI_VIEWBOX}`}
         style={{ WebkitTapHighlightColor: 'transparent' }}
@@ -446,25 +744,12 @@ export function ParchisiBoardSvg({
             <stop offset="100%" stopColor="#D49B68" />
           </linearGradient>
 
-          {/* Glossy 3D token radial gradients for all 4 classic colors */}
-          {ALL_PARCHISI_COLORS.map((c) => (
-            <radialGradient key={c} id={`token-grad-${c}`} cx="35%" cy="28%" r="70%">
-              <stop offset="0%" stopColor={COLOR_PALETTE[c].light} />
-              <stop offset="52%" stopColor={COLOR_PALETTE[c].fill} />
-              <stop offset="100%" stopColor={COLOR_PALETTE[c].dark} />
-            </radialGradient>
-          ))}
-
           {/* Recessed base slot shadow gradient */}
           <radialGradient id="slot-recess" cx="50%" cy="60%" r="55%">
             <stop offset="0%" stopColor="rgba(0,0,0,0.28)" />
             <stop offset="78%" stopColor="rgba(0,0,0,0.08)" />
             <stop offset="100%" stopColor="rgba(255,255,255,0.22)" />
           </radialGradient>
-
-          <filter id="token-shadow" x="-35%" y="-35%" width="170%" height="170%">
-            <feDropShadow dx="0" dy="2.8" stdDeviation="2.4" floodColor="#1A0E07" floodOpacity="0.58" />
-          </filter>
         </defs>
 
         {/* 1. Warm Beveled Wooden Outer Frame (evenodd cutout leaves interior open for z-0 base videos) */}
@@ -504,7 +789,6 @@ export function ParchisiBoardSvg({
           const isLiveCamBase =
             (color === 'red' && showRedBaseVideo) || (color === 'yellow' && showYellowBaseVideo);
 
-          // Translucent colored tint over live video vs 100% opaque official solid classic color
           let baseFill = pal.fill;
           if (isLiveCamBase) {
             if (color === 'red') {
@@ -530,7 +814,6 @@ export function ParchisiBoardSvg({
                 strokeWidth="1.5"
                 opacity={isLiveCamBase ? 1 : isActiveColor ? 1 : 0.92}
               />
-              {/* Soft inset frame inside corner base (glows gold on active player's turn) */}
               <rect
                 x={base.x + 12}
                 y={base.y + 12}
@@ -541,7 +824,6 @@ export function ParchisiBoardSvg({
                 stroke={isTurn ? '#FEF08A' : isLiveCamBase ? 'rgba(255,255,255,0.68)' : 'rgba(255,255,255,0.45)'}
                 strokeWidth={isTurn ? '4' : '2'}
               />
-              {/* 4 Circular Token Slots: subtle thin rings over live camera, classic recessed circles when solid */}
               {base.slots.map((slot, idx) => (
                 <g key={`slot-${color}-${idx}`}>
                   {isLiveCamBase ? (
@@ -609,7 +891,6 @@ export function ParchisiBoardSvg({
                 stroke="#8D867E"
                 strokeWidth="1.5"
               />
-              {/* High-contrast dark-gray 5-point Star on the 8 Star Safe Tiles */}
               {cell.isStar && (
                 <polygon
                   points={STAR_POINTS}
@@ -618,7 +899,6 @@ export function ParchisiBoardSvg({
                   opacity="0.86"
                 />
               )}
-              {/* Crisp centered safe circle ring on Colored Start Tiles */}
               {cell.startFor && (
                 <circle
                   cx={cell.cx}
@@ -629,7 +909,6 @@ export function ParchisiBoardSvg({
                   strokeWidth="1.8"
                 />
               )}
-              {/* Ultra-clear tile number (1..68) */}
               <text
                 x={numX}
                 y={numY}
@@ -696,7 +975,6 @@ export function ParchisiBoardSvg({
             stroke="#5D3A1A"
             strokeWidth="1.8"
           />
-          {/* Center brass medallion crest */}
           <circle
             cx={C}
             cy={C}
@@ -780,138 +1058,179 @@ export function ParchisiBoardSvg({
               onMouseEnter={() => onHoverMoveOption(dest.move)}
               onMouseLeave={() => onHoverMoveOption(null)}
             >
-              {/* Generous >= 44px transparent touch hitbox over highlighted destination tile */}
               <circle cx={dest.x} cy={dest.y} r="40" fill="transparent" />
-              <circle
-                cx={dest.x}
-                cy={dest.y}
-                r={dest.isHovered ? '24' : '21'}
-                fill={fillTint}
-                stroke={ringColor}
-                strokeWidth="3.8"
-                strokeDasharray="6 4"
-              >
-                <animate
-                  attributeName="r"
-                  values="19;25;19"
-                  dur="0.85s"
-                  repeatCount="indefinite"
-                />
-              </circle>
-              <circle cx={dest.x} cy={dest.y} r="6" fill={ringColor} stroke="#FFFFFF" strokeWidth="1.5" />
-            </g>
-          );
-        })}
-
-        {/* 8. Glossy 100% Opaque 3D Game Tokens with Enlarged Touch Hitboxes (>= 44x44px effective) */}
-        {renderTokens.map(({ token, x, y, stackSize, isMovable, isSelected }) => {
-          const pal = COLOR_PALETTE[token.color];
-          const baseScale = stackSize >= 2 ? 0.8 : 1;
-          const hopScale = token.hopBoost ? 1.2 : isSelected ? 1.16 : isMovable ? 1.07 : 1;
-          const totalScale = baseScale * hopScale;
-          const liftY = token.hopBoost ? -5 : isSelected ? -3.5 : isMovable ? -2 : 0;
-          // Enlarged touch radius: r=46 when solo (>= 44x44px effective on 374px mobile board),
-          // r=24 when stacked side-by-side so adjacent tokens never overlap each other's hit area.
-          const hitRadius = stackSize >= 2 ? 24 : 46;
-
-          return (
-            <g
-              key={`token-${token.color}-${token.id}`}
-              data-testid={`parchisi-token-${token.color}-${token.id}`}
-              data-movable={isMovable ? 'true' : 'false'}
-              transform={`translate(${x}, ${y + liftY}) scale(${totalScale})`}
-              style={{
-                transition: 'transform 105ms cubic-bezier(0.22, 1, 0.36, 1)',
-                cursor: isMovable ? 'pointer' : 'default',
-                touchAction: 'manipulation',
-              }}
-              role={isMovable ? 'button' : undefined}
-              tabIndex={isMovable ? 0 : undefined}
-              aria-label={
-                isMovable
-                  ? `Move ${pal.label} token ${token.id + 1}`
-                  : `${pal.label} token ${token.id + 1}`
-              }
-              onClick={(e) => {
-                e.stopPropagation();
-                if (isMovable) onTokenClick(token.id);
-              }}
-              onKeyDown={(e) => {
-                if (isMovable && (e.key === 'Enter' || e.key === ' ')) {
-                  e.preventDefault();
-                  onTokenClick(token.id);
-                }
-              }}
-              onMouseEnter={() => {
-                if (isMovable) onTokenHover(token.id);
-              }}
-              onMouseLeave={() => {
-                if (isMovable) onTokenHover(null);
-              }}
-            >
-              {/* High-visibility pulsing golden halo ring whenever token has a valid move */}
-              {isMovable && (
-                <>
-                  <circle
-                    r="23"
-                    fill="rgba(250,204,21,0.18)"
-                    stroke="#FACC15"
-                    strokeWidth="3.8"
-                    opacity="0.98"
-                  >
-                    <animate
-                      attributeName="r"
-                      values="18;26;18"
-                      dur="1.05s"
-                      repeatCount="indefinite"
-                    />
-                    <animate
-                      attributeName="opacity"
-                      values="0.98;0.28;0.98"
-                      dur="1.05s"
-                      repeatCount="indefinite"
-                    />
-                  </circle>
-                  <circle
-                    r="18.5"
-                    fill="none"
-                    stroke="#FEF08A"
-                    strokeWidth="2.8"
-                  />
-                </>
-              )}
-
-              {/* Generous transparent thumb-friendly touch hitbox (>= 44x44px effective) */}
-              {isMovable && <circle r={hitRadius} fill="transparent" />}
-
-              {/* Glossy 100% Opaque 3D Disc */}
-              <g filter="url(#token-shadow)">
+              <g transform={`translate(${dest.x}, ${dest.y})`}>
                 <circle
-                  r="16"
-                  fill={pal.dark}
-                  stroke={isSelected ? '#FEF08A' : '#FFFFFF'}
-                  strokeWidth={isSelected ? '3' : '2.2'}
+                  r={dest.isHovered ? '24' : '21'}
+                  fill={fillTint}
+                  stroke={ringColor}
+                  strokeWidth="3.8"
+                  strokeDasharray="6 4"
+                  className="parchisi-dest-pulse"
                 />
-                <circle r="13.6" fill={`url(#token-grad-${token.color})`} />
-                <ellipse
-                  cx="-3"
-                  cy="-6"
-                  rx="6.6"
-                  ry="3.5"
-                  fill="rgba(255,255,255,0.46)"
-                  transform="rotate(-18 -3 -6)"
-                />
-                <path
-                  d={CROWN_PATH}
-                  transform="translate(0, 1) scale(0.78)"
-                  fill={token.color === 'yellow' ? '#5A3703' : '#FFF9E6'}
-                  opacity="0.96"
-                />
+                <circle r="6" fill={ringColor} stroke="#FFFFFF" strokeWidth="1.5" />
               </g>
             </g>
           );
         })}
+
+        {/* 7b. Capture Impact Ring Bursts (GPU transform + opacity only) */}
+        {impactBursts.map((burst) => (
+          <g
+            key={burst.id}
+            transform={`translate(${burst.x}, ${burst.y})`}
+            className="pointer-events-none"
+          >
+            <circle
+              r="18"
+              fill="rgba(239,68,68,0.22)"
+              stroke="#FACC15"
+              strokeWidth="4"
+              className="parchisi-capture-ring"
+            />
+          </g>
+        ))}
       </svg>
+
+      {/* LAYER z-20: Fixed-DOM-Order HTML GPU Token Overlay
+          - Guarantees real CSS z-index (moving pawn=50, captured knock-back=60) ABOVE all tiles, stars & other pawns
+          - Zero DOM reordering, zero SVG viewBox/px Safari glitches, 100% GPU translate3d at 60fps */}
+      <div
+        data-testid="parchisi-tokens-layer"
+        className="pointer-events-none absolute inset-0 z-20"
+      >
+        {renderTokens.map(({ token, x, y, stackSize, isMovable, isSelected }) => {
+          const key = tokenKey(token.color, token.id);
+          const pal = COLOR_PALETTE[token.color];
+          const isMoving = activeMoverKey === key;
+          const isCaptured = activeCapturedKeys.has(key);
+          const baseScale = stackSize >= 2 ? 0.8 : 1;
+          const totalScale = baseScale * (isSelected ? 1.18 : 1);
+          const { txPct, tyPct } = boardPointToGpuTranslatePct(x, y);
+
+          // Strict z-index hierarchy without ever changing DOM order!
+          const zIndex = isCaptured
+            ? 60
+            : isMoving
+              ? 50
+              : isSelected
+                ? 35
+                : isMovable
+                  ? 25
+                  : 10;
+
+          const gradId = `html-token-grad-${token.color}-${token.id}`;
+
+          return (
+            <div
+              key={`token-${key}`}
+              ref={(el) => {
+                if (el) tokenElRefs.current.set(key, el);
+                else tokenElRefs.current.delete(key);
+              }}
+              data-animating={isMoving || isCaptured ? 'true' : 'false'}
+              style={{
+                width: `${PARCHISI_TOKEN_BOX_PCT}%`,
+                height: `${PARCHISI_TOKEN_BOX_PCT}%`,
+                left: 0,
+                top: 0,
+                zIndex,
+                transform: `translate3d(${txPct.toFixed(3)}%, ${tyPct.toFixed(3)}%, 0) scale(${totalScale})`,
+                transition:
+                  isMoving || isCaptured
+                    ? 'none'
+                    : 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+                willChange: 'transform',
+              }}
+              className="pointer-events-none absolute flex items-center justify-center"
+            >
+              {/* Permanently mounted 1:1 scale 3D crown token SVG (zero remount flicker when isMovable toggles) */}
+              <svg
+                viewBox="-39 -39 78 78"
+                className="w-full h-full overflow-visible pointer-events-none"
+                style={{ filter: 'drop-shadow(0 2.5px 3px rgba(26,14,7,0.52))' }}
+                aria-hidden="true"
+              >
+                <defs>
+                  <radialGradient id={gradId} cx="35%" cy="28%" r="70%">
+                    <stop offset="0%" stopColor={pal.light} />
+                    <stop offset="52%" stopColor={pal.fill} />
+                    <stop offset="100%" stopColor={pal.dark} />
+                  </radialGradient>
+                </defs>
+                {isMovable && (
+                  <>
+                    <circle
+                      r="21"
+                      fill="rgba(250,204,21,0.18)"
+                      stroke="#FACC15"
+                      strokeWidth="3.6"
+                      className="parchisi-halo-pulse"
+                    />
+                    <circle r="18.5" fill="none" stroke="#FEF08A" strokeWidth="2.6" />
+                  </>
+                )}
+                <g className={isMovable && !isSelected ? 'parchisi-playable-float' : ''}>
+                  <circle
+                    r="16"
+                    fill={pal.dark}
+                    stroke={
+                      isCaptured
+                        ? '#EF4444'
+                        : isSelected || isMoving
+                          ? '#FEF08A'
+                          : '#FFFFFF'
+                    }
+                    strokeWidth={isCaptured || isSelected || isMoving ? '3' : '2.2'}
+                  />
+                  <circle r="13.6" fill={`url(#${gradId})`} />
+                  <ellipse
+                    cx="-3"
+                    cy="-6"
+                    rx="6.6"
+                    ry="3.5"
+                    fill="rgba(255,255,255,0.46)"
+                    transform="rotate(-18 -3 -6)"
+                  />
+                  <path
+                    d={CROWN_PATH}
+                    transform="translate(0, 1) scale(0.78)"
+                    fill={token.color === 'yellow' ? '#5A3703' : '#FFF9E6'}
+                    opacity="0.96"
+                  />
+                </g>
+              </svg>
+
+              {/* Interactive hitbox overlay (only movable tokens capture pointer events) */}
+              {isMovable ? (
+                <button
+                  type="button"
+                  data-testid={`parchisi-token-${token.color}-${token.id}`}
+                  data-movable="true"
+                  aria-label={`Move ${pal.label} token ${token.id + 1}`}
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                  className={`pointer-events-auto absolute inset-0 m-auto rounded-full bg-transparent border-0 p-0 focus-visible:outline-none ${
+                    stackSize >= 2 ? 'w-[70%] h-[70%]' : 'w-full h-full min-w-[42px] min-h-[42px]'
+                  } cursor-pointer touch-manipulation`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onTokenClick(token.id);
+                  }}
+                  onMouseEnter={() => onTokenHover(token.id)}
+                  onMouseLeave={() => onTokenHover(null)}
+                />
+              ) : (
+                <span
+                  data-testid={`parchisi-token-${token.color}-${token.id}`}
+                  data-movable="false"
+                  aria-label={`${pal.label} token ${token.id + 1}`}
+                  className="pointer-events-none absolute inset-0"
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
 
       {/* 9. Large, Comfortably Spaced Floating Move Picker Pills (+3, +5, +8) above clicked token */}
       {activePicker && (

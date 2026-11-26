@@ -702,12 +702,17 @@ export function applyParchisiMove(
     move.bonusUsed !== null ? state.pendingBonuses.slice(1) : [...state.pendingBonuses];
 
   // Apply captures -> send opponents to base & award +20 bonus per capture
-  const capturedList: { color: ParchisiColor; tokenId: number }[] = [];
+  const capturedList: { color: ParchisiColor; tokenId: number; fromProgress: number }[] = [];
   for (const cap of move.captures) {
     const victim = nextTokens[cap.color].find((t) => t.id === cap.tokenId);
     if (victim) {
+      const victimFromProgress = victim.progress;
       victim.progress = -1;
-      capturedList.push({ color: cap.color, tokenId: cap.tokenId });
+      capturedList.push({
+        color: cap.color,
+        tokenId: cap.tokenId,
+        fromProgress: victimFromProgress,
+      });
       nextStats[color].captures += 1;
       nextBonuses.unshift(20);
     }
@@ -736,6 +741,7 @@ export function applyParchisiMove(
     seq: animSeq,
     color,
     tokenId: move.tokenId,
+    fromProgress: move.fromProgress,
     path: move.path,
     captured: capturedList,
     reachedHome: move.reachesHome,

@@ -156,6 +156,60 @@ function shuffleWithRng<T>(items: readonly T[], rng: () => number): T[] {
 }
 
 /**
+ * Builds a single 4-choice round payload for a given correct track using a pool of category tracks.
+ */
+export function buildSingleQuizRoundFromTrack(
+  correctTrack: ItunesTrack,
+  pool: readonly ItunesTrack[],
+  roundNumber: number,
+  totalRounds: number,
+  rng: () => number = Math.random,
+): MusicQuizRoundPayload {
+  const correctKey = normalizeTrackKey(correctTrack.trackName);
+  const correctArtistLower = correctTrack.artistName.toLowerCase();
+
+  const otherArtists = shuffleWithRng(
+    pool.filter(
+      (t) =>
+        normalizeTrackKey(t.trackName) !== correctKey &&
+        t.artistName.toLowerCase() !== correctArtistLower,
+    ),
+    rng,
+  );
+  const sameArtistFallback = shuffleWithRng(
+    pool.filter(
+      (t) =>
+        normalizeTrackKey(t.trackName) !== correctKey &&
+        t.artistName.toLowerCase() === correctArtistLower,
+    ),
+    rng,
+  );
+
+  const distractors = [...otherArtists, ...sameArtistFallback].slice(0, 3);
+  const combined: { track: ItunesTrack; isCorrect: boolean }[] = [
+    { track: correctTrack, isCorrect: true },
+    ...distractors.map((track) => ({ track, isCorrect: false })),
+  ];
+  const shuffledOptions = shuffleWithRng(combined, rng);
+  const correctIndex = shuffledOptions.findIndex((entry) => entry.isCorrect);
+
+  const options: MusicQuizOption[] = shuffledOptions.map((entry) => ({
+    title: formatQuizTrackTitle(entry.track.trackName),
+    artist: entry.track.artistName,
+  }));
+
+  return {
+    round: roundNumber,
+    totalRounds,
+    previewUrl: correctTrack.previewUrl,
+    artworkUrl: correctTrack.artworkUrlHiRes || correctTrack.artworkUrl,
+    options,
+    correctIndex: correctIndex >= 0 ? correctIndex : 0,
+    startTime: 0,
+  };
+}
+
+/**
  * Builds `totalRounds` randomized 4-choice rounds from a pool of iTunes tracks.
  * Guarantees 4 unique choices per round (preferring distinct artists for distractors).
  */
@@ -173,50 +227,9 @@ export function buildQuizRoundsFromTracks(
     selectedCorrect.push(shuffledPool[i % shuffledPool.length]);
   }
 
-  return selectedCorrect.map((correctTrack, idx) => {
-    const correctKey = normalizeTrackKey(correctTrack.trackName);
-    const correctArtistLower = correctTrack.artistName.toLowerCase();
-
-    const otherArtists = shuffleWithRng(
-      pool.filter(
-        (t) =>
-          normalizeTrackKey(t.trackName) !== correctKey &&
-          t.artistName.toLowerCase() !== correctArtistLower,
-      ),
-      rng,
-    );
-    const sameArtistFallback = shuffleWithRng(
-      pool.filter(
-        (t) =>
-          normalizeTrackKey(t.trackName) !== correctKey &&
-          t.artistName.toLowerCase() === correctArtistLower,
-      ),
-      rng,
-    );
-
-    const distractors = [...otherArtists, ...sameArtistFallback].slice(0, 3);
-    const combined: { track: ItunesTrack; isCorrect: boolean }[] = [
-      { track: correctTrack, isCorrect: true },
-      ...distractors.map((track) => ({ track, isCorrect: false })),
-    ];
-    const shuffledOptions = shuffleWithRng(combined, rng);
-    const correctIndex = shuffledOptions.findIndex((entry) => entry.isCorrect);
-
-    const options: MusicQuizOption[] = shuffledOptions.map((entry) => ({
-      title: formatQuizTrackTitle(entry.track.trackName),
-      artist: entry.track.artistName,
-    }));
-
-    return {
-      round: idx + 1,
-      totalRounds,
-      previewUrl: correctTrack.previewUrl,
-      artworkUrl: correctTrack.artworkUrlHiRes || correctTrack.artworkUrl,
-      options,
-      correctIndex: correctIndex >= 0 ? correctIndex : 0,
-      startTime: 0,
-    };
-  });
+  return selectedCorrect.map((correctTrack, idx) =>
+    buildSingleQuizRoundFromTrack(correctTrack, pool, idx + 1, totalRounds, rng),
+  );
 }
 
 /**

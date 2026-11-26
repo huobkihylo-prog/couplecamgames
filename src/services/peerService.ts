@@ -1,19 +1,20 @@
 import Peer, { type DataConnection, type MediaConnection } from 'peerjs';
-import type { PeerMessage } from '../types/duoplay';
+import type { PeerMessage, ScreenView } from '../types/duoplay';
 
 /**
- * Verified, fast public STUN servers for WebRTC NAT traversal across distinct devices & networks.
- * Keeps the pool concise (4 servers) and excludes dead/unresolvable endpoints (e.g. twilio/openrelay).
+ * Full public STUN pool for reliable WebRTC NAT traversal across Wi-Fi & 4G/5G mobile networks.
  */
 export const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
 ];
 
 /**
- * Builds the WebRTC ICE server list combining the 4 fast public STUN servers
+ * Builds the WebRTC ICE server list combining the 6 public STUN servers
  * with an optional TURN server configured via Vite env vars (`VITE_TURN_URL`,
  * `VITE_TURN_USER`, `VITE_TURN_PASS`) for restrictive 4G/corporate NATs.
  */
@@ -39,16 +40,16 @@ export function buildIceServers(
 }
 
 export const ROOM_PREFIX = 'couplecam-room-';
-export const CONNECT_TIMEOUT_MS = 15000;
-export const MAX_GUEST_RETRIES = 3;
-export const GUEST_RETRY_DELAY_MS = 3000;
-export const GUEST_ATTEMPT_STALL_MS = 5000;
+export const CONNECT_TIMEOUT_MS = 10000;
+export const MAX_GUEST_RETRIES = 2;
+export const GUEST_RETRY_DELAY_MS = 1500;
+export const GUEST_ATTEMPT_STALL_MS = 4000;
 export const HEARTBEAT_INTERVAL_MS = 20000;
 
 export const ERR_ROOM_NOT_FOUND =
-  "Salon introuvable. Demande à ton partenaire de revenir sur la page du salon (sans fermer l'onglet).";
+  "Salon introuvable. Vérifie le code ou demande à ton/ta partenaire de rester sur le salon.";
 export const ERR_NETWORK_BLOCKED =
-  'Connexion directe bloquée par le réseau (4G/Wi-Fi). Essayez de cliquer sur Réessayer ou passez en Wi-Fi.';
+  'Connexion lente ou bloquée par le réseau (Wi-Fi / 4G). Clique sur Réessayer.';
 
 const JOIN_RETRY_PING_MS = 1000;
 const ICE_DISCONNECT_GRACE_MS = 6000;
@@ -95,10 +96,17 @@ export function normalizeRoomCode(raw: string): string {
 }
 
 /**
- * Builds the deterministic lowercase PeerJS peer ID from any raw room code.
+ * Strict identical PeerJS room ID normalization used on BOTH Host and Guest:
+ * `'couplecam-room-' + code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')`
+ */
+export const toPeerId = (code: string): string =>
+  ROOM_PREFIX + code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+/**
+ * Builds the deterministic PeerJS peer ID from any raw room code or invite URL.
  */
 export function getPeerRoomId(code: string): string {
-  return `${ROOM_PREFIX}${normalizeRoomCode(code).toLowerCase()}`;
+  return toPeerId(normalizeRoomCode(code));
 }
 
 export function isSignalingOnlyError(errType: string | undefined): boolean {
@@ -111,6 +119,11 @@ export function isSignalingOnlyError(errType: string | undefined): boolean {
   );
 }
 
+export interface HostRoomStateSnapshot {
+  currentGame?: ScreenView;
+  scores?: Record<string, number>;
+}
+
 export interface PeerServiceCallbacks {
   onStatusChange: (
     status: 'creating' | 'waiting' | 'connecting' | 'connected' | 'disconnected' | 'error',
@@ -119,6 +132,7 @@ export interface PeerServiceCallbacks {
   onRoomCodeChange?: (code: string) => void;
   onRemoteStream: (stream: MediaStream | null) => void;
   onMessage: (msg: PeerMessage) => void;
+  getHostRoomState?: () => HostRoomStateSnapshot;
 }
 
 /**
@@ -397,7 +411,7 @@ export class DuoPeerService {
     );
     this.callbacks.onStatusChange('creating', `Ouverture du salon ${cleanCode}...`);
 
-    // 15-second max timeout for room opening across both Relay & PeerJS
+    // 10-second max timeout for room opening across both Relay & PeerJS
     this.connectTimeoutTimer = window.setTimeout(() => {
       if (gen !== this.sessionGen) return;
       if (!this.hostWaitingNotified && !this.hasEnteredRoom) {
@@ -407,7 +421,7 @@ export class DuoPeerService {
         this.destroy();
         this.callbacks.onStatusChange(
           'error',
-          'Délai dépassé (15 s) : impossible d’ouvrir le salon. Vérifie ta connexion et réessaie.',
+          'Connexion lente (10 s) : impossible d’ouvrir le salon. Vérifie ta connexion et réessaie.',
         );
       }
     }, CONNECT_TIMEOUT_MS);
@@ -920,30 +934,10 @@ export class DuoPeerService {
       const guestName = String(envelope.name ?? 'Partenaire');
       const guestHasStream = Boolean(envelope.hasStream);
       console.log(
-        `[CoupleCam P2P][Host] Step 3 (Relay): Partner "${guestName}" arrived -> sending immediate JOIN_CONFIRMED`,
+        `[CoupleCam P2P][Host] Step 3 (Relay): Partner "${guestName}" arrived -> sending immediate JOIN_ACCEPTED`,
       );
       const myPeerId = this.peer?.id || undefined;
-      this.sendHandshakeMessage({
-        type: 'JOIN_WELCOME',
-        code: this.activeRoomCode,
-        hostName: this.localName,
-        hasStream: Boolean(this.localStream),
-        peerId: myPeerId,
-      });
-      this.sendHandshakeMessage({
-        type: 'JOIN_CONFIRMED',
-        code: this.activeRoomCode,
-        hostName: this.localName,
-        hasStream: Boolean(this.localStream),
-        peerId: myPeerId,
-      });
-      this.sendHandshakeMessage({
-        type: 'HELLO',
-        name: this.localName,
-        role: 'host',
-        hasStream: Boolean(this.localStream),
-        peerId: myPeerId,
-      });
+      this.sendHostJoinAcceptedBundle(myPeerId);
       this.callbacks.onMessage({
         type: 'HELLO',
         name: guestName,
@@ -1099,6 +1093,40 @@ export class DuoPeerService {
     }, JOIN_RETRY_PING_MS);
   }
 
+  private sendHostJoinAcceptedBundle(myPeerId?: string) {
+    const snapshot = this.callbacks.getHostRoomState?.() ?? {};
+    this.sendHandshakeMessage({
+      type: 'JOIN_ACCEPTED',
+      code: this.activeRoomCode,
+      hostName: this.localName,
+      currentGame: snapshot.currentGame,
+      scores: snapshot.scores,
+      hasStream: Boolean(this.localStream),
+      peerId: myPeerId,
+    });
+    this.sendHandshakeMessage({
+      type: 'JOIN_WELCOME',
+      code: this.activeRoomCode,
+      hostName: this.localName,
+      hasStream: Boolean(this.localStream),
+      peerId: myPeerId,
+    });
+    this.sendHandshakeMessage({
+      type: 'JOIN_CONFIRMED',
+      code: this.activeRoomCode,
+      hostName: this.localName,
+      hasStream: Boolean(this.localStream),
+      peerId: myPeerId,
+    });
+    this.sendHandshakeMessage({
+      type: 'HELLO',
+      name: this.localName,
+      role: 'host',
+      hasStream: Boolean(this.localStream),
+      peerId: myPeerId,
+    });
+  }
+
   private scheduleSignalingReconnect(peer: Peer, gen: number) {
     if (this.reconnectTimer !== null) return;
     this.reconnectTimer = window.setTimeout(() => {
@@ -1109,7 +1137,7 @@ export class DuoPeerService {
       } catch {
         // Ignore reconnect race if already reconnecting
       }
-    }, 1500);
+    }, 600);
   }
 
   private markRoomEntered(gen: number, reason: string, peerId?: string) {
@@ -1172,22 +1200,9 @@ export class DuoPeerService {
       const resolvedPeerId = msg.peerId || connPeerId;
       const myPeerId = this.peer?.id || undefined;
       console.log(
-        `[CoupleCam P2P][Host] Received ${msg.type} from "${msg.name}" (via ${via}) -> replying JOIN_WELCOME`,
+        `[CoupleCam P2P][Host] Received ${msg.type} from "${msg.name}" (via ${via}) -> replying JOIN_ACCEPTED`,
       );
-      this.sendHandshakeMessage({
-        type: 'JOIN_WELCOME',
-        code: this.activeRoomCode,
-        hostName: this.localName,
-        hasStream: Boolean(this.localStream),
-        peerId: myPeerId,
-      });
-      this.sendHandshakeMessage({
-        type: 'JOIN_CONFIRMED',
-        code: this.activeRoomCode,
-        hostName: this.localName,
-        hasStream: Boolean(this.localStream),
-        peerId: myPeerId,
-      });
+      this.sendHostJoinAcceptedBundle(myPeerId);
       this.callbacks.onMessage({
         type: 'HELLO',
         name: msg.name,
@@ -1195,7 +1210,7 @@ export class DuoPeerService {
         hasStream: msg.hasStream,
         peerId: resolvedPeerId,
       });
-      this.markRoomEntered(gen, `join-hello-${via}`, resolvedPeerId);
+      this.markRoomEntered(gen, `join-request-${via}`, resolvedPeerId);
 
       // If Partner joined without camera/mic while Host HAS a camera, Host initiates MediaConnection in parallel
       if (!msg.hasStream && this.localStream && !this.hasSentLocalMediaStream && resolvedPeerId) {
@@ -1207,11 +1222,15 @@ export class DuoPeerService {
       return;
     }
 
-    if ((msg.type === 'JOIN_WELCOME' || msg.type === 'JOIN_CONFIRMED') && this.role === 'guest') {
+    if (
+      (msg.type === 'JOIN_ACCEPTED' || msg.type === 'JOIN_WELCOME' || msg.type === 'JOIN_CONFIRMED') &&
+      this.role === 'guest'
+    ) {
       const resolvedPeerId = msg.peerId || connPeerId;
       console.log(
         `[CoupleCam P2P][Partner] Received ${msg.type} from Host "${msg.hostName}" (via ${via}) -> entering Hub!`,
       );
+      this.callbacks.onMessage(msg);
       this.callbacks.onMessage({
         type: 'HELLO',
         name: msg.hostName,
@@ -1219,7 +1238,7 @@ export class DuoPeerService {
         hasStream: msg.hasStream,
         peerId: resolvedPeerId,
       });
-      this.markRoomEntered(gen, `join-welcome-${via}`, resolvedPeerId);
+      this.markRoomEntered(gen, `join-accepted-${via}`, resolvedPeerId);
       return;
     }
 
@@ -1277,25 +1296,8 @@ export class DuoPeerService {
       console.log(`[CoupleCam P2P][${roleLabel}] Step 4 (PeerJS): DataConnection OPEN with "${conn.peer}"`);
 
       if (this.role === 'host') {
-        console.log(`[CoupleCam P2P][Host] Sending immediate JOIN_WELCOME + HELLO to partner "${conn.peer}"`);
-        this.sendHandshakeMessage({
-          type: 'JOIN_WELCOME',
-          code: this.activeRoomCode,
-          hostName: this.localName,
-          hasStream: Boolean(this.localStream),
-        });
-        this.sendHandshakeMessage({
-          type: 'JOIN_CONFIRMED',
-          code: this.activeRoomCode,
-          hostName: this.localName,
-          hasStream: Boolean(this.localStream),
-        });
-        this.sendHandshakeMessage({
-          type: 'HELLO',
-          name: this.localName,
-          role: 'host',
-          hasStream: Boolean(this.localStream),
-        });
+        console.log(`[CoupleCam P2P][Host] Sending immediate JOIN_ACCEPTED + HELLO to partner "${conn.peer}"`);
+        this.sendHostJoinAcceptedBundle(this.peer?.id || undefined);
         this.markRoomEntered(gen, 'host-channel-open', conn.peer);
       } else {
         this.sendPartnerJoinHandshake(gen);
