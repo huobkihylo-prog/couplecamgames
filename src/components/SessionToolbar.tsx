@@ -107,11 +107,11 @@ export function SessionToolbar({
               data-testid="toolbar-status-pill"
               className={`${
                 isInGame ? 'hidden sm:inline-flex' : 'inline-flex'
-              } items-center gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 rounded-full bg-white border border-[#EAE4DC] text-[11px] sm:text-xs font-bold text-[#1F242D] shadow-xs whitespace-nowrap shrink-0`}
+              } items-center gap-1 sm:gap-1.5 px-2.5 py-1 rounded-full bg-white border border-[#EAE4DC] text-[11px] sm:text-xs font-bold text-[#1F242D] shadow-sm whitespace-nowrap shrink-0`}
             >
               <span aria-hidden="true">🤖</span>
-              <span className="sm:hidden">IA</span>
-              <span className="hidden sm:inline">Mode IA</span>
+              <span className="sm:hidden">{t.toolbarAiShort}</span>
+              <span className="hidden sm:inline">{t.toolbarAiMode}</span>
             </span>
           ) : (
             roomCode && (
@@ -121,10 +121,10 @@ export function SessionToolbar({
                 onClick={handleCopyCode}
                 title={t.copyCodeBtn}
                 aria-label={`${t.roomLabel} #${roomCode} — ${t.copyCodeBtn}`}
-                className="min-h-[34px] sm:min-h-[36px] inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-full bg-white border border-[#EAE4DC] hover:border-[#FF6B57]/45 text-[11px] sm:text-xs font-bold text-[#1F242D] shadow-xs transition-all whitespace-nowrap shrink-0 cursor-pointer"
+                className="min-h-[34px] inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-white border border-[#EAE4DC] hover:border-[#FF6B57]/45 text-[11px] sm:text-xs font-bold text-[#1F242D] shadow-sm transition-all whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <span className="w-2 h-2 rounded-full bg-[#16A34A] shrink-0" />
-                <span className="hidden sm:inline text-[#6B7280] font-semibold">En direct •</span>
+                <span className="hidden sm:inline text-[#6B7280] font-semibold">{t.toolbarLivePrefix}</span>
                 <span
                   dir="ltr"
                   data-testid="toolbar-room-code"
@@ -142,8 +142,8 @@ export function SessionToolbar({
           )}
         </div>
 
-        {/* Right: Round white buttons (Miroir, Micro, Caméra, Paramètres) */}
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+        {/* Right: Light round white buttons (w-9 h-9) */}
+        <div className="flex items-center gap-1.5 shrink-0">
           {/* Mirror Toggle */}
           <button
             type="button"
@@ -152,7 +152,7 @@ export function SessionToolbar({
             title={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
             aria-label={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
             aria-pressed={isMirrored}
-            className={`w-9 h-9 sm:w-10 sm:h-10 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-xs cursor-pointer ${
+            className={`w-9 h-9 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-sm cursor-pointer ${
               isMirrored
                 ? 'bg-white text-[#7C5CFC] border-[#7C5CFC]/35 hover:bg-[#EFE9FB]/40'
                 : 'bg-white text-[#6B7280] border-[#EAE4DC] hover:text-[#1F242D]'
@@ -169,7 +169,7 @@ export function SessionToolbar({
             title={micMuted ? t.micMuted : t.micActive}
             aria-label={micMuted ? t.micMuted : t.micActive}
             aria-pressed={micMuted}
-            className={`w-9 h-9 sm:w-10 sm:h-10 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-xs cursor-pointer ${
+            className={`w-9 h-9 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-sm cursor-pointer ${
               micMuted
                 ? 'bg-[#FEE2E2] text-[#DC2626] border-[#FCA5A5]'
                 : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
@@ -187,7 +187,7 @@ export function SessionToolbar({
             title={t.enableCamera}
             aria-label={t.enableCamera}
             aria-pressed={!cameraEnabled}
-            className={`w-9 h-9 sm:w-10 sm:h-10 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-xs disabled:opacity-45 cursor-pointer ${
+            className={`w-9 h-9 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-sm disabled:opacity-45 cursor-pointer ${
               !cameraEnabled
                 ? 'bg-[#FEE2E2] text-[#DC2626] border-[#FCA5A5]'
                 : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
@@ -202,10 +202,10 @@ export function SessionToolbar({
               type="button"
               data-testid="toolbar-settings-btn"
               onClick={() => setSettingsOpen((prev) => !prev)}
-              title="Paramètres"
-              aria-label="Paramètres"
+              title={t.toolbarSettingsLabel}
+              aria-label={t.toolbarSettingsLabel}
               aria-expanded={settingsOpen}
-              className={`w-9 h-9 sm:w-10 sm:h-10 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-xs cursor-pointer ${
+              className={`w-9 h-9 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-sm cursor-pointer ${
                 settingsOpen
                   ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
                   : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
@@ -220,14 +220,14 @@ export function SessionToolbar({
                 className="absolute end-0 mt-2 w-64 rounded-2xl bg-white border border-[#EAE4DC] shadow-[0_12px_36px_rgba(31,36,45,0.14)] p-3 space-y-3 z-50"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-[#6B7280]">Langue</span>
+                  <span className="text-xs font-bold text-[#6B7280]">{t.toolbarLanguageLabel}</span>
                   <LanguageSwitcher />
                 </div>
 
                 <button
                   type="button"
                   onClick={onToggleSfx}
-                  className="w-full min-h-[42px] flex items-center justify-between px-3 py-2 rounded-xl bg-[#FAF7F2] hover:bg-[#F3EEE6] border border-[#EAE4DC] text-xs font-bold text-[#1F242D] transition-colors"
+                  className="w-full min-h-[42px] flex items-center justify-between px-3 py-2 rounded-xl bg-[#FAF7F2] hover:bg-[#F3EEE6] border border-[#EAE4DC] text-xs font-bold text-[#1F242D] transition-colors cursor-pointer"
                 >
                   <span className="inline-flex items-center gap-2">
                     {sfxMuted ? (
@@ -235,7 +235,7 @@ export function SessionToolbar({
                     ) : (
                       <Volume2 className="w-4 h-4 text-[#FF6B57]" />
                     )}
-                    <span>Effets sonores</span>
+                    <span>{t.toolbarSfxLabel}</span>
                   </span>
                   <span
                     className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
@@ -253,7 +253,7 @@ export function SessionToolbar({
                     setSettingsOpen(false);
                     onLeaveRoom();
                   }}
-                  className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA] hover:bg-[#FEE2E2] transition-colors"
+                  className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA] hover:bg-[#FEE2E2] transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4 shrink-0" />
                   <span>{t.leave}</span>

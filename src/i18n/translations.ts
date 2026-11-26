@@ -60,6 +60,18 @@ export interface TranslationDictionary {
   // Hub
   hubTitle: string;
   hubSubtitle: string;
+  hubSearchPlaceholder: string;
+  hubFeaturedBadge: string;
+  hubPlayBtn: string;
+  hubNoResultsTitle: string;
+  hubNoResultsSub: string;
+  hubShowAllBtn: string;
+  toolbarAiShort: string;
+  toolbarAiMode: string;
+  toolbarLivePrefix: string;
+  toolbarLanguageLabel: string;
+  toolbarSfxLabel: string;
+  toolbarSettingsLabel: string;
   gamesAvailable: string;
   camReady: string;
   camLoading: string;
@@ -339,6 +351,18 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
     errInvalidCode: 'Saisis le code complet à 4 caractères du salon.',
     hubTitle: 'Choisissez votre prochain jeu',
     hubSubtitle: 'Un clic lance la partie instantanément sur vos deux écrans sans couper l’appel.',
+    hubSearchPlaceholder: 'Rechercher un jeu...',
+    hubFeaturedBadge: '✨ À LA UNE • 2 JOUEURS',
+    hubPlayBtn: 'Jouer',
+    hubNoResultsTitle: 'Aucun jeu trouvé',
+    hubNoResultsSub: 'Essaie un autre mot-clé ou une autre catégorie.',
+    hubShowAllBtn: 'Afficher tous les jeux',
+    toolbarAiShort: 'IA',
+    toolbarAiMode: 'Mode IA',
+    toolbarLivePrefix: 'En direct •',
+    toolbarLanguageLabel: 'Langue',
+    toolbarSfxLabel: 'Effets sonores',
+    toolbarSettingsLabel: 'Paramètres',
     gamesAvailable: '12 jeux disponibles',
     camReady: 'Suivi webcam MediaPipe prêt',
     camLoading: 'Chargement de MediaPipe...',
@@ -781,6 +805,18 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
     errInvalidCode: 'Enter the full 4-character room code.',
     hubTitle: 'Pick your next game',
     hubSubtitle: 'One click launches the game on both screens instantly without dropping the call.',
+    hubSearchPlaceholder: 'Search a game...',
+    hubFeaturedBadge: '✨ FEATURED • 2 PLAYERS',
+    hubPlayBtn: 'Play',
+    hubNoResultsTitle: 'No game found',
+    hubNoResultsSub: 'Try another keyword or category.',
+    hubShowAllBtn: 'Show all games',
+    toolbarAiShort: 'AI',
+    toolbarAiMode: 'AI Mode',
+    toolbarLivePrefix: 'Live •',
+    toolbarLanguageLabel: 'Language',
+    toolbarSfxLabel: 'Sound effects',
+    toolbarSettingsLabel: 'Settings',
     gamesAvailable: '12 games available',
     camReady: 'MediaPipe webcam tracking ready',
     camLoading: 'Loading MediaPipe...',
@@ -1223,6 +1259,18 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
     errInvalidCode: 'أدخل رمز الغرفة المكوّن من 4 أحرف/أرقام.',
     hubTitle: 'اختارا لعبتكما التالية',
     hubSubtitle: 'نقرة واحدة تبدأ اللعبة فوراً على الشاشتين دون قطع مكالمة الفيديو.',
+    hubSearchPlaceholder: 'ابحث عن لعبة...',
+    hubFeaturedBadge: '✨ مميز • لاعبان',
+    hubPlayBtn: 'العب',
+    hubNoResultsTitle: 'لم يتم العثور على لعبة',
+    hubNoResultsSub: 'جرّب كلمة أخرى أو فئة أخرى.',
+    hubShowAllBtn: 'عرض كل الألعاب',
+    toolbarAiShort: 'ذكاء',
+    toolbarAiMode: 'وضع الذكاء',
+    toolbarLivePrefix: 'مباشر •',
+    toolbarLanguageLabel: 'اللغة',
+    toolbarSfxLabel: 'المؤثرات الصوتية',
+    toolbarSettingsLabel: 'الإعدادات',
     gamesAvailable: '12 لعبة متاحة',
     camReady: 'تتبع الكاميرا MediaPipe جاهز',
     camLoading: 'جارٍ تحميل MediaPipe...',
