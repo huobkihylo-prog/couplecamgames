@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type {
   ParchisiColor,
   ParchisiMoveOption,
@@ -35,6 +35,12 @@ interface ParchisiBoardSvgProps {
   hoveredMove: ParchisiMoveOption | null;
   animOverride: { color: ParchisiColor; tokenId: number; progress: number; hopBoost: boolean } | null;
   floatingReactions: FloatingReactionItem[];
+  /** Base Camera Mode props (zero <foreignObject>, pure HTML z-0 layer behind SVG z-10) */
+  baseCamsEnabled: boolean;
+  redBaseStream: MediaStream | null;
+  yellowBaseStream: MediaStream | null;
+  mirrorRedBase: boolean;
+  mirrorYellowBase: boolean;
   onTokenClick: (tokenId: number) => void;
   onTokenHover: (tokenId: number | null) => void;
   onSelectMoveOption: (move: ParchisiMoveOption) => void;
@@ -43,10 +49,57 @@ interface ParchisiBoardSvgProps {
 }
 
 const STAR_POINTS =
-  '0,-9.5 2.7,-3.2 9.4,-2.8 4.2,1.6 5.8,8.3 0,4.6 -5.8,8.3 -4.2,1.6 -9.4,-2.8 -2.7,-3.2';
+  '0,-9.8 2.8,-3.3 9.6,-2.9 4.3,1.7 6.0,8.5 0,4.7 -6.0,8.5 -4.3,1.7 -9.6,-2.9 -2.8,-3.3';
 
 /** Classic 5-point crown emblem centered on glossy 3D game tokens */
 const CROWN_PATH = 'M -7,5 L -8.5,-4 L -3.5,0.5 L 0,-6 L 3.5,0.5 L 8.5,-4 L 7,5 Z';
+
+/** Pure percentage CSS bounds aligned identically to the 780x780 SVG viewBox corner bases */
+const BASE_VIDEO_BOUNDS = {
+  red: {
+    left: `${(CORNER_BASES.red.x / PARCHISI_VIEWBOX) * 100}%`,
+    top: `${(CORNER_BASES.red.y / PARCHISI_VIEWBOX) * 100}%`,
+    width: `${(CORNER_BASES.red.size / PARCHISI_VIEWBOX) * 100}%`,
+    height: `${(CORNER_BASES.red.size / PARCHISI_VIEWBOX) * 100}%`,
+  },
+  yellow: {
+    left: `${(CORNER_BASES.yellow.x / PARCHISI_VIEWBOX) * 100}%`,
+    top: `${(CORNER_BASES.yellow.y / PARCHISI_VIEWBOX) * 100}%`,
+    width: `${(CORNER_BASES.yellow.size / PARCHISI_VIEWBOX) * 100}%`,
+    height: `${(CORNER_BASES.yellow.size / PARCHISI_VIEWBOX) * 100}%`,
+  },
+} as const;
+
+/**
+ * Helper to generate an evenodd SVG path for a rounded outer rectangle with an inner rectangular hole,
+ * so the wooden frame NEVER blocks the z-0 HTML base camera videos behind the Red/Yellow bases.
+ */
+function buildFrameWithCutoutPath(
+  ox: number,
+  oy: number,
+  ow: number,
+  oh: number,
+  r: number,
+  ix: number,
+  iy: number,
+  iw: number,
+  ih: number,
+): string {
+  const outer = [
+    `M ${ox + r} ${oy}`,
+    `H ${ox + ow - r}`,
+    `Q ${ox + ow} ${oy} ${ox + ow} ${oy + r}`,
+    `V ${oy + oh - r}`,
+    `Q ${ox + ow} ${oy + oh} ${ox + ow - r} ${oy + oh}`,
+    `H ${ox + r}`,
+    `Q ${ox} ${oy + oh} ${ox} ${oy + oh - r}`,
+    `V ${oy + r}`,
+    `Q ${ox} ${oy} ${ox + r} ${oy}`,
+    'Z',
+  ].join(' ');
+  const hole = `M ${ix} ${iy} H ${ix + iw} V ${iy + ih} H ${ix} Z`;
+  return `${outer} ${hole}`;
+}
 
 export function ParchisiBoardSvg({
   state,
@@ -56,6 +109,11 @@ export function ParchisiBoardSvg({
   hoveredMove,
   animOverride,
   floatingReactions,
+  baseCamsEnabled,
+  redBaseStream,
+  yellowBaseStream,
+  mirrorRedBase,
+  mirrorYellowBase,
   onTokenClick,
   onTokenHover,
   onSelectMoveOption,
@@ -65,6 +123,82 @@ export function ParchisiBoardSvg({
   const O = PARCHISI_BOARD_ORIGIN; // 30
   const B = PARCHISI_BOARD_SIZE; // 720
   const C = O + B / 2; // 390
+
+  const redVideoRef = useRef<HTMLVideoElement | null>(null);
+  const yellowVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  const showRedBaseVideo = baseCamsEnabled && Boolean(redBaseStream);
+  const showYellowBaseVideo = baseCamsEnabled && Boolean(yellowBaseStream);
+
+  // Universal cross-browser video playback helper (Safari iOS, Android Chrome/Samsung/Firefox/Brave, Desktop)
+  const ensureBaseVideosPlaying = useCallback(() => {
+    const pairs: [HTMLVideoElement | null, boolean][] = [
+      [redVideoRef.current, showRedBaseVideo],
+      [yellowVideoRef.current, showYellowBaseVideo],
+    ];
+    for (const [el, active] of pairs) {
+      if (el && active && el.srcObject) {
+        el.muted = true;
+        el.playsInline = true;
+        el.play().catch(() => {});
+      }
+    }
+  }, [showRedBaseVideo, showYellowBaseVideo]);
+
+  // Attach/detach Red base <video> srcObject cleanly (NEVER stops MediaStreamTracks!)
+  useEffect(() => {
+    const el = redVideoRef.current;
+    if (!el) return;
+    el.setAttribute('webkit-playsinline', 'true');
+    el.setAttribute('playsinline', 'true');
+    el.muted = true;
+    if (showRedBaseVideo && redBaseStream) {
+      if (el.srcObject !== redBaseStream) {
+        el.srcObject = redBaseStream;
+      }
+      el.play().catch(() => {});
+    } else {
+      el.srcObject = null;
+    }
+  }, [showRedBaseVideo, redBaseStream]);
+
+  // Attach/detach Yellow base <video> srcObject cleanly (NEVER stops MediaStreamTracks!)
+  useEffect(() => {
+    const el = yellowVideoRef.current;
+    if (!el) return;
+    el.setAttribute('webkit-playsinline', 'true');
+    el.setAttribute('playsinline', 'true');
+    el.muted = true;
+    if (showYellowBaseVideo && yellowBaseStream) {
+      if (el.srcObject !== yellowBaseStream) {
+        el.srcObject = yellowBaseStream;
+      }
+      el.play().catch(() => {});
+    } else {
+      el.srcObject = null;
+    }
+  }, [showYellowBaseVideo, yellowBaseStream]);
+
+  // Automatically resume base videos when returning from background tab / WhatsApp on mobile
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        ensureBaseVideosPlaying();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [ensureBaseVideosPlaying]);
+
+  // Precompute frame paths with crisp 720x720 interior cutout so base videos shine through cleanly
+  const outerWoodFramePath = useMemo(
+    () => buildFrameWithCutoutPath(2, 2, PARCHISI_VIEWBOX - 4, PARCHISI_VIEWBOX - 4, 28, O, O, B, B),
+    [O, B],
+  );
+  const innerWoodChannelPath = useMemo(
+    () => buildFrameWithCutoutPath(O - 6, O - 6, B + 12, B + 12, 12, O, O, B, B),
+    [O, B],
+  );
 
   // Group legal moves by tokenId for the active player
   const movesByTokenId = useMemo(() => {
@@ -157,24 +291,52 @@ export function ParchisiBoardSvg({
     return positioned;
   }, [state.tokens, state.turn, animOverride, canInteract, movesByTokenId, selectedTokenId]);
 
-  // Compute target tile preview geometry for hovered move
-  const targetPreview = useMemo(() => {
-    if (!hoveredMove) return null;
-    const pt = getTokenBoardPoint(
-      hoveredMove.color,
-      hoveredMove.tokenId,
-      hoveredMove.toProgress,
-      0,
-      1,
-    );
-    return {
-      x: pt.x,
-      y: pt.y,
-      isCapture: hoveredMove.captures.length > 0,
-      isHome: hoveredMove.reachesHome,
-      label: hoveredMove.label,
-    };
-  }, [hoveredMove]);
+  /**
+   * Direct-tap highlighted destination tiles (Double Validation: tap token OR tap destination tile!):
+   * - If a token is selected: highlight ALL of its legal landing tiles as directly clickable targets.
+   * - Else if a move is hovered: highlight that hovered move's exact landing tile.
+   * - Else if exactly 1 movable token exists on the board: pre-highlight its landing tile(s) immediately
+   *   so the player can tap EITHER the token OR the illuminated destination tile in one tap!
+   */
+  const clickableDestinations = useMemo(() => {
+    if (!canInteract) return [];
+
+    let sourceMoves: ParchisiMoveOption[] = [];
+    if (selectedTokenId !== null) {
+      sourceMoves = movesByTokenId.get(selectedTokenId) ?? [];
+    } else if (hoveredMove) {
+      sourceMoves = [hoveredMove];
+    } else if (movesByTokenId.size === 1) {
+      const onlyMoves = Array.from(movesByTokenId.values())[0] ?? [];
+      sourceMoves = onlyMoves;
+    }
+
+    // Deduplicate identical landing progress (keeping preferred option first)
+    const seen = new Set<number>();
+    const results: {
+      move: ParchisiMoveOption;
+      x: number;
+      y: number;
+      isCapture: boolean;
+      isHome: boolean;
+      isHovered: boolean;
+    }[] = [];
+
+    for (const m of sourceMoves) {
+      if (seen.has(m.toProgress)) continue;
+      seen.add(m.toProgress);
+      const pt = getTokenBoardPoint(m.color, m.tokenId, m.toProgress, 0, 1);
+      results.push({
+        move: m,
+        x: pt.x,
+        y: pt.y,
+        isCapture: m.captures.length > 0,
+        isHome: m.reachesHome,
+        isHovered: hoveredMove?.id === m.id,
+      });
+    }
+    return results;
+  }, [canInteract, selectedTokenId, movesByTokenId, hoveredMove]);
 
   // Selected token floating picker anchor (percentage coords over the square SVG container)
   const activePicker = useMemo(() => {
@@ -185,11 +347,11 @@ export function ParchisiBoardSvg({
       (item) => item.token.color === state.turn && item.token.id === selectedTokenId,
     );
     if (!found) return null;
-    const leftPct = Math.max(15, Math.min(85, (found.x / PARCHISI_VIEWBOX) * 100));
-    const preferBelow = found.y < 140;
+    const leftPct = Math.max(20, Math.min(80, (found.x / PARCHISI_VIEWBOX) * 100));
+    const preferBelow = found.y < 155;
     const topPct = preferBelow
-      ? Math.min(88, ((found.y + 38) / PARCHISI_VIEWBOX) * 100)
-      : Math.max(10, ((found.y - 36) / PARCHISI_VIEWBOX) * 100);
+      ? Math.min(86, ((found.y + 42) / PARCHISI_VIEWBOX) * 100)
+      : Math.max(12, ((found.y - 40) / PARCHISI_VIEWBOX) * 100);
     return {
       options,
       leftPct,
@@ -215,14 +377,55 @@ export function ParchisiBoardSvg({
   return (
     <div
       data-testid="parchisi-board-wrapper"
-      className="relative aspect-square w-full h-full max-w-full max-h-full select-none flex items-center justify-center"
+      style={{ WebkitTapHighlightColor: 'transparent' }}
+      className="relative aspect-square w-full h-full max-w-full max-h-full overflow-hidden rounded-[3.6%] select-none touch-manipulation flex items-center justify-center"
+      onPointerDown={ensureBaseVideosPlaying}
       onClick={(e) => {
         if (e.target === e.currentTarget) onDismissPicker();
       }}
     >
+      {/* LAYER z-0: Pure HTML Base Camera <video> Elements (ZERO <foreignObject>, 100% Safari iOS/Android/Desktop safe) */}
+      <div
+        data-testid="parchisi-base-video-red"
+        data-cam-active={showRedBaseVideo ? 'true' : 'false'}
+        style={BASE_VIDEO_BOUNDS.red}
+        className={`pointer-events-none absolute z-0 overflow-hidden transition-opacity duration-200 ${
+          showRedBaseVideo ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        <video
+          ref={redVideoRef}
+          autoPlay
+          playsInline
+          muted
+          onLoadedMetadata={ensureBaseVideosPlaying}
+          className={`w-full h-full object-cover ${mirrorRedBase ? 'scale-x-[-1]' : ''}`}
+        />
+      </div>
+
+      <div
+        data-testid="parchisi-base-video-yellow"
+        data-cam-active={showYellowBaseVideo ? 'true' : 'false'}
+        style={BASE_VIDEO_BOUNDS.yellow}
+        className={`pointer-events-none absolute z-0 overflow-hidden transition-opacity duration-200 ${
+          showYellowBaseVideo ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
+        <video
+          ref={yellowVideoRef}
+          autoPlay
+          playsInline
+          muted
+          onLoadedMetadata={ensureBaseVideosPlaying}
+          className={`w-full h-full object-cover ${mirrorYellowBase ? 'scale-x-[-1]' : ''}`}
+        />
+      </div>
+
+      {/* LAYER z-10: Crisp Official 68-Tile Wooden Parcheesi SVG Board + 100% Opaque 3D Crown Tokens */}
       <svg
         viewBox={`0 0 ${PARCHISI_VIEWBOX} ${PARCHISI_VIEWBOX}`}
-        className="w-full h-full drop-shadow-[0_14px_30px_rgba(0,0,0,0.62)]"
+        style={{ WebkitTapHighlightColor: 'transparent' }}
+        className="relative z-10 w-full h-full touch-manipulation select-none drop-shadow-[0_14px_30px_rgba(0,0,0,0.62)]"
         role="img"
         aria-label="Official Parcheesi 68-tile board"
         onClick={(e) => {
@@ -259,18 +462,15 @@ export function ParchisiBoardSvg({
             <stop offset="100%" stopColor="rgba(255,255,255,0.22)" />
           </radialGradient>
 
-          <filter id="token-shadow" x="-30%" y="-30%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="2.5" stdDeviation="2.2" floodColor="#1A0E07" floodOpacity="0.52" />
+          <filter id="token-shadow" x="-35%" y="-35%" width="170%" height="170%">
+            <feDropShadow dx="0" dy="2.8" stdDeviation="2.4" floodColor="#1A0E07" floodOpacity="0.58" />
           </filter>
         </defs>
 
-        {/* 1. Warm Beveled Wooden Outer Frame */}
-        <rect
-          x="2"
-          y="2"
-          width={PARCHISI_VIEWBOX - 4}
-          height={PARCHISI_VIEWBOX - 4}
-          rx="28"
+        {/* 1. Warm Beveled Wooden Outer Frame (evenodd cutout leaves interior open for z-0 base videos) */}
+        <path
+          d={outerWoodFramePath}
+          fillRule="evenodd"
           fill="url(#wood-frame-outer)"
           stroke="#5A3315"
           strokeWidth="3"
@@ -287,27 +487,12 @@ export function ParchisiBoardSvg({
           strokeWidth="2.5"
         />
         {/* Recessed inner wooden channel border */}
-        <rect
-          x={O - 6}
-          y={O - 6}
-          width={B + 12}
-          height={B + 12}
-          rx="12"
+        <path
+          d={innerWoodChannelPath}
+          fillRule="evenodd"
           fill="#8C562B"
           stroke="url(#wood-frame-bevel)"
           strokeWidth="3"
-        />
-
-        {/* Crisp white inner board backing */}
-        <rect
-          x={O}
-          y={O}
-          width={B}
-          height={B}
-          rx="6"
-          fill="#FFFFFF"
-          stroke="#6E4422"
-          strokeWidth="2"
         />
 
         {/* 2. Four Corner Home Bases (Blue TL, Yellow TR, Red BL, Green BR) */}
@@ -316,72 +501,102 @@ export function ParchisiBoardSvg({
           const pal = COLOR_PALETTE[color];
           const isTurn = state.turn === color && state.phase !== 'READY';
           const isActiveColor = state.activeColors.includes(color);
+          const isLiveCamBase =
+            (color === 'red' && showRedBaseVideo) || (color === 'yellow' && showYellowBaseVideo);
+
+          // Translucent colored tint over live video vs 100% opaque official solid classic color
+          let baseFill = pal.fill;
+          if (isLiveCamBase) {
+            if (color === 'red') {
+              baseFill = isTurn ? 'rgba(229, 57, 53, 0.28)' : 'rgba(229, 57, 53, 0.42)';
+            } else {
+              baseFill = isTurn ? 'rgba(251, 192, 45, 0.26)' : 'rgba(251, 192, 45, 0.40)';
+            }
+          }
 
           return (
-            <g key={`base-${color}`}>
+            <g
+              key={`base-${color}`}
+              data-testid={`parchisi-base-${color}`}
+              data-transparent={isLiveCamBase ? 'true' : 'false'}
+            >
               <rect
                 x={base.x}
                 y={base.y}
                 width={base.size}
                 height={base.size}
-                fill={pal.fill}
+                fill={baseFill}
                 stroke="#6E4422"
                 strokeWidth="1.5"
-                opacity={isActiveColor ? 1 : 0.88}
+                opacity={isLiveCamBase ? 1 : isActiveColor ? 1 : 0.92}
               />
-              {/* Soft inset white classic square border inside corner base */}
+              {/* Soft inset frame inside corner base (glows gold on active player's turn) */}
               <rect
-                x={base.x + 14}
-                y={base.y + 14}
-                width={base.size - 28}
-                height={base.size - 28}
+                x={base.x + 12}
+                y={base.y + 12}
+                width={base.size - 24}
+                height={base.size - 24}
                 rx="18"
-                fill="rgba(255,255,255,0.12)"
-                stroke={isTurn ? '#FEF08A' : 'rgba(255,255,255,0.42)'}
-                strokeWidth={isTurn ? '3.5' : '2'}
+                fill={isLiveCamBase ? 'none' : 'rgba(255,255,255,0.12)'}
+                stroke={isTurn ? '#FEF08A' : isLiveCamBase ? 'rgba(255,255,255,0.68)' : 'rgba(255,255,255,0.45)'}
+                strokeWidth={isTurn ? '4' : '2'}
               />
-              {/* 4 Recessed Darker Circular Token Slots */}
+              {/* 4 Circular Token Slots: subtle thin rings over live camera, classic recessed circles when solid */}
               {base.slots.map((slot, idx) => (
                 <g key={`slot-${color}-${idx}`}>
-                  <circle
-                    cx={slot.x}
-                    cy={slot.y}
-                    r="27"
-                    fill={pal.slot}
-                    stroke="rgba(255,255,255,0.45)"
-                    strokeWidth="2"
-                  />
-                  <circle cx={slot.x} cy={slot.y} r="25" fill="url(#slot-recess)" />
+                  {isLiveCamBase ? (
+                    <circle
+                      cx={slot.x}
+                      cy={slot.y}
+                      r="25"
+                      fill="rgba(0,0,0,0.14)"
+                      stroke="rgba(255,255,255,0.72)"
+                      strokeWidth="2"
+                      strokeDasharray="4 3"
+                    />
+                  ) : (
+                    <>
+                      <circle
+                        cx={slot.x}
+                        cy={slot.y}
+                        r="27"
+                        fill={pal.slot}
+                        stroke="rgba(255,255,255,0.52)"
+                        strokeWidth="2"
+                      />
+                      <circle cx={slot.x} cy={slot.y} r="25" fill="url(#slot-recess)" />
+                    </>
+                  )}
                 </g>
               ))}
             </g>
           );
         })}
 
-        {/* 3. Exact 68-Tile Numbered Outer Track (Counter-Clockwise 1..68) */}
+        {/* 3. Exact 68-Tile Numbered Outer Track (100% Opaque, Ultra-Clear 1.5px Borders & Crisp Numbers 1..68) */}
         {OUTER_CELLS.map((cell) => {
           let fill = '#FFFFFF';
-          let numColor = '#736E68';
+          let numColor = '#46413C';
 
           if (cell.startFor) {
             fill = COLOR_PALETTE[cell.startFor].fill;
-            numColor = cell.startFor === 'yellow' ? '#4A3102' : 'rgba(255,255,255,0.92)';
+            numColor = cell.startFor === 'yellow' ? '#3B2500' : '#FFFFFF';
           } else if (cell.isStar) {
-            fill = '#D4D0C9';
-            numColor = '#4F4B46';
+            fill = '#CFCAC2';
+            numColor = '#2E2A26';
           }
 
           const isHorizontal = cell.orientation === 'horizontal';
           const numX = cell.isStar
             ? isHorizontal
-              ? cell.x + 13
+              ? cell.x + 14
               : cell.cx
             : cell.cx;
           const numY = cell.isStar
             ? isHorizontal
-              ? cell.cy + 3.5
-              : cell.y + 13
-            : cell.cy + 3.5;
+              ? cell.cy + 3.8
+              : cell.y + 14
+            : cell.cy + 3.8;
 
           return (
             <g key={`outer-${cell.id}`}>
@@ -391,36 +606,36 @@ export function ParchisiBoardSvg({
                 width={cell.w}
                 height={cell.h}
                 fill={fill}
-                stroke="#A8A29A"
-                strokeWidth="1.25"
+                stroke="#8D867E"
+                strokeWidth="1.5"
               />
-              {/* Centered dark-gray 5-point Star on the 8 Star Safe Tiles */}
+              {/* High-contrast dark-gray 5-point Star on the 8 Star Safe Tiles */}
               {cell.isStar && (
                 <polygon
                   points={STAR_POINTS}
-                  transform={`translate(${cell.cx}, ${cell.cy}) scale(1.05)`}
-                  fill="#6E6963"
-                  opacity="0.72"
+                  transform={`translate(${cell.cx}, ${cell.cy}) scale(1.08)`}
+                  fill="#4B4640"
+                  opacity="0.86"
                 />
               )}
-              {/* Subtle centered safe circle ring on Colored Start Tiles */}
+              {/* Crisp centered safe circle ring on Colored Start Tiles */}
               {cell.startFor && (
                 <circle
                   cx={cell.cx}
                   cy={cell.cy}
-                  r="10"
+                  r="10.5"
                   fill="none"
-                  stroke={cell.startFor === 'yellow' ? 'rgba(74,49,2,0.32)' : 'rgba(255,255,255,0.45)'}
-                  strokeWidth="1.6"
+                  stroke={cell.startFor === 'yellow' ? 'rgba(59,37,0,0.38)' : 'rgba(255,255,255,0.58)'}
+                  strokeWidth="1.8"
                 />
               )}
-              {/* Crisp subtle tile number (1..68) */}
+              {/* Ultra-clear tile number (1..68) */}
               <text
                 x={numX}
                 y={numY}
                 textAnchor="middle"
-                fontSize="9.5"
-                fontWeight="700"
+                fontSize="10.5"
+                fontWeight="800"
                 fill={numColor}
                 style={{ fontVariantNumeric: 'tabular-nums' }}
               >
@@ -430,7 +645,7 @@ export function ParchisiBoardSvg({
           );
         })}
 
-        {/* 4. Four Colored 7-Tile Home Columns */}
+        {/* 4. Four Colored 7-Tile Home Columns (100% Opaque) */}
         {ALL_PARCHISI_COLORS.map((color) =>
           CORRIDOR_CELLS[color].map((cell) => (
             <g key={`corr-${color}-${cell.index}`}>
@@ -440,46 +655,41 @@ export function ParchisiBoardSvg({
                 width={cell.w}
                 height={cell.h}
                 fill={COLOR_PALETTE[color].fill}
-                stroke={color === 'yellow' ? '#B8860B' : 'rgba(255,255,255,0.48)'}
-                strokeWidth="1.25"
+                stroke={color === 'yellow' ? '#A87906' : 'rgba(255,255,255,0.58)'}
+                strokeWidth="1.5"
               />
-              {/* Subtle chevron arrow pointing toward center triangle on first & last home-column tiles */}
               {(cell.index === 0 || cell.index === 6) && (
                 <circle
                   cx={cell.cx}
                   cy={cell.cy}
-                  r="3.2"
-                  fill={color === 'yellow' ? 'rgba(74,49,2,0.28)' : 'rgba(255,255,255,0.4)'}
+                  r="3.5"
+                  fill={color === 'yellow' ? 'rgba(59,37,0,0.34)' : 'rgba(255,255,255,0.48)'}
                 />
               )}
             </g>
           )),
         )}
 
-        {/* 5. Center 4-Triangle Goal (Red Left, Green Bottom, Yellow Right, Blue Top) */}
+        {/* 5. Center 4-Triangle Goal (100% Opaque — Red Left, Green Bottom, Yellow Right, Blue Top) */}
         <g>
-          {/* Red Left Triangle */}
           <polygon
             points={`${O + 240},${O + 240} ${C},${C} ${O + 240},${O + 480}`}
             fill={COLOR_PALETTE.red.fill}
             stroke="#5D3A1A"
             strokeWidth="1.8"
           />
-          {/* Green Bottom Triangle */}
           <polygon
             points={`${O + 240},${O + 480} ${C},${C} ${O + 480},${O + 480}`}
             fill={COLOR_PALETTE.green.fill}
             stroke="#5D3A1A"
             strokeWidth="1.8"
           />
-          {/* Yellow Right Triangle */}
           <polygon
             points={`${O + 480},${O + 240} ${C},${C} ${O + 480},${O + 480}`}
             fill={COLOR_PALETTE.yellow.fill}
             stroke="#5D3A1A"
             strokeWidth="1.8"
           />
-          {/* Blue Top Triangle */}
           <polygon
             points={`${O + 240},${O + 240} ${C},${C} ${O + 480},${O + 240}`}
             fill={COLOR_PALETTE.blue.fill}
@@ -504,7 +714,19 @@ export function ParchisiBoardSvg({
           />
         </g>
 
-        {/* 6. Subtle Blockade Shield/Lock Badges on Outer Track Squares with 2 Same-Color Tokens */}
+        {/* Crisp outer border of the 720x720 inner playing field */}
+        <rect
+          x={O}
+          y={O}
+          width={B}
+          height={B}
+          fill="none"
+          stroke="#6E4422"
+          strokeWidth="2"
+          className="pointer-events-none"
+        />
+
+        {/* 6. Subtle Blockade Shield Badges on Outer Track Squares with 2 Same-Color Tokens */}
         {Array.from(outerBlockades.entries()).map(([square, owner]) => {
           const cell = getOuterCell(square);
           const bx = cell.orientation === 'horizontal' ? cell.x + cell.w - 9 : cell.cx;
@@ -515,12 +737,7 @@ export function ParchisiBoardSvg({
               transform={`translate(${bx}, ${by})`}
               className="pointer-events-none"
             >
-              <circle
-                r="7.5"
-                fill="#1F120A"
-                stroke="#FACC15"
-                strokeWidth="1.5"
-              />
+              <circle r="7.8" fill="#1F120A" stroke="#FACC15" strokeWidth="1.6" />
               <path
                 d="M 0,-4.2 L 3.4,-2.4 L 3.4,0.8 C 3.4,2.8 1.8,4.1 0,4.8 C -1.8,4.1 -3.4,2.8 -3.4,0.8 L -3.4,-2.4 Z"
                 fill={COLOR_PALETTE[owner].light}
@@ -529,50 +746,84 @@ export function ParchisiBoardSvg({
           );
         })}
 
-        {/* 7. Target Landing Tile Preview */}
-        {targetPreview && (
-          <g className="pointer-events-none">
-            <circle
-              cx={targetPreview.x}
-              cy={targetPreview.y}
-              r="22"
-              fill={targetPreview.isCapture ? 'rgba(229,57,53,0.28)' : 'rgba(250,204,21,0.32)'}
-              stroke={targetPreview.isCapture ? '#EF4444' : '#FACC15'}
-              strokeWidth="3.5"
-              strokeDasharray="6 4"
-            >
-              <animate
-                attributeName="r"
-                values="19;24;19"
-                dur="0.85s"
-                repeatCount="indefinite"
-              />
-            </circle>
-            <circle
-              cx={targetPreview.x}
-              cy={targetPreview.y}
-              r="5"
-              fill={targetPreview.isCapture ? '#EF4444' : '#FACC15'}
-            />
-          </g>
-        )}
+        {/* 7. Illuminated & Directly Tappable Destination Landing Tiles (Double Validation!) */}
+        {clickableDestinations.map((dest) => {
+          const ringColor = dest.isCapture
+            ? '#EF4444'
+            : dest.isHome
+              ? '#22C55E'
+              : '#FACC15';
+          const fillTint = dest.isCapture
+            ? 'rgba(239,68,68,0.34)'
+            : dest.isHome
+              ? 'rgba(34,197,94,0.34)'
+              : 'rgba(250,204,21,0.36)';
 
-        {/* 8. Glossy 3D Game Tokens */}
+          return (
+            <g
+              key={`dest-${dest.move.id}`}
+              data-testid={`parchisi-dest-${dest.move.id}`}
+              role="button"
+              tabIndex={0}
+              aria-label={`Move to target (${dest.move.label})`}
+              style={{ cursor: 'pointer', touchAction: 'manipulation' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectMoveOption(dest.move);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onSelectMoveOption(dest.move);
+                }
+              }}
+              onMouseEnter={() => onHoverMoveOption(dest.move)}
+              onMouseLeave={() => onHoverMoveOption(null)}
+            >
+              {/* Generous >= 44px transparent touch hitbox over highlighted destination tile */}
+              <circle cx={dest.x} cy={dest.y} r="40" fill="transparent" />
+              <circle
+                cx={dest.x}
+                cy={dest.y}
+                r={dest.isHovered ? '24' : '21'}
+                fill={fillTint}
+                stroke={ringColor}
+                strokeWidth="3.8"
+                strokeDasharray="6 4"
+              >
+                <animate
+                  attributeName="r"
+                  values="19;25;19"
+                  dur="0.85s"
+                  repeatCount="indefinite"
+                />
+              </circle>
+              <circle cx={dest.x} cy={dest.y} r="6" fill={ringColor} stroke="#FFFFFF" strokeWidth="1.5" />
+            </g>
+          );
+        })}
+
+        {/* 8. Glossy 100% Opaque 3D Game Tokens with Enlarged Touch Hitboxes (>= 44x44px effective) */}
         {renderTokens.map(({ token, x, y, stackSize, isMovable, isSelected }) => {
           const pal = COLOR_PALETTE[token.color];
-          const baseScale = stackSize >= 2 ? 0.78 : 1;
-          const hopScale = token.hopBoost ? 1.2 : isSelected ? 1.12 : 1;
+          const baseScale = stackSize >= 2 ? 0.8 : 1;
+          const hopScale = token.hopBoost ? 1.2 : isSelected ? 1.16 : isMovable ? 1.07 : 1;
           const totalScale = baseScale * hopScale;
+          const liftY = token.hopBoost ? -5 : isSelected ? -3.5 : isMovable ? -2 : 0;
+          // Enlarged touch radius: r=46 when solo (>= 44x44px effective on 374px mobile board),
+          // r=24 when stacked side-by-side so adjacent tokens never overlap each other's hit area.
+          const hitRadius = stackSize >= 2 ? 24 : 46;
 
           return (
             <g
               key={`token-${token.color}-${token.id}`}
               data-testid={`parchisi-token-${token.color}-${token.id}`}
               data-movable={isMovable ? 'true' : 'false'}
-              transform={`translate(${x}, ${y}) scale(${totalScale})`}
+              transform={`translate(${x}, ${y + liftY}) scale(${totalScale})`}
               style={{
                 transition: 'transform 105ms cubic-bezier(0.22, 1, 0.36, 1)',
                 cursor: isMovable ? 'pointer' : 'default',
+                touchAction: 'manipulation',
               }}
               role={isMovable ? 'button' : undefined}
               tabIndex={isMovable ? 0 : undefined}
@@ -598,67 +849,63 @@ export function ParchisiBoardSvg({
                 if (isMovable) onTokenHover(null);
               }}
             >
-              {/* Pulsing golden highlight ring whenever token has a valid move */}
+              {/* High-visibility pulsing golden halo ring whenever token has a valid move */}
               {isMovable && (
                 <>
                   <circle
-                    r="21"
-                    fill="none"
+                    r="23"
+                    fill="rgba(250,204,21,0.18)"
                     stroke="#FACC15"
-                    strokeWidth="3.2"
-                    opacity="0.95"
+                    strokeWidth="3.8"
+                    opacity="0.98"
                   >
                     <animate
                       attributeName="r"
-                      values="17;24;17"
-                      dur="1.15s"
+                      values="18;26;18"
+                      dur="1.05s"
                       repeatCount="indefinite"
                     />
                     <animate
                       attributeName="opacity"
-                      values="0.95;0.25;0.95"
-                      dur="1.15s"
+                      values="0.98;0.28;0.98"
+                      dur="1.05s"
                       repeatCount="indefinite"
                     />
                   </circle>
                   <circle
-                    r="18"
+                    r="18.5"
                     fill="none"
                     stroke="#FEF08A"
-                    strokeWidth="2.4"
+                    strokeWidth="2.8"
                   />
                 </>
               )}
 
-              {/* Generous invisible hit area for mobile finger taps */}
-              {isMovable && <circle r="24" fill="transparent" />}
+              {/* Generous transparent thumb-friendly touch hitbox (>= 44x44px effective) */}
+              {isMovable && <circle r={hitRadius} fill="transparent" />}
 
-              {/* Glossy 3D Disc */}
+              {/* Glossy 100% Opaque 3D Disc */}
               <g filter="url(#token-shadow)">
-                {/* Outer bevel ring */}
                 <circle
-                  r="15.5"
+                  r="16"
                   fill={pal.dark}
                   stroke={isSelected ? '#FEF08A' : '#FFFFFF'}
-                  strokeWidth={isSelected ? '2.8' : '2'}
+                  strokeWidth={isSelected ? '3' : '2.2'}
                 />
-                {/* Main colored glossy dome */}
-                <circle r="13.2" fill={`url(#token-grad-${token.color})`} />
-                {/* Top specular glass highlight crescent */}
+                <circle r="13.6" fill={`url(#token-grad-${token.color})`} />
                 <ellipse
                   cx="-3"
                   cy="-6"
-                  rx="6.5"
-                  ry="3.4"
-                  fill="rgba(255,255,255,0.42)"
+                  rx="6.6"
+                  ry="3.5"
+                  fill="rgba(255,255,255,0.46)"
                   transform="rotate(-18 -3 -6)"
                 />
-                {/* Centered Crown Emblem */}
                 <path
                   d={CROWN_PATH}
-                  transform="translate(0, 1) scale(0.76)"
+                  transform="translate(0, 1) scale(0.78)"
                   fill={token.color === 'yellow' ? '#5A3703' : '#FFF9E6'}
-                  opacity="0.95"
+                  opacity="0.96"
                 />
               </g>
             </g>
@@ -666,7 +913,7 @@ export function ParchisiBoardSvg({
         })}
       </svg>
 
-      {/* 9. Crisp Floating Move Picker Pills (+2, +5, +7) above clicked token */}
+      {/* 9. Large, Comfortably Spaced Floating Move Picker Pills (+3, +5, +8) above clicked token */}
       {activePicker && (
         <div
           data-testid="parchisi-move-picker"
@@ -676,8 +923,9 @@ export function ParchisiBoardSvg({
             transform: activePicker.preferBelow
               ? 'translate(-50%, 0%)'
               : 'translate(-50%, -100%)',
+            WebkitTapHighlightColor: 'transparent',
           }}
-          className="absolute z-30 flex items-center gap-1.5 px-2 py-1.5 rounded-full bg-[#241222]/95 border-2 border-[#FACC15] shadow-[0_10px_24px_rgba(0,0,0,0.65)]"
+          className="absolute z-30 flex items-center gap-2.5 px-3 py-2 rounded-full bg-[#241222]/96 border-2 border-[#FACC15] shadow-[0_12px_28px_rgba(0,0,0,0.72)] touch-manipulation select-none"
           onClick={(e) => e.stopPropagation()}
         >
           {activePicker.options.map((opt) => (
@@ -688,7 +936,7 @@ export function ParchisiBoardSvg({
               onClick={() => onSelectMoveOption(opt)}
               onMouseEnter={() => onHoverMoveOption(opt)}
               onMouseLeave={() => onHoverMoveOption(null)}
-              className={`min-h-[34px] px-3 py-1 rounded-full text-xs sm:text-sm font-extrabold tabular-nums whitespace-nowrap transition-transform active:scale-95 ${
+              className={`min-h-[44px] min-w-[54px] px-4 py-1.5 rounded-full text-sm sm:text-base font-black tabular-nums whitespace-nowrap touch-manipulation select-none transition-transform active:scale-95 shadow ${
                 opt.captures.length > 0
                   ? 'bg-[#E53935] text-white hover:bg-[#EF5350]'
                   : opt.reachesHome

@@ -360,11 +360,11 @@ export type WhisperRole = 'whisperer' | 'guesser';
 export type WhisperStage = 'writing' | 'whispering' | 'revealed';
 
 export type PeerMessage =
-  | { type: 'JOIN_HELLO'; code: string; name: string; hasStream?: boolean }
-  | { type: 'JOIN_WELCOME'; code: string; hostName: string; hasStream?: boolean }
-  | { type: 'JOIN_REQUEST'; code: string; name: string; hasStream?: boolean }
-  | { type: 'JOIN_CONFIRMED'; code: string; hostName: string; hasStream?: boolean }
-  | { type: 'HELLO'; name: string; role: 'host' | 'guest'; hasStream?: boolean }
+  | { type: 'JOIN_HELLO'; code: string; name: string; hasStream?: boolean; peerId?: string }
+  | { type: 'JOIN_WELCOME'; code: string; hostName: string; hasStream?: boolean; peerId?: string }
+  | { type: 'JOIN_REQUEST'; code: string; name: string; hasStream?: boolean; peerId?: string }
+  | { type: 'JOIN_CONFIRMED'; code: string; hostName: string; hasStream?: boolean; peerId?: string }
+  | { type: 'HELLO'; name: string; role: 'host' | 'guest'; hasStream?: boolean; peerId?: string }
   | { type: 'PING'; ts: number }
   | { type: 'PONG'; ts: number }
   | { type: 'SELECT_GAME'; game: GameId }

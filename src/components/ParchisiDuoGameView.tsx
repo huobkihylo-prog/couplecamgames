@@ -81,6 +81,17 @@ const QUICK_CHATS = [
 ] as const;
 
 const CONFETTI_COLORS = ['#E53935', '#FBC02D', '#2E9E5B', '#1E88E5', '#FEF08A', '#FFFFFF'];
+const BASE_CAMS_STORAGE_KEY = 'parchisi_base_cams';
+
+function readStoredBaseCams(): boolean {
+  try {
+    const raw = window.localStorage.getItem(BASE_CAMS_STORAGE_KEY);
+    if (raw === '0' || raw === 'false') return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 /** Subtle inline SVG damask pattern for the deep aubergine/plum backdrop */
 const DAMASK_BG_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cg fill='none' stroke='%23E8C4A0' stroke-opacity='0.065' stroke-width='1'%3E%3Cpath d='M32 4 L60 32 L32 60 L4 32 Z'/%3E%3Ccircle cx='32' cy='32' r='10'/%3E%3Cpath d='M32 14 L42 32 L32 50 L22 32 Z'/%3E%3Ccircle cx='0' cy='0' r='6'/%3E%3Ccircle cx='64' cy='0' r='6'/%3E%3Ccircle cx='0' cy='64' r='6'/%3E%3Ccircle cx='64' cy='64' r='6'/%3E%3C/g%3E%3C/svg%3E")`;
@@ -314,11 +325,45 @@ export function ParchisiDuoGameView({
   const [turnSecondsLeft, setTurnSecondsLeft] = useState(PARCHISI_TURN_SECONDS);
   const [noMovesBanner, setNoMovesBanner] = useState(false);
   const [confettiSeed, setConfettiSeed] = useState(0);
+  const [baseCamsEnabled, setBaseCamsEnabled] = useState<boolean>(readStoredBaseCams);
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const showLocalLiveVideo = Boolean(localStream) && cameraEnabled;
   const showRemoteLiveVideo = Boolean(remoteStream) && !isSolo;
+
+  // Base Camera Mode mapping: Red Base = Host, Yellow Base = Guest; mirror ONLY localStream
+  const redBaseStream =
+    localColor === 'red'
+      ? showLocalLiveVideo
+        ? localStream
+        : null
+      : showRemoteLiveVideo
+        ? remoteStream
+        : null;
+  const yellowBaseStream =
+    localColor === 'yellow'
+      ? showLocalLiveVideo
+        ? localStream
+        : null
+      : showRemoteLiveVideo
+        ? remoteStream
+        : null;
+  const mirrorRedBase = localColor === 'red';
+  const mirrorYellowBase = localColor === 'yellow';
+
+  const handleToggleBaseCams = useCallback(() => {
+    soundFx.click();
+    setBaseCamsEnabled((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(BASE_CAMS_STORAGE_KEY, next ? '1' : '0');
+      } catch {
+        // Ignore storage quota / private-mode errors
+      }
+      return next;
+    });
+  }, []);
 
   const handDetectorRef = useRef(createHandShakeState());
   const reactionIdRef = useRef(1);
@@ -681,7 +726,7 @@ export function ParchisiDuoGameView({
     const timer = window.setTimeout(() => {
       setNoMovesBanner(false);
       commitHostState(passParchisiTurnOrBonus(stateRef.current));
-    }, 1100);
+    }, 1000);
 
     return () => window.clearTimeout(timer);
   }, [gameState.phase, gameState.stateSeq, legalMoves.length, isRollingAnim, animOverride, isHost, commitHostState]);
@@ -856,11 +901,12 @@ export function ParchisiDuoGameView({
       data-testid="parchisi-game-root"
       style={{
         backgroundImage: `${DAMASK_BG_SVG}, radial-gradient(circle at 50% 42%, #3B1F37 0%, #2D182A 52%, #1E101D 100%)`,
+        WebkitTapHighlightColor: 'transparent',
       }}
-      className="relative flex-1 min-h-0 h-full w-full overflow-hidden flex flex-col items-center justify-between px-2 sm:px-4 py-1.5 sm:py-2 select-none text-[#FFF7ED]"
+      className="relative flex-1 min-h-0 h-full w-full overflow-hidden flex flex-col items-center justify-between px-1 sm:px-4 py-1 sm:py-2 select-none touch-manipulation text-[#FFF7ED]"
     >
-      {/* CENTERED STAGE: Top HUD + Square Wooden Board + Bottom HUD snugly framed together */}
-      <div className="relative z-10 flex-1 min-h-0 w-full flex flex-col items-center justify-center gap-2 sm:gap-2.5 overflow-hidden">
+      {/* CENTERED STAGE: Top HUD + Square Wooden Board (96-100% mobile width) + Bottom HUD snugly framed together */}
+      <div className="relative z-10 flex-1 min-h-0 w-full flex flex-col items-center justify-center gap-1.5 sm:gap-2 overflow-hidden">
       {/* 1. CLASSIC TOP PLAYER HUD BAR (Blue TL in 4P · Yellow TR + Active Top Dice Tray) */}
       <div className="relative z-20 w-full max-w-[660px] flex items-center justify-between gap-2 px-1 shrink-0 min-h-[48px]">
         {/* Top-Left slot: Blue AI (4P) or clean event status readout (1v1) */}
@@ -949,8 +995,8 @@ export function ParchisiDuoGameView({
         </div>
       </div>
 
-      {/* 2. CENTER SQUARE WOODEN PARCHEESI BOARD (Scales cleanly to max square on every viewport) */}
-      <div className="relative z-10 w-full flex-1 min-h-0 max-h-[min(100%,96vw)] flex items-center justify-center [container-type:size]">
+      {/* 2. CENTER SQUARE WOODEN PARCHEESI BOARD (96-100% mobile width, HD crisp, zero scroll) */}
+      <div className="relative z-10 w-full flex-1 min-h-0 max-h-[min(100%,98vw)] flex items-center justify-center [container-type:size]">
         <div className="relative w-[min(100cqw,100cqh)] h-[min(100cqw,100cqh)] flex items-center justify-center">
           <ParchisiBoardSvg
             state={gameState}
@@ -960,6 +1006,11 @@ export function ParchisiDuoGameView({
             hoveredMove={activeHoveredMove}
             animOverride={animOverride}
             floatingReactions={floatingReactions}
+            baseCamsEnabled={baseCamsEnabled}
+            redBaseStream={redBaseStream}
+            yellowBaseStream={yellowBaseStream}
+            mirrorRedBase={mirrorRedBase}
+            mirrorYellowBase={mirrorYellowBase}
             onTokenClick={handleTokenClick}
             onTokenHover={setHoveredTokenId}
             onSelectMoveOption={handleExecuteMove}
@@ -1229,8 +1280,8 @@ export function ParchisiDuoGameView({
       </div>
       </div>
 
-      {/* 4. BOTTOM QUICK BAR (EMOJI · CHAT · Hand-Shake Dice Roll · Sound Mute · Optional Cam) */}
-      <div className="relative z-30 w-full max-w-[660px] flex items-center justify-center gap-1.5 sm:gap-2 pt-1 shrink-0">
+      {/* 4. BOTTOM QUICK BAR (EMOJI · CHAT · Base Cameras Toggle · Hand · Mute · Hot Camera Enable) */}
+      <div className="relative z-30 w-full max-w-[660px] flex items-center justify-center gap-1 sm:gap-2 pt-1 shrink-0 touch-manipulation select-none">
         {/* Inline Popover Drawer for EMOJI or CHAT */}
         {openDrawer !== 'none' && (
           <div
@@ -1244,7 +1295,7 @@ export function ParchisiDuoGameView({
                     type="button"
                     onClick={() => handleSendEmoji(em)}
                     aria-label={`Send ${em} reaction`}
-                    className="w-10 h-10 rounded-full bg-white/8 hover:bg-white/18 active:scale-90 text-xl flex items-center justify-center transition-transform"
+                    className="w-11 h-11 rounded-full bg-white/8 hover:bg-white/18 active:scale-90 text-xl flex items-center justify-center transition-transform"
                   >
                     {em}
                   </button>
@@ -1254,7 +1305,7 @@ export function ParchisiDuoGameView({
                     key={phrase}
                     type="button"
                     onClick={() => handleSendQuickChat(phrase)}
-                    className="min-h-[36px] px-3 py-1 rounded-full bg-white/10 hover:bg-[#C58B58]/35 text-xs font-bold text-[#FFF7ED] whitespace-nowrap transition-colors"
+                    className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-[#C58B58]/35 text-xs font-bold text-[#FFF7ED] whitespace-nowrap transition-colors"
                   >
                     {phrase}
                   </button>
@@ -1267,7 +1318,7 @@ export function ParchisiDuoGameView({
           data-testid="parchisi-emoji-btn"
           aria-expanded={openDrawer === 'emoji'}
           onClick={() => setOpenDrawer((prev) => (prev === 'emoji' ? 'none' : 'emoji'))}
-          className={`min-h-[36px] sm:min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap ${
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap ${
             openDrawer === 'emoji'
               ? 'bg-[#C58B58] text-[#1E101D] border-[#FEF08A]'
               : 'bg-[#361D33]/90 text-[#FFF7ED] border-[#C58B58]/50 hover:bg-[#472743]'
@@ -1282,7 +1333,7 @@ export function ParchisiDuoGameView({
           data-testid="parchisi-chat-btn"
           aria-expanded={openDrawer === 'chat'}
           onClick={() => setOpenDrawer((prev) => (prev === 'chat' ? 'none' : 'chat'))}
-          className={`min-h-[36px] sm:min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap ${
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap ${
             openDrawer === 'chat'
               ? 'bg-[#C58B58] text-[#1E101D] border-[#FEF08A]'
               : 'bg-[#361D33]/90 text-[#FFF7ED] border-[#C58B58]/50 hover:bg-[#472743]'
@@ -1290,6 +1341,32 @@ export function ParchisiDuoGameView({
         >
           <MessageSquare className="w-3.5 h-3.5 shrink-0" />
           <span>CHAT</span>
+        </button>
+
+        {/* Base Cameras Mode Toggle (persisted in localStorage 'parchisi_base_cams') */}
+        <button
+          type="button"
+          data-testid="parchisi-base-cams-toggle"
+          aria-pressed={baseCamsEnabled}
+          onClick={handleToggleBaseCams}
+          title={baseCamsEnabled ? 'Caméras dans les bases activées' : 'Tapis Classique opaque'}
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold border transition-colors whitespace-nowrap ${
+            baseCamsEnabled
+              ? 'bg-[#C58B58]/30 text-[#FEF3C7] border-[#FACC15]/75 hover:bg-[#C58B58]/42'
+              : 'bg-[#361D33]/90 text-[#E8C4A0] border-[#C58B58]/50 hover:bg-[#472743]'
+          }`}
+        >
+          {baseCamsEnabled ? (
+            <>
+              <span className="sm:hidden">🎥 Cam : ON</span>
+              <span className="hidden sm:inline">🎥 Caméras : ON</span>
+            </>
+          ) : (
+            <>
+              <span className="sm:hidden">🎨 Classique</span>
+              <span className="hidden sm:inline">🎨 Tapis Classique</span>
+            </>
+          )}
         </button>
 
         <button
@@ -1301,14 +1378,15 @@ export function ParchisiDuoGameView({
             onToggleHandDice(!handDiceEnabled);
           }}
           title="Hand-Shake Dice Roll (MediaPipe)"
-          className={`min-h-[36px] sm:min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors whitespace-nowrap ${
+          aria-label="Hand-Shake Dice Roll"
+          className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-bold border transition-colors whitespace-nowrap shrink-0 ${
             handDiceEnabled
               ? 'bg-[#2E9E5B]/30 text-[#D1FAE5] border-[#4ADE80]/70'
               : 'bg-[#361D33]/90 text-[#E8C4A0] border-[#C58B58]/40 hover:bg-[#472743]'
           }`}
         >
-          <Hand className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden xs:inline sm:inline">
+          <Hand className="w-4 h-4 shrink-0" />
+          <span className="hidden sm:inline">
             {handDiceEnabled
               ? handTrackerStatus === 'loading'
                 ? 'Hand…'
@@ -1323,7 +1401,7 @@ export function ParchisiDuoGameView({
           aria-label={sfxMutedLocal ? 'Unmute sound' : 'Mute sound'}
           aria-pressed={sfxMutedLocal}
           onClick={handleToggleSoundMute}
-          className="min-h-[36px] min-w-[36px] sm:min-h-[40px] sm:min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#361D33]/90 text-[#E8C4A0] border border-[#C58B58]/40 hover:bg-[#472743] transition-colors shrink-0"
+          className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#361D33]/90 text-[#E8C4A0] border border-[#C58B58]/40 hover:bg-[#472743] transition-colors shrink-0"
         >
           {sfxMutedLocal ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
         </button>
@@ -1331,9 +1409,11 @@ export function ParchisiDuoGameView({
         {!showLocalLiveVideo && (
           <button
             type="button"
+            data-testid="parchisi-enable-cam-btn"
             onClick={onRequestCamera}
-            aria-label="Enable camera"
-            className="min-h-[36px] min-w-[36px] sm:min-h-[40px] sm:min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#361D33]/90 text-[#E8C4A0] border border-[#C58B58]/40 hover:bg-[#472743] transition-colors shrink-0"
+            title="Activer la caméra en direct"
+            aria-label="Activer la caméra"
+            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#361D33]/90 text-[#FEF08A] border border-[#FACC15]/55 hover:bg-[#472743] transition-colors shrink-0"
           >
             <Camera className="w-4 h-4" />
           </button>

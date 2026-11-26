@@ -72,14 +72,14 @@ function SingleDie3D({
         transform: rolling ? `rotate(${tiltDeg}deg) scale(1.06)` : 'rotate(0deg) scale(1)',
       }}
       className={`relative ${
-        compact ? 'w-8 h-8 sm:w-10 sm:h-10' : 'w-9 h-9 sm:w-11 sm:h-11'
+        compact ? 'w-9 h-9 sm:w-11 sm:h-11' : 'w-10 h-10 sm:w-12 sm:h-12'
       } transition-all duration-150 shrink-0 ${
-        used ? 'opacity-40 grayscale-[35%] scale-92' : 'opacity-100'
+        used ? 'opacity-40 grayscale-[35%] scale-90' : 'opacity-100'
       }`}
     >
       <svg
         viewBox="0 0 100 100"
-        className={`w-full h-full drop-shadow-[0_3px_4px_rgba(0,0,0,0.45)] ${
+        className={`w-full h-full drop-shadow-[0_3px_5px_rgba(0,0,0,0.48)] ${
           rolling ? 'animate-spin' : ''
         }`}
         aria-hidden="true"
@@ -87,12 +87,12 @@ function SingleDie3D({
         <defs>
           <linearGradient id={`${gradPrefix}-body`} x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#FFFFFF" />
-            <stop offset="55%" stopColor="#F5EEE2" />
-            <stop offset="100%" stopColor="#D9C7AE" />
+            <stop offset="55%" stopColor="#F6F0E6" />
+            <stop offset="100%" stopColor="#D7C3A8" />
           </linearGradient>
           <linearGradient id={`${gradPrefix}-rim`} x1="0%" y1="0%" x2="0%" y2="100%">
             <stop offset="0%" stopColor="#FFFDF8" />
-            <stop offset="100%" stopColor="#B89B75" />
+            <stop offset="100%" stopColor="#B69870" />
           </linearGradient>
         </defs>
         <rect
@@ -112,17 +112,17 @@ function SingleDie3D({
           height="80"
           rx="14"
           fill="none"
-          stroke="rgba(255,255,255,0.8)"
+          stroke="rgba(255,255,255,0.85)"
           strokeWidth="2"
         />
         {pips.map(([cx, cy], idx) => (
           <g key={idx}>
-            <circle cx={cx} cy={cy + 1.5} r="8.2" fill="rgba(255,255,255,0.8)" />
+            <circle cx={cx} cy={cy + 1.5} r="8.5" fill="rgba(255,255,255,0.82)" />
             <circle
               cx={cx}
               cy={cy}
-              r="8.2"
-              fill={value === 5 || value === 6 ? '#C62828' : '#261C15'}
+              r="8.5"
+              fill={value === 5 || value === 6 ? '#C62828' : '#241A13'}
             />
           </g>
         ))}
@@ -132,7 +132,7 @@ function SingleDie3D({
       {used && !rolling && (
         <span
           aria-hidden="true"
-          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#1F2937] border border-white/60 text-[#4ADE80] flex items-center justify-center text-[10px] font-black shadow"
+          className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#1F2937] border border-white/70 text-[#4ADE80] flex items-center justify-center text-[10px] font-black shadow"
         >
           ✓
         </span>
@@ -143,8 +143,8 @@ function SingleDie3D({
 
 /**
  * Authentic Official Parcheesi 2-Dice Golden-Brown Pill Tray.
- * Displays two crisp 3D dice side-by-side, dims/checkmarks spent dice,
- * shows a glowing golden +20 / +10 bonus badge when active, and rolls on click.
+ * Large, well-spaced dice with instant touch response (zero 300ms delay),
+ * clear "🎲 Lancer" action cue, spent-die dimming, and glowing +20/+10 bonus badge.
  */
 export function ParchisiDice3D({
   dice,
@@ -175,16 +175,19 @@ export function ParchisiDice3D({
       aria-label={ariaLabel}
       style={{
         transform: `translateX(${jitterX.toFixed(1)}px) rotate(${jitterRot.toFixed(1)}deg)`,
-        background: 'linear-gradient(180deg, #7A4D25 0%, #583416 55%, #41240D 100%)',
+        background: 'linear-gradient(180deg, #7E5027 0%, #5A3516 55%, #41240D 100%)',
         boxShadow: canRoll
-          ? `0 0 0 2px #FACC15, 0 0 18px ${accentColor}77, inset 0 2px 4px rgba(255,232,186,0.35), 0 4px 10px rgba(0,0,0,0.45)`
+          ? `0 0 0 2.5px #FACC15, 0 0 20px ${accentColor}88, inset 0 2px 4px rgba(255,232,186,0.38), 0 4px 12px rgba(0,0,0,0.48)`
           : isActiveTray
-            ? '0 0 0 1.5px rgba(224,164,88,0.75), inset 0 2px 4px rgba(255,232,186,0.22), 0 4px 10px rgba(0,0,0,0.4)'
+            ? '0 0 0 1.5px rgba(224,164,88,0.8), inset 0 2px 4px rgba(255,232,186,0.22), 0 4px 10px rgba(0,0,0,0.4)'
             : '0 0 0 1px rgba(197,139,88,0.35), inset 0 2px 3px rgba(0,0,0,0.35)',
+        WebkitTapHighlightColor: 'transparent',
       }}
-      className={`relative inline-flex items-center ${
-        compact ? 'gap-1 sm:gap-1.5 px-2 sm:px-2.5 py-1 sm:py-1.5' : 'gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-1.5'
-      } rounded-full transition-all duration-150 select-none shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FACC15] ${
+      className={`relative min-h-[46px] inline-flex items-center touch-manipulation select-none shrink-0 ${
+        compact
+          ? 'gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5'
+          : 'gap-2 sm:gap-2.5 px-3 sm:px-3.5 py-1.5'
+      } rounded-full transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FACC15] ${
         canRoll
           ? 'cursor-pointer hover:brightness-110 active:scale-95'
           : isActiveTray
@@ -192,11 +195,11 @@ export function ParchisiDice3D({
             : 'cursor-default opacity-65'
       }`}
     >
-      {/* Subtle golden pulse ring when it's your turn to roll */}
+      {/* Prominent golden pulse ring when it's your turn to roll */}
       {canRoll && !rolling && (
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute -inset-1 rounded-full border-2 border-[#FACC15]/75 animate-pulse"
+          className="pointer-events-none absolute -inset-1 rounded-full border-2 border-[#FACC15]/80 animate-pulse"
         />
       )}
 
@@ -221,20 +224,21 @@ export function ParchisiDice3D({
       {pendingBonus !== null && (
         <span
           data-testid="parchisi-bonus-badge"
-          className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs sm:text-sm font-black tabular-nums text-[#2B1503] bg-gradient-to-b from-[#FEF08A] via-[#FACC15] to-[#D97706] shadow-[0_0_14px_rgba(250,204,21,0.85)] border border-white/60 animate-bounce whitespace-nowrap"
+          className="inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-xs sm:text-sm font-black tabular-nums text-[#2B1503] bg-gradient-to-b from-[#FEF08A] via-[#FACC15] to-[#D97706] shadow-[0_0_14px_rgba(250,204,21,0.85)] border border-white/65 animate-bounce whitespace-nowrap"
         >
           +{pendingBonus}
         </span>
       )}
 
-      {/* Compact ROLL cue inside tray when awaiting local player's roll */}
-      {canRoll && !rolling && !dice && (
+      {/* Clear "🎲 Lancer" action badge inside tray whenever awaiting local roll */}
+      {canRoll && !rolling && (
         <span
           className={`${
-            compact ? 'hidden sm:inline' : 'inline'
-          } text-[11px] sm:text-xs font-extrabold uppercase tracking-wider text-[#FEF3C7] pr-0.5 whitespace-nowrap`}
+            compact ? 'hidden sm:inline-flex' : 'inline-flex'
+          } items-center gap-1 px-2.5 py-1 rounded-full text-xs sm:text-sm font-black tracking-wide text-[#2B1503] bg-gradient-to-b from-[#FEF08A] to-[#F59E0B] shadow-sm whitespace-nowrap`}
         >
-          ROLL
+          <span aria-hidden="true">🎲</span>
+          <span>Lancer</span>
         </span>
       )}
     </button>

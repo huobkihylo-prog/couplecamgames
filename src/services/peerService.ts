@@ -341,16 +341,41 @@ export class DuoPeerService {
 
   public setLocalStream(stream: MediaStream | null) {
     this.localStream = stream;
-    if (
-      stream &&
-      this.peer &&
-      !this.peer.destroyed &&
-      this.hasEnteredRoom &&
-      this.remotePeerId &&
-      !this.hasSentLocalMediaStream
-    ) {
-      console.log('[CoupleCam P2P] Local stream became available mid-session, starting MediaConnection.');
-      this.initiateMediaCall(this.remotePeerId, this.sessionGen);
+    if (!stream || !this.hasEnteredRoom) return;
+
+    // 1. Hot-swap via RTCRtpSender.replaceTrack when an active MediaConnection already has a video sender
+    const pc = this.mediaConn?.peerConnection;
+    const newVideoTrack = stream.getVideoTracks()[0] ?? null;
+    const newAudioTrack = stream.getAudioTracks()[0] ?? null;
+    if (pc && typeof pc.getSenders === 'function') {
+      const senders = pc.getSenders();
+      const videoSender = senders.find((s) => s.track?.kind === 'video');
+      if (videoSender && newVideoTrack) {
+        this.hasSentLocalMediaStream = true;
+        console.log('[CoupleCam P2P] Hot-swapping local video track via RTCRtpSender.replaceTrack.');
+        void videoSender.replaceTrack(newVideoTrack).catch((err) => {
+          console.warn('[CoupleCam P2P] replaceTrack(video) failed, falling back to peer.call:', err);
+          this.hasSentLocalMediaStream = false;
+          if (this.remotePeerId && this.peer?.open) {
+            this.initiateMediaCall(this.remotePeerId, this.sessionGen);
+          }
+        });
+        const audioSender = senders.find((s) => s.track?.kind === 'audio');
+        if (audioSender && newAudioTrack) {
+          void audioSender.replaceTrack(newAudioTrack).catch(() => {});
+        }
+        return;
+      }
+    }
+
+    // 2. Otherwise (joined without camera -> camera turned ON mid-game), attach via peer.call without touching DataConnection
+    if (this.peer && !this.peer.destroyed && this.remotePeerId && !this.hasSentLocalMediaStream) {
+      if (this.peer.open) {
+        console.log('[CoupleCam P2P] Local stream became available mid-session, starting MediaConnection.');
+        this.initiateMediaCall(this.remotePeerId, this.sessionGen);
+      } else if (this.peer.disconnected) {
+        this.scheduleSignalingReconnect(this.peer, this.sessionGen);
+      }
     }
   }
 
@@ -418,6 +443,18 @@ export class DuoPeerService {
       if (gen !== this.sessionGen) return;
       console.log(`[CoupleCam P2P][Host] Step 2 (PeerJS): Room "${cleanCode}" open and listening (assignedId="${assignedId}")`);
       this.notifyHostWaiting(gen);
+      if (this.hasEnteredRoom) {
+        this.sendHandshakeMessage({
+          type: 'HELLO',
+          name: this.localName,
+          role: 'host',
+          hasStream: Boolean(this.localStream),
+          peerId: assignedId,
+        });
+        if (this.localStream && !this.hasSentLocalMediaStream && this.remotePeerId) {
+          this.initiateMediaCall(this.remotePeerId, gen);
+        }
+      }
     });
 
     peer.on('error', (err) => {
@@ -526,8 +563,16 @@ export class DuoPeerService {
       if (gen !== this.sessionGen || peer.destroyed) return;
       console.log(`[CoupleCam P2P][Partner] Step 2 (PeerJS): Local peer open (myId="${myId}").`);
       if (this.hasEnteredRoom) {
+        // Share our PeerJS peerId over Relay/DataConn so Host can initiate or receive hot-camera calls
+        this.sendHandshakeMessage({
+          type: 'HELLO',
+          name: this.localName,
+          role: 'guest',
+          hasStream: Boolean(this.localStream),
+          peerId: myId,
+        });
         // Relay already paired us into the Hub -> still launch video/audio call in parallel!
-        if (this.localStream && !this.hasSentMediaCall) {
+        if (this.localStream && !this.hasSentLocalMediaStream) {
           this.initiateMediaCall(targetId, gen);
         } else if (!this.dataConn) {
           // Silently open background DataConnection so Host learns our peerId if Host has video
@@ -877,23 +922,27 @@ export class DuoPeerService {
       console.log(
         `[CoupleCam P2P][Host] Step 3 (Relay): Partner "${guestName}" arrived -> sending immediate JOIN_CONFIRMED`,
       );
+      const myPeerId = this.peer?.id || undefined;
       this.sendHandshakeMessage({
         type: 'JOIN_WELCOME',
         code: this.activeRoomCode,
         hostName: this.localName,
         hasStream: Boolean(this.localStream),
+        peerId: myPeerId,
       });
       this.sendHandshakeMessage({
         type: 'JOIN_CONFIRMED',
         code: this.activeRoomCode,
         hostName: this.localName,
         hasStream: Boolean(this.localStream),
+        peerId: myPeerId,
       });
       this.sendHandshakeMessage({
         type: 'HELLO',
         name: this.localName,
         role: 'host',
         hasStream: Boolean(this.localStream),
+        peerId: myPeerId,
       });
       this.callbacks.onMessage({
         type: 'HELLO',
@@ -1001,23 +1050,27 @@ export class DuoPeerService {
   private sendPartnerJoinHandshake(gen: number) {
     if (gen !== this.sessionGen || this.role !== 'guest') return;
     console.log(`[CoupleCam P2P][Partner] Step 4: Sending JOIN_HELLO + JOIN_REQUEST + HELLO for room "${this.activeRoomCode}"`);
+    const myPeerId = this.peer?.id || undefined;
     const joinHello: PeerMessage = {
       type: 'JOIN_HELLO',
       code: this.activeRoomCode,
       name: this.localName,
       hasStream: Boolean(this.localStream),
+      peerId: myPeerId,
     };
     const joinReq: PeerMessage = {
       type: 'JOIN_REQUEST',
       code: this.activeRoomCode,
       name: this.localName,
       hasStream: Boolean(this.localStream),
+      peerId: myPeerId,
     };
     const hello: PeerMessage = {
       type: 'HELLO',
       name: this.localName,
       role: 'guest',
       hasStream: Boolean(this.localStream),
+      peerId: myPeerId,
     };
     this.sendHandshakeMessage(joinHello);
     this.sendHandshakeMessage(joinReq);
@@ -1116,6 +1169,8 @@ export class DuoPeerService {
     }
 
     if ((msg.type === 'JOIN_HELLO' || msg.type === 'JOIN_REQUEST') && this.role === 'host') {
+      const resolvedPeerId = msg.peerId || connPeerId;
+      const myPeerId = this.peer?.id || undefined;
       console.log(
         `[CoupleCam P2P][Host] Received ${msg.type} from "${msg.name}" (via ${via}) -> replying JOIN_WELCOME`,
       );
@@ -1124,32 +1179,36 @@ export class DuoPeerService {
         code: this.activeRoomCode,
         hostName: this.localName,
         hasStream: Boolean(this.localStream),
+        peerId: myPeerId,
       });
       this.sendHandshakeMessage({
         type: 'JOIN_CONFIRMED',
         code: this.activeRoomCode,
         hostName: this.localName,
         hasStream: Boolean(this.localStream),
+        peerId: myPeerId,
       });
       this.callbacks.onMessage({
         type: 'HELLO',
         name: msg.name,
         role: 'guest',
         hasStream: msg.hasStream,
+        peerId: resolvedPeerId,
       });
-      this.markRoomEntered(gen, `join-hello-${via}`, connPeerId);
+      this.markRoomEntered(gen, `join-hello-${via}`, resolvedPeerId);
 
       // If Partner joined without camera/mic while Host HAS a camera, Host initiates MediaConnection in parallel
-      if (!msg.hasStream && this.localStream && !this.hasSentMediaCall && connPeerId) {
+      if (!msg.hasStream && this.localStream && !this.hasSentLocalMediaStream && resolvedPeerId) {
         window.setTimeout(() => {
-          if (gen !== this.sessionGen || !this.hasEnteredRoom || this.hasSentMediaCall) return;
-          this.initiateMediaCall(connPeerId, gen);
+          if (gen !== this.sessionGen || !this.hasEnteredRoom || this.hasSentLocalMediaStream) return;
+          this.initiateMediaCall(resolvedPeerId, gen);
         }, 150);
       }
       return;
     }
 
     if ((msg.type === 'JOIN_WELCOME' || msg.type === 'JOIN_CONFIRMED') && this.role === 'guest') {
+      const resolvedPeerId = msg.peerId || connPeerId;
       console.log(
         `[CoupleCam P2P][Partner] Received ${msg.type} from Host "${msg.hostName}" (via ${via}) -> entering Hub!`,
       );
@@ -1158,25 +1217,38 @@ export class DuoPeerService {
         name: msg.hostName,
         role: 'host',
         hasStream: msg.hasStream,
+        peerId: resolvedPeerId,
       });
-      this.markRoomEntered(gen, `join-welcome-${via}`, connPeerId);
+      this.markRoomEntered(gen, `join-welcome-${via}`, resolvedPeerId);
       return;
     }
 
     if (msg.type === 'HELLO') {
+      const resolvedPeerId = msg.peerId || connPeerId;
+      if (resolvedPeerId) {
+        this.remotePeerId = resolvedPeerId;
+      }
       if (this.role === 'guest' && !this.hasEnteredRoom) {
         console.log(
           `[CoupleCam P2P][Partner] Received HELLO from Host "${msg.name}" (via ${via}) -> confirming room entry!`,
         );
-        this.markRoomEntered(gen, `hello-${via}`, connPeerId);
+        this.markRoomEntered(gen, `hello-${via}`, resolvedPeerId);
       } else if (this.role === 'host') {
-        this.markRoomEntered(gen, `hello-${via}`, connPeerId);
-        if (!msg.hasStream && this.localStream && !this.hasSentMediaCall && connPeerId) {
+        this.markRoomEntered(gen, `hello-${via}`, resolvedPeerId);
+        if (!msg.hasStream && this.localStream && !this.hasSentLocalMediaStream && resolvedPeerId) {
           window.setTimeout(() => {
-            if (gen !== this.sessionGen || !this.hasEnteredRoom || this.hasSentMediaCall) return;
-            this.initiateMediaCall(connPeerId, gen);
+            if (gen !== this.sessionGen || !this.hasEnteredRoom || this.hasSentLocalMediaStream) return;
+            this.initiateMediaCall(resolvedPeerId, gen);
           }, 150);
         }
+      } else if (
+        this.hasEnteredRoom &&
+        this.localStream &&
+        !this.hasSentLocalMediaStream &&
+        resolvedPeerId &&
+        this.peer?.open
+      ) {
+        this.initiateMediaCall(resolvedPeerId, gen);
       }
     }
 

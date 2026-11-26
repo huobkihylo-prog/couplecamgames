@@ -253,5 +253,109 @@ test('Host keeps room open in waiting state if incoming Guest attempt fails ICE 
   assert.equal(statuses[statuses.length - 1], 'waiting');
 });
 
+test('Hot-camera activation mid-game uses RTCRtpSender.replaceTrack when video sender exists', () => {
+  const svc = new DuoPeerService({
+    onStatusChange: () => {},
+    onRemoteStream: () => {},
+    onMessage: () => {},
+  });
+
+  let replacedTrack: unknown = null;
+  let peerCalled = false;
+  const fakeNewVideoTrack = { kind: 'video', id: 'new-video-1' };
+  const fakeStream = {
+    getVideoTracks: () => [fakeNewVideoTrack],
+    getAudioTracks: () => [],
+  } as unknown as MediaStream;
+
+  const internal = svc as unknown as {
+    hasEnteredRoom: boolean;
+    remotePeerId: string | null;
+    peer: { destroyed: boolean; open: boolean; call: () => void };
+    mediaConn: {
+      peerConnection: {
+        getSenders: () => { track: { kind: string }; replaceTrack: (t: unknown) => Promise<void> }[];
+      };
+    };
+  };
+  internal.hasEnteredRoom = true;
+  internal.remotePeerId = 'couplecam-room-a7k4';
+  internal.peer = {
+    destroyed: false,
+    open: true,
+    call: () => {
+      peerCalled = true;
+    },
+  };
+  internal.mediaConn = {
+    peerConnection: {
+      getSenders: () => [
+        {
+          track: { kind: 'video' },
+          replaceTrack: async (t: unknown) => {
+            replacedTrack = t;
+          },
+        },
+      ],
+    },
+  };
+
+  svc.setLocalStream(fakeStream);
+  assert.equal(replacedTrack, fakeNewVideoTrack);
+  assert.equal(peerCalled, false, 'Should hot-swap via replaceTrack without renegotiating peer.call');
+});
+
+test('Guest who entered without camera can enable camera mid-game via peer.call without disrupting DataConnection', () => {
+  const statuses: string[] = [];
+  const svc = new DuoPeerService({
+    onStatusChange: (s) => statuses.push(s),
+    onRemoteStream: () => {},
+    onMessage: () => {},
+  });
+
+  let calledTarget: string | null = null;
+  let dataConnClosed = false;
+  const fakeStream = {
+    getVideoTracks: () => [{ kind: 'video', id: 'guest-cam-1' }],
+    getAudioTracks: () => [],
+  } as unknown as MediaStream;
+
+  const internal = svc as unknown as {
+    role: 'host' | 'guest';
+    hasEnteredRoom: boolean;
+    remotePeerId: string | null;
+    hasSentLocalMediaStream: boolean;
+    dataConn: { open: boolean; close: () => void };
+    peer: {
+      destroyed: boolean;
+      open: boolean;
+      call: (target: string, stream: MediaStream) => { on: () => void; close: () => void };
+    };
+  };
+  internal.role = 'guest';
+  internal.hasEnteredRoom = true;
+  internal.remotePeerId = 'couplecam-room-a7k4';
+  internal.hasSentLocalMediaStream = false;
+  internal.dataConn = {
+    open: true,
+    close: () => {
+      dataConnClosed = true;
+    },
+  };
+  internal.peer = {
+    destroyed: false,
+    open: true,
+    call: (target) => {
+      calledTarget = target;
+      return { on: () => {}, close: () => {} };
+    },
+  };
+
+  svc.setLocalStream(fakeStream);
+  assert.equal(calledTarget, 'couplecam-room-a7k4');
+  assert.equal(dataConnClosed, false, 'DataConnection must stay open when attaching hot camera');
+  assert.equal(statuses.length, 0, 'Room status must remain undisturbed during hot camera attach');
+});
+
 
 

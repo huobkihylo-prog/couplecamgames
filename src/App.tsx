@@ -148,7 +148,14 @@ function CoupleCamApp() {
   connectionModeRef.current = connectionMode;
 
   const requestLocalMedia = useCallback(async (): Promise<MediaStream | null> => {
-    if (localStreamRef.current) return localStreamRef.current;
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      setCameraEnabled(true);
+      peerServiceRef.current?.setLocalStream(localStreamRef.current);
+      return localStreamRef.current;
+    }
     if (mediaRequestPromiseRef.current) return mediaRequestPromiseRef.current;
 
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -165,6 +172,7 @@ function CoupleCamApp() {
         });
         localStreamRef.current = stream;
         setLocalStream(stream);
+        setCameraEnabled(true);
         setCameraHint(null);
         peerServiceRef.current?.setLocalStream(stream);
         return stream;
@@ -177,6 +185,7 @@ function CoupleCamApp() {
           });
           localStreamRef.current = videoOnlyStream;
           setLocalStream(videoOnlyStream);
+          setCameraEnabled(true);
           setCameraHint('Micro indisponible — webcam activée sans son.');
           peerServiceRef.current?.setLocalStream(videoOnlyStream);
           return videoOnlyStream;
@@ -189,6 +198,7 @@ function CoupleCamApp() {
             });
             localStreamRef.current = basicVideo;
             setLocalStream(basicVideo);
+            setCameraEnabled(true);
             setCameraHint('Micro indisponible — webcam activée sans son.');
             peerServiceRef.current?.setLocalStream(basicVideo);
             return basicVideo;
