@@ -360,6 +360,8 @@ export type WhisperRole = 'whisperer' | 'guesser';
 export type WhisperStage = 'writing' | 'whispering' | 'revealed';
 
 export type PeerMessage =
+  | { type: 'JOIN_HELLO'; code: string; name: string; hasStream?: boolean }
+  | { type: 'JOIN_WELCOME'; code: string; hostName: string; hasStream?: boolean }
   | { type: 'JOIN_REQUEST'; code: string; name: string; hasStream?: boolean }
   | { type: 'JOIN_CONFIRMED'; code: string; hostName: string; hasStream?: boolean }
   | { type: 'HELLO'; name: string; role: 'host' | 'guest'; hasStream?: boolean }
@@ -565,10 +567,11 @@ export type PeerMessage =
   | { type: 'PARCHISI_START'; mode: ParchisiMode }
   | {
       type: 'PARCHISI_ACTION';
-      action: 'ROLL' | 'MOVE_PAWN' | 'MERCY_DECISION' | 'DISMISS_CARD' | 'EMOTE';
-      pawnId?: number;
-      mercyChoice?: 'no_mercy' | 'offer_dare' | 'accept_dare' | 'decline_dare' | 'validate_dare';
-      emote?: ParchisiEmoteKind;
+      action: 'ROLL' | 'MOVE_TOKEN' | 'EMOJI' | 'QUICK_CHAT';
+      tokenId?: number;
+      moveOptionId?: string;
+      emoji?: string;
+      chatText?: string;
     }
   | {
       type: 'PARCHISI_STATE';
@@ -728,102 +731,85 @@ export interface XoNeonState {
   moveSeq: number;
 }
 
-export type ParchisiPlayer = 'host' | 'guest';
-export type ParchisiMode = 'express' | 'classic';
-export type ParchisiPhase =
-  | 'READY'
-  | 'WAIT_ROLL'
-  | 'WAIT_MOVE'
-  | 'BONUS_20'
-  | 'BONUS_10'
-  | 'MERCY_OFFER'
-  | 'KARMA_CARD'
-  | 'GAME_OVER';
+export type ParchisiColor = 'red' | 'green' | 'yellow' | 'blue';
+export type ParchisiPlayer = ParchisiColor;
+export type ParchisiMode = '1v1' | '4p';
+export type ParchisiPhase = 'READY' | 'WAIT_ROLL' | 'WAIT_MOVE' | 'GAME_OVER';
+export type ParchisiBonusAmount = 20 | 10;
 
-export type ParchisiEmoteKind = 'yum' | 'mercy' | 'blocked' | 'lucky';
-
-export interface ParchisiPawn {
-  /** 0..3 per player */
+export interface ParchisiToken {
+  /** 0..3 per color */
   id: number;
-  owner: ParchisiPlayer;
-  /** -1 = in base, 0..63 = outer 68-square loop relative to exit, 64..70 = 7-square final corridor, 71 = Central Throne */
+  color: ParchisiColor;
+  /** -1 = in corner base, 0..63 = outer 68-tile track relative to Start, 64..70 = 7-tile colored home column, 71 = Center Triangle Goal */
   progress: number;
-  /** Remaining turns of Love Shield capture immunity */
-  shieldTurns: number;
 }
 
 export interface ParchisiMoveOption {
-  pawnId: number;
+  /** Stable identifier e.g. "t0:d0", "t0:d1", "t0:sum", "t0:exit-d0", "t0:exit-sum", "t0:bonus-20" */
+  id: string;
+  tokenId: number;
+  color: ParchisiColor;
   fromProgress: number;
   toProgress: number;
   steps: number;
-  /** Sequence of progress values visited step-by-step for 120ms hop animation */
+  /** Which dice indices (0, 1) are consumed by this move, empty for +20/+10 bonus */
+  diceUsed: number[];
+  /** Non-null when this move spends a pending +20 or +10 bonus */
+  bonusUsed: ParchisiBonusAmount | null;
+  /** Short pill label e.g. "+5", "+7", "Exit (5)", "+20", "+10" */
+  label: string;
+  /** Step-by-step progress values for smooth 105ms tile hop animation */
   path: number[];
   isExit: boolean;
-  captures: { owner: ParchisiPlayer; pawnId: number; square: number } | null;
-  reachesThrone: boolean;
+  /** Opponent token(s) captured on landing (or intermediate tile during combined move) */
+  captures: { color: ParchisiColor; tokenId: number; square: number }[];
+  reachesHome: boolean;
   landsOnSafe: boolean;
-  landsOnKarma: boolean;
   breaksBlockade: boolean;
-}
-
-export interface ParchisiPendingMercy {
-  capturer: ParchisiPlayer;
-  capturerPawnId: number;
-  victim: ParchisiPlayer;
-  victimPawnId: number;
-  square: number;
-  dareIndex: number;
-  stage: 'choose' | 'waiting_partner' | 'partner_performing';
-  /** Remaining countdown seconds during the 8s decision stage */
-  countdownSec: number;
-}
-
-export type ParchisiKarmaEffect = 'shield' | 'turbo3' | 'free_roll' | 'complicity';
-
-export interface ParchisiActiveKarma {
-  cardId: number;
-  effect: ParchisiKarmaEffect;
-  triggeredBy: ParchisiPlayer;
-  pawnId: number;
-  square: number;
 }
 
 export interface ParchisiMoveAnimation {
   seq: number;
-  owner: ParchisiPlayer;
-  pawnId: number;
+  color: ParchisiColor;
+  tokenId: number;
   path: number[];
+  captured: { color: ParchisiColor; tokenId: number }[];
+  reachedHome: boolean;
+  landedSafe: boolean;
 }
 
 export interface ParchisiPlayerStats {
   captures: number;
-  daresCompleted: number;
-  sixesRolled: number;
-  tenderHearts: number;
-  karmaCards: number;
+  doublesRolled: number;
+  homeEntries: number;
 }
 
 export interface ParchisiState {
   phase: ParchisiPhase;
   mode: ParchisiMode;
-  turn: ParchisiPlayer;
-  dieValue: number | null;
-  effectiveSteps: number;
+  activeColors: ParchisiColor[];
+  turn: ParchisiColor;
+  /** Two 6-sided dice values once rolled this turn */
+  dice: [number, number] | null;
+  /** Tracks which of the 2 dice have been spent */
+  usedDice: [boolean, boolean];
+  /** Pending +20 (capture) or +10 (center home) bonus moves to play immediately */
+  pendingBonuses: ParchisiBonusAmount[];
   rollSeq: number;
-  consecutiveSixes: number;
-  extraTurnPending: boolean;
-  lastMovedPawnId: Record<ParchisiPlayer, number | null>;
-  pawns: Record<ParchisiPlayer, ParchisiPawn[]>;
-  pendingMercy: ParchisiPendingMercy | null;
-  activeKarma: ParchisiActiveKarma | null;
-  usedKarmaIds: number[];
+  consecutiveDoubles: number;
+  extraRollPending: boolean;
+  /** True after rolling doubles while owning a blockade, until a blockade is broken */
+  mustBreakBlockade: boolean;
+  /** Last moved token per color (subject to 3-consecutive-doubles penalty if outside home column) */
+  lastMovedTokenId: Record<ParchisiColor, number | null>;
+  tokens: Record<ParchisiColor, ParchisiToken[]>;
   lastMoveAnim: ParchisiMoveAnimation | null;
   lastEventText: string;
-  history: string[];
-  winner: ParchisiPlayer | null;
-  finalDareIndex: number;
-  stats: Record<ParchisiPlayer, ParchisiPlayerStats>;
+  lastEventTone: 'neutral' | 'capture' | 'bonus' | 'safe' | 'warning' | 'win';
+  winner: ParchisiColor | null;
+  stats: Record<ParchisiColor, ParchisiPlayerStats>;
+  turnStartedAt: number;
   stateSeq: number;
 }
 

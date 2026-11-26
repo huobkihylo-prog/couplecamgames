@@ -12,11 +12,45 @@ export const ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ];
 
+/**
+ * Builds the WebRTC ICE server list combining the 4 fast public STUN servers
+ * with an optional TURN server configured via Vite env vars (`VITE_TURN_URL`,
+ * `VITE_TURN_USER`, `VITE_TURN_PASS`) for restrictive 4G/corporate NATs.
+ */
+export function buildIceServers(
+  envOverride?: Partial<Record<'VITE_TURN_URL' | 'VITE_TURN_USER' | 'VITE_TURN_PASS', string>>,
+): RTCIceServer[] {
+  const servers: RTCIceServer[] = [...ICE_SERVERS];
+  const env =
+    envOverride ??
+    ((import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {});
+  const turnUrl = env.VITE_TURN_URL?.trim();
+  if (turnUrl) {
+    const turnEntry: RTCIceServer = { urls: turnUrl };
+    if (env.VITE_TURN_USER?.trim()) {
+      turnEntry.username = env.VITE_TURN_USER.trim();
+    }
+    if (env.VITE_TURN_PASS?.trim()) {
+      turnEntry.credential = env.VITE_TURN_PASS.trim();
+    }
+    servers.push(turnEntry);
+  }
+  return servers;
+}
+
 export const ROOM_PREFIX = 'couplecam-room-';
-export const CONNECT_TIMEOUT_MS = 10000;
+export const CONNECT_TIMEOUT_MS = 15000;
+export const MAX_GUEST_RETRIES = 3;
+export const GUEST_RETRY_DELAY_MS = 3000;
+export const GUEST_ATTEMPT_STALL_MS = 5000;
+export const HEARTBEAT_INTERVAL_MS = 20000;
+
+export const ERR_ROOM_NOT_FOUND =
+  "Salon introuvable. Demande à ton partenaire de revenir sur la page du salon (sans fermer l'onglet).";
+export const ERR_NETWORK_BLOCKED =
+  'Connexion directe bloquée par le réseau (4G/Wi-Fi). Essayez de cliquer sur Réessayer ou passez en Wi-Fi.';
 
 const JOIN_RETRY_PING_MS = 1000;
-const HEARTBEAT_INTERVAL_MS = 4000;
 const ICE_DISCONNECT_GRACE_MS = 6000;
 
 const ROOM_CODE_LETTERS = 'ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -102,11 +136,15 @@ export class DuoPeerService {
   private dataConn: DataConnection | null = null;
   private mediaConn: MediaConnection | null = null;
   private relayWs: WebSocket | null = null;
+  private relaySse: EventSource | null = null;
+  private relaySseClientId: string | null = null;
+  private relaySseReady = false;
   private relayHostReady = false;
   private relayGuestJoined = false;
   private relayRoomNotFound = false;
   private peerUnavailable = false;
   private hostWaitingNotified = false;
+  private relayReconnectAttempts = 0;
 
   private localStream: MediaStream | null = null;
   private callbacks: PeerServiceCallbacks;
@@ -121,11 +159,18 @@ export class DuoPeerService {
 
   // Monotonic generation counter prevents stale async close/error events from corrupting a new session
   private sessionGen = 0;
+  private guestRetryCount = 0;
   private connectTimeoutTimer: number | null = null;
   private joinRetryTimer: number | null = null;
+  private guestPeerRetryTimer: number | null = null;
+  private guestAttemptStallTimer: number | null = null;
   private heartbeatTimer: number | null = null;
   private iceGraceTimer: number | null = null;
   private reconnectTimer: number | null = null;
+  private relayReconnectTimer: number | null = null;
+  private relayFallbackTimer: number | null = null;
+  private visibilityListener: (() => void) | null = null;
+  private onlineListener: (() => void) | null = null;
 
   constructor(callbacks: PeerServiceCallbacks) {
     this.callbacks = callbacks;
@@ -140,6 +185,14 @@ export class DuoPeerService {
       window.clearInterval(this.joinRetryTimer);
       this.joinRetryTimer = null;
     }
+    if (this.guestPeerRetryTimer !== null) {
+      window.clearTimeout(this.guestPeerRetryTimer);
+      this.guestPeerRetryTimer = null;
+    }
+    if (this.guestAttemptStallTimer !== null) {
+      window.clearTimeout(this.guestAttemptStallTimer);
+      this.guestAttemptStallTimer = null;
+    }
     if (this.heartbeatTimer !== null) {
       window.clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -152,14 +205,63 @@ export class DuoPeerService {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    if (this.relayReconnectTimer !== null) {
+      window.clearTimeout(this.relayReconnectTimer);
+      this.relayReconnectTimer = null;
+    }
+    if (this.relayFallbackTimer !== null) {
+      window.clearTimeout(this.relayFallbackTimer);
+      this.relayFallbackTimer = null;
+    }
+  }
+
+  private detachLifecycleListeners() {
+    if (typeof document !== 'undefined' && this.visibilityListener) {
+      document.removeEventListener('visibilitychange', this.visibilityListener);
+      this.visibilityListener = null;
+    }
+    if (typeof window !== 'undefined' && this.onlineListener) {
+      window.removeEventListener('online', this.onlineListener);
+      this.onlineListener = null;
+    }
+  }
+
+  private attachLifecycleListeners(gen: number) {
+    this.detachLifecycleListeners();
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+
+    const handleWakeup = () => {
+      if (gen !== this.sessionGen || !this.activeRoomCode) return;
+      if (document.visibilityState === 'hidden') return;
+      // Re-attach relay transport immediately when returning from WhatsApp/background on mobile
+      const wsOpen = Boolean(this.relayWs && this.relayWs.readyState === WebSocket.OPEN);
+      const sseOpen = Boolean(this.relaySse && this.relaySseReady);
+      if (!wsOpen && !sseOpen) {
+        console.log('[CoupleCam P2P] App returned to foreground -> reconnecting relay transport...');
+        this.relayReconnectAttempts = 0;
+        this.openRelayTransport(gen);
+      } else {
+        // Re-assert room membership idempotently so server flushes any queued partner arrival
+        this.sendRelayRegistration();
+      }
+      if (this.peer && !this.peer.destroyed && this.peer.disconnected) {
+        this.scheduleSignalingReconnect(this.peer, gen);
+      }
+    };
+
+    this.visibilityListener = handleWakeup;
+    this.onlineListener = handleWakeup;
+    document.addEventListener('visibilitychange', handleWakeup);
+    window.addEventListener('online', handleWakeup);
   }
 
   private createPeerOptions() {
     return {
+      debug: 1,
       pingInterval: 5000,
       config: {
-        iceServers: ICE_SERVERS,
-        iceCandidatePoolSize: 4,
+        iceServers: buildIceServers(),
+        iceCandidatePoolSize: 10,
       },
     };
   }
@@ -170,24 +272,71 @@ export class DuoPeerService {
     return `${protocol}//${window.location.host}/ws/room`;
   }
 
+  private getRelaySseBaseUrl(): string | null {
+    if (typeof window === 'undefined' || !window.location?.origin) return null;
+    return `${window.location.origin}/api/room`;
+  }
+
   private sendRelayControl(payload: Record<string, unknown>): boolean {
     if (this.relayWs && this.relayWs.readyState === WebSocket.OPEN) {
       try {
         this.relayWs.send(JSON.stringify(payload));
         return true;
       } catch {
-        return false;
+        // Fall through to SSE if WS send fails
+      }
+    }
+    if (this.relaySseReady && this.relaySseClientId) {
+      const base = this.getRelaySseBaseUrl();
+      if (base) {
+        void fetch(`${base}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, clientId: this.relaySseClientId }),
+          keepalive: payload.type === 'LEAVE_ROOM',
+        }).catch(() => {});
+        return true;
       }
     }
     return false;
   }
 
+  private sendRelayRegistration() {
+    if (!this.activeRoomCode) return;
+    if (this.role === 'host') {
+      this.sendRelayControl({
+        type: 'HOST_OPEN',
+        code: this.activeRoomCode,
+        name: this.localName,
+      });
+    } else {
+      this.sendRelayControl({
+        type: 'GUEST_JOIN',
+        code: this.activeRoomCode,
+        name: this.localName,
+        hasStream: Boolean(this.localStream),
+      });
+    }
+  }
+
   private isRelayTransportOpen(): boolean {
-    return Boolean(
+    const wsOpen = Boolean(this.relayWs && this.relayWs.readyState === WebSocket.OPEN);
+    const sseOpen = Boolean(this.relaySse && this.relaySseReady);
+    return Boolean((wsOpen || sseOpen) && (this.relayHostReady || this.relayGuestJoined));
+  }
+
+  private hasAnyRelayLink(): boolean {
+    const wsActive = Boolean(
       this.relayWs &&
-        this.relayWs.readyState === WebSocket.OPEN &&
-        (this.relayHostReady || this.relayGuestJoined),
+        (this.relayWs.readyState === WebSocket.OPEN ||
+          this.relayWs.readyState === WebSocket.CONNECTING),
     );
+    const sseActive = Boolean(
+      this.relaySse &&
+        (this.relaySse.readyState === EventSource.OPEN ||
+          this.relaySse.readyState === EventSource.CONNECTING),
+    );
+    return wsActive || sseActive;
   }
 
   public setLocalStream(stream: MediaStream | null) {
@@ -223,7 +372,7 @@ export class DuoPeerService {
     );
     this.callbacks.onStatusChange('creating', `Ouverture du salon ${cleanCode}...`);
 
-    // 10-second max timeout for room opening across both Relay & PeerJS
+    // 15-second max timeout for room opening across both Relay & PeerJS
     this.connectTimeoutTimer = window.setTimeout(() => {
       if (gen !== this.sessionGen) return;
       if (!this.hostWaitingNotified && !this.hasEnteredRoom) {
@@ -233,21 +382,14 @@ export class DuoPeerService {
         this.destroy();
         this.callbacks.onStatusChange(
           'error',
-          'Délai dépassé (10 s) : impossible d’ouvrir le salon. Vérifie ta connexion et réessaie.',
+          'Délai dépassé (15 s) : impossible d’ouvrir le salon. Vérifie ta connexion et réessaie.',
         );
       }
     }, CONNECT_TIMEOUT_MS);
 
-    // 1. Open instant WebSocket Room Relay so Partner can ALWAYS join regardless of Symmetric NAT
-    this.openRelaySocket(gen, () => {
-      if (gen !== this.sessionGen) return;
-      console.log(`[CoupleCam P2P][Host] Step 1b (Relay): Registering host room "${cleanCode}" on /ws/room`);
-      this.sendRelayControl({
-        type: 'HOST_OPEN',
-        code: cleanCode,
-        name: localName,
-      });
-    });
+    // 1. Open instant WebSocket Room Relay (with automatic HTTP/SSE fallback & foreground reconnect)
+    this.attachLifecycleListeners(gen);
+    this.openRelayTransport(gen);
 
     // 2. Open PeerJS P2P endpoint for direct WebRTC video/audio & direct DataConnection
     const peer = new Peer(peerId, this.createPeerOptions());
@@ -289,6 +431,11 @@ export class DuoPeerService {
       }
 
       if (errType === 'unavailable-id') {
+        // Never silently change a room code already shown on screen via Relay!
+        if (this.relayHostReady) {
+          console.log(`[CoupleCam P2P][Host] PeerJS ID "${peerId}" taken, keeping active Relay room "${cleanCode}".`);
+          return;
+        }
         if (attempt < 3 && !this.hasEnteredRoom) {
           const freshCode = generateRoomCode();
           console.log(`[CoupleCam P2P][Host] Code "${cleanCode}" already taken, regenerating -> "${freshCode}"`);
@@ -296,11 +443,9 @@ export class DuoPeerService {
           this.createHostRoom(freshCode, localName, stream, attempt + 1);
           return;
         }
-        if (!this.relayHostReady) {
-          this.destroy();
-          this.callbacks.onStatusChange('error', 'Ce code est déjà utilisé. Réessaie pour en générer un autre.');
-        }
-      } else if (!this.relayHostReady) {
+        this.destroy();
+        this.callbacks.onStatusChange('error', 'Ce code est déjà utilisé. Réessaie pour en générer un autre.');
+      } else if (!this.relayHostReady && !this.hasAnyRelayLink()) {
         this.destroy();
         this.callbacks.onStatusChange(
           'error',
@@ -345,52 +490,57 @@ export class DuoPeerService {
     this.hasEnteredRoom = false;
     this.relayRoomNotFound = false;
     this.peerUnavailable = false;
+    this.guestRetryCount = 0;
 
     console.log(
       `[CoupleCam P2P][Partner] Step 1: Joining room "${cleanCode}" (targetId="${targetId}", raw="${code}")`,
     );
-    this.callbacks.onStatusChange('connecting', `Connexion au salon ${cleanCode}...`);
+    this.callbacks.onStatusChange('connecting', '1/3 Connexion au serveur...');
 
-    // Strict 10-second maximum timeout so Partner NEVER stays stuck on "en cours..."
+    // Clean 15-second timeout so Partner NEVER stays stuck on "en cours d'entrée"
     this.connectTimeoutTimer = window.setTimeout(() => {
       if (gen !== this.sessionGen || this.hasEnteredRoom) return;
       const iceState = this.dataConn?.peerConnection?.iceConnectionState ?? 'none';
       const dcOpen = Boolean(this.dataConn?.open);
       const wsState = this.relayWs?.readyState ?? -1;
+      const wasRoomNotFound = this.peerUnavailable && (this.relayRoomNotFound || !this.hasAnyRelayLink());
       console.log(
-        `[CoupleCam P2P][Partner] Timeout (${CONNECT_TIMEOUT_MS}ms) reached for room "${cleanCode}" (wsState=${wsState}, peerOpen=${Boolean(this.peer?.open)}, dcOpen=${dcOpen}, iceState="${iceState}"). Aborting.`,
+        `[CoupleCam P2P][Partner] Timeout (${CONNECT_TIMEOUT_MS}ms) reached for room "${cleanCode}" (wsState=${wsState}, peerOpen=${Boolean(this.peer?.open)}, dcOpen=${dcOpen}, iceState="${iceState}", roomNotFound=${wasRoomNotFound}). Aborting.`,
       );
       this.destroy();
       this.callbacks.onStatusChange(
         'error',
-        `Délai dépassé (10 s) : impossible d’entrer dans le salon ${cleanCode}. Vérifie le code, que l’hôte est toujours en attente, puis réessaie.`,
+        wasRoomNotFound ? ERR_ROOM_NOT_FOUND : ERR_NETWORK_BLOCKED,
       );
     }, CONNECT_TIMEOUT_MS);
 
-    // 1. Connect immediately via WebSocket Room Relay (`/ws/room`)
-    this.openRelaySocket(gen, () => {
-      if (gen !== this.sessionGen || this.hasEnteredRoom) return;
-      console.log(`[CoupleCam P2P][Partner] Step 2 (Relay): Requesting entry into room "${cleanCode}" on /ws/room`);
-      this.sendRelayControl({
-        type: 'GUEST_JOIN',
-        code: cleanCode,
-        name: localName,
-        hasStream: Boolean(this.localStream),
-      });
-    });
+    // 1. Connect immediately via WebSocket Room Relay (`/ws/room`) with automatic HTTP/SSE fallback
+    this.attachLifecycleListeners(gen);
+    this.openRelayTransport(gen);
 
-    // 2. Simultaneously connect via PeerJS for direct WebRTC video/audio & P2P DataConnection
+    // 2. Simultaneously open local PeerJS endpoint; NEVER call peer.connect() before peer 'open'
     const peer = new Peer(this.createPeerOptions());
     this.peer = peer;
 
     peer.on('open', (myId) => {
       if (gen !== this.sessionGen || peer.destroyed) return;
-      console.log(`[CoupleCam P2P][Partner] Step 2 (PeerJS): Local peer open (myId="${myId}"). Connecting to "${targetId}"...`);
-      const conn = peer.connect(targetId, {
-        serialization: 'json',
-        reliable: true,
-      });
-      this.attachDataConnection(conn, gen);
+      console.log(`[CoupleCam P2P][Partner] Step 2 (PeerJS): Local peer open (myId="${myId}").`);
+      if (this.hasEnteredRoom) {
+        // Relay already paired us into the Hub -> still launch video/audio call in parallel!
+        if (this.localStream && !this.hasSentMediaCall) {
+          this.initiateMediaCall(targetId, gen);
+        } else if (!this.dataConn) {
+          // Silently open background DataConnection so Host learns our peerId if Host has video
+          try {
+            const bgConn = peer.connect(targetId, { serialization: 'json', reliable: true });
+            this.attachDataConnection(bgConn, gen);
+          } catch {
+            // Relay remains active
+          }
+        }
+        return;
+      }
+      this.attemptGuestPeerConnect(peer, targetId, cleanCode, gen);
     });
 
     peer.on('call', (call) => {
@@ -414,18 +564,17 @@ export class DuoPeerService {
 
       if (errType === 'peer-unavailable') {
         this.peerUnavailable = true;
-        // Abort immediately if Relay ALSO confirmed room doesn't exist (or relay is unavailable)
-        const wsUnavailable = !this.relayWs || this.relayWs.readyState === WebSocket.CLOSED;
-        if (this.relayRoomNotFound || wsUnavailable) {
+        // Host may still be on WhatsApp — auto-retry up to 3 times every 3 seconds before failing!
+        if (this.guestRetryCount < MAX_GUEST_RETRIES) {
+          this.scheduleGuestPeerRetry(peer, targetId, cleanCode, gen, 'peer-unavailable');
+        } else if (this.relayRoomNotFound || !this.hasAnyRelayLink()) {
           this.failRoomNotFound(gen, cleanCode);
         }
-      } else if (!this.isRelayTransportOpen() && (!this.relayWs || this.relayWs.readyState === WebSocket.CLOSED)) {
+      } else if (!this.isRelayTransportOpen() && !this.hasAnyRelayLink()) {
         this.destroy();
         this.callbacks.onStatusChange(
           'error',
-          isSignalingOnlyError(errType)
-            ? 'Connexion au serveur interrompue. Vérifie ton réseau et réessaie.'
-            : err.message || 'Connexion au salon échouée.',
+          isSignalingOnlyError(errType) ? ERR_NETWORK_BLOCKED : err.message || ERR_NETWORK_BLOCKED,
         );
       }
     });
@@ -437,22 +586,143 @@ export class DuoPeerService {
     });
   }
 
+  private attemptGuestPeerConnect(peer: Peer, targetId: string, cleanCode: string, gen: number) {
+    if (gen !== this.sessionGen || peer.destroyed || this.hasEnteredRoom) return;
+    if (!peer.open) return;
+
+    this.guestRetryCount += 1;
+    const attemptNum = this.guestRetryCount;
+    const retrySuffix = attemptNum > 1 ? ` (tentative ${attemptNum}/${MAX_GUEST_RETRIES})` : '';
+
+    if (!this.hasEnteredRoom) {
+      this.callbacks.onStatusChange(
+        'connecting',
+        `2/3 Recherche du salon ${cleanCode}...${retrySuffix}`,
+      );
+    }
+
+    // Close any previous stalled DataConnection before starting a fresh attempt
+    if (this.dataConn && !this.dataConn.open) {
+      const stale = this.dataConn;
+      this.dataConn = null;
+      try {
+        stale.close();
+      } catch {
+        // Ignore stale close error
+      }
+    }
+
+    if (this.guestAttemptStallTimer !== null) {
+      window.clearTimeout(this.guestAttemptStallTimer);
+      this.guestAttemptStallTimer = null;
+    }
+
+    console.log(
+      `[CoupleCam P2P][Partner] Connecting PeerJS DataConnection to "${targetId}" (attempt ${attemptNum}/${MAX_GUEST_RETRIES})`,
+    );
+    const conn = peer.connect(targetId, {
+      serialization: 'json',
+      reliable: true,
+    });
+    this.attachDataConnection(conn, gen);
+
+    if (!this.hasEnteredRoom) {
+      this.callbacks.onStatusChange(
+        'connecting',
+        `3/3 Établissement de la liaison directe (P2P)...${retrySuffix}`,
+      );
+    }
+
+    // If this DataConnection attempt stalls > 5 seconds without opening, close cleanly & auto-retry
+    this.guestAttemptStallTimer = window.setTimeout(() => {
+      this.guestAttemptStallTimer = null;
+      if (gen !== this.sessionGen || this.hasEnteredRoom) return;
+      if (this.dataConn === conn && !conn.open) {
+        console.log(
+          `[CoupleCam P2P][Partner] PeerJS attempt ${attemptNum} stalled > ${GUEST_ATTEMPT_STALL_MS}ms -> closing stale attempt.`,
+        );
+        this.dataConn = null;
+        try {
+          conn.close();
+        } catch {
+          // Ignore close error
+        }
+        if (this.guestRetryCount < MAX_GUEST_RETRIES) {
+          this.scheduleGuestPeerRetry(peer, targetId, cleanCode, gen, 'stalled');
+        }
+      }
+    }, GUEST_ATTEMPT_STALL_MS);
+  }
+
+  private scheduleGuestPeerRetry(
+    peer: Peer,
+    targetId: string,
+    cleanCode: string,
+    gen: number,
+    reason: string,
+  ) {
+    if (gen !== this.sessionGen || this.hasEnteredRoom || peer.destroyed) return;
+    if (this.guestPeerRetryTimer !== null) return;
+    if (this.guestRetryCount >= MAX_GUEST_RETRIES) return;
+
+    const nextAttempt = this.guestRetryCount + 1;
+    console.log(
+      `[CoupleCam P2P][Partner] Auto-retry ${nextAttempt}/${MAX_GUEST_RETRIES} scheduled in ${GUEST_RETRY_DELAY_MS}ms (reason=${reason})`,
+    );
+    this.callbacks.onStatusChange(
+      'connecting',
+      `2/3 Recherche du salon ${cleanCode}... (tentative ${nextAttempt}/${MAX_GUEST_RETRIES})`,
+    );
+
+    this.guestPeerRetryTimer = window.setTimeout(() => {
+      this.guestPeerRetryTimer = null;
+      if (gen !== this.sessionGen || this.hasEnteredRoom || peer.destroyed) return;
+      // Also re-ping relay in case Host just returned from WhatsApp
+      if (this.hasAnyRelayLink()) {
+        this.sendRelayRegistration();
+      }
+      if (peer.open) {
+        this.attemptGuestPeerConnect(peer, targetId, cleanCode, gen);
+      } else if (peer.disconnected) {
+        this.scheduleSignalingReconnect(peer, gen);
+      }
+    }, GUEST_RETRY_DELAY_MS);
+  }
+
   private failRoomNotFound(gen: number, cleanCode: string) {
     if (gen !== this.sessionGen || this.hasEnteredRoom) return;
     console.log(`[CoupleCam P2P][Partner] Room "${cleanCode}" does not exist on Relay or PeerJS -> aborting.`);
     this.destroy();
-    this.callbacks.onStatusChange(
-      'error',
-      `Aucun salon actif trouvé pour le code ${cleanCode}. Demande à l’hôte de vérifier le code.`,
-    );
+    this.callbacks.onStatusChange('error', ERR_ROOM_NOT_FOUND);
   }
 
-  private openRelaySocket(gen: number, onOpen: () => void) {
-    const url = this.getRelayWsUrl();
-    if (!url || typeof WebSocket === 'undefined') return;
+  private openRelayTransport(gen: number) {
+    if (gen !== this.sessionGen) return;
+
+    // Close any stale fallback timer before opening WS
+    if (this.relayFallbackTimer !== null) {
+      window.clearTimeout(this.relayFallbackTimer);
+      this.relayFallbackTimer = null;
+    }
+
+    const wsUrl = this.getRelayWsUrl();
+    if (!wsUrl || typeof WebSocket === 'undefined') {
+      this.openRelaySseFallback(gen);
+      return;
+    }
+
+    // If WebSocket doesn't open within 1.8s (e.g. restrictive mobile/corporate proxy), activate HTTP/SSE fallback
+    this.relayFallbackTimer = window.setTimeout(() => {
+      this.relayFallbackTimer = null;
+      if (gen !== this.sessionGen) return;
+      if (!this.relayWs || this.relayWs.readyState !== WebSocket.OPEN) {
+        console.log('[CoupleCam P2P] /ws/room slow or blocked -> activating HTTP/SSE relay fallback.');
+        this.openRelaySseFallback(gen);
+      }
+    }, 1800);
 
     try {
-      const ws = new WebSocket(url);
+      const ws = new WebSocket(wsUrl);
       this.relayWs = ws;
 
       ws.addEventListener('open', () => {
@@ -460,7 +730,26 @@ export class DuoPeerService {
           ws.close();
           return;
         }
-        onOpen();
+        this.relayReconnectAttempts = 0;
+        if (this.relayFallbackTimer !== null) {
+          window.clearTimeout(this.relayFallbackTimer);
+          this.relayFallbackTimer = null;
+        }
+        // Close SSE fallback if WS came up cleanly
+        if (this.relaySse) {
+          try {
+            this.relaySse.close();
+          } catch {
+            // Ignore close error
+          }
+          this.relaySse = null;
+          this.relaySseReady = false;
+          this.relaySseClientId = null;
+        }
+        console.log(
+          `[CoupleCam P2P][${this.role === 'host' ? 'Host' : 'Partner'}] Step 1b (Relay WS): Registering "${this.activeRoomCode}" on /ws/room`,
+        );
+        this.sendRelayRegistration();
       });
 
       ws.addEventListener('message', (ev) => {
@@ -471,103 +760,217 @@ export class DuoPeerService {
         } catch {
           return;
         }
-
-        const type = typeof envelope.type === 'string' ? envelope.type : '';
-
-        if (type === 'RELAY_HOST_READY' && this.role === 'host') {
-          this.relayHostReady = true;
-          console.log(
-            `[CoupleCam P2P][Host] Step 2 (Relay): Room "${this.activeRoomCode}" open and listening on /ws/room`,
-          );
-          this.notifyHostWaiting(gen);
-          return;
-        }
-
-        if (type === 'RELAY_PARTNER_CONNECTED' && this.role === 'host') {
-          const guestName = String(envelope.name ?? 'Partenaire');
-          const guestHasStream = Boolean(envelope.hasStream);
-          console.log(
-            `[CoupleCam P2P][Host] Step 3 (Relay): Partner "${guestName}" arrived -> sending immediate JOIN_CONFIRMED`,
-          );
-          this.sendRelayData({
-            type: 'JOIN_CONFIRMED',
-            code: this.activeRoomCode,
-            hostName: this.localName,
-            hasStream: Boolean(this.localStream),
-          });
-          this.sendRelayData({
-            type: 'HELLO',
-            name: this.localName,
-            role: 'host',
-            hasStream: Boolean(this.localStream),
-          });
-          this.callbacks.onMessage({
-            type: 'HELLO',
-            name: guestName,
-            role: 'guest',
-            hasStream: guestHasStream,
-          });
-          this.markRoomEntered(gen, 'relay-partner-connected');
-          return;
-        }
-
-        if (type === 'RELAY_JOINED_ROOM' && this.role === 'guest') {
-          this.relayGuestJoined = true;
-          const hostName = String(envelope.hostName ?? 'Hôte');
-          console.log(
-            `[CoupleCam P2P][Partner] Step 3 (Relay): Connected to room "${this.activeRoomCode}" (Host="${hostName}") -> sending JOIN_REQUEST`,
-          );
-          this.sendPartnerJoinHandshake(gen);
-          this.startJoinRetryLoop(gen);
-          return;
-        }
-
-        if (type === 'RELAY_ROOM_NOT_FOUND' && this.role === 'guest') {
-          this.relayRoomNotFound = true;
-          console.log(`[CoupleCam P2P][Partner] Relay reported room "${this.activeRoomCode}" not found.`);
-          if (this.peerUnavailable) {
-            this.failRoomNotFound(gen, this.activeRoomCode);
-          }
-          return;
-        }
-
-        if (type === 'RELAY_DATA') {
-          const payload = envelope.data;
-          if (payload && typeof payload === 'object' && 'type' in payload) {
-            this.handleIncomingPeerMessage(payload as PeerMessage, gen, 'relay');
-          }
-          return;
-        }
-
-        if (type === 'RELAY_PEER_LEFT') {
-          console.log(`[CoupleCam P2P] Relay reported partner left (reason="${String(envelope.reason ?? '')}")`);
-          if (this.dataConn?.open) {
-            // Direct P2P DataConnection is still alive, stay connected!
-            return;
-          }
-          this.callbacks.onRemoteStream(null);
-          if (this.hasEnteredRoom) {
-            this.hasEnteredRoom = false;
-            this.callbacks.onStatusChange('disconnected', 'Ton/ta partenaire a quitté le salon.');
-          }
-        }
+        this.handleRelayEnvelope(envelope, gen);
       });
 
       ws.addEventListener('error', () => {
         if (gen !== this.sessionGen || this.relayWs !== ws) return;
-        console.log('[CoupleCam P2P] Relay WebSocket warning (PeerJS remains active).');
+        console.log('[CoupleCam P2P] Relay WebSocket error -> falling back to HTTP/SSE relay.');
+        this.openRelaySseFallback(gen);
       });
 
       ws.addEventListener('close', () => {
         if (gen !== this.sessionGen || this.relayWs !== ws) return;
-        this.relayHostReady = false;
-        this.relayGuestJoined = false;
-        if (this.role === 'guest' && !this.hasEnteredRoom && this.peerUnavailable) {
+        this.relayWs = null;
+        if (!this.relaySseReady) {
+          this.relayHostReady = false;
+          this.relayGuestJoined = false;
+        }
+        if (this.role === 'guest' && !this.hasEnteredRoom && this.peerUnavailable && this.relayRoomNotFound) {
           this.failRoomNotFound(gen, this.activeRoomCode);
+          return;
+        }
+        // Auto-reconnect relay transport (or switch to SSE) so mobile tab pauses never kill the room
+        if (!this.relaySseReady) {
+          this.openRelaySseFallback(gen);
+          this.scheduleRelayWsReconnect(gen);
         }
       });
     } catch {
-      // Relay unavailable in non-server environments; PeerJS continues independently
+      // WebSocket constructor blocked or unavailable -> use HTTP/SSE relay immediately
+      if (this.relayFallbackTimer !== null) {
+        window.clearTimeout(this.relayFallbackTimer);
+        this.relayFallbackTimer = null;
+      }
+      this.openRelaySseFallback(gen);
+    }
+  }
+
+  private scheduleRelayWsReconnect(gen: number) {
+    if (gen !== this.sessionGen || this.relayReconnectTimer !== null) return;
+    if (this.relayReconnectAttempts >= 5) return;
+    const delayMs = Math.min(4000, 450 * Math.pow(2, this.relayReconnectAttempts));
+    this.relayReconnectAttempts += 1;
+    this.relayReconnectTimer = window.setTimeout(() => {
+      this.relayReconnectTimer = null;
+      if (gen !== this.sessionGen) return;
+      if (this.relayWs && this.relayWs.readyState === WebSocket.OPEN) return;
+      if (this.relaySse && this.relaySseReady) return;
+      this.openRelayTransport(gen);
+    }, delayMs);
+  }
+
+  private openRelaySseFallback(gen: number) {
+    if (gen !== this.sessionGen || typeof EventSource === 'undefined') return;
+    if (this.relayWs && this.relayWs.readyState === WebSocket.OPEN) return;
+    if (this.relaySse && this.relaySse.readyState !== EventSource.CLOSED) return;
+
+    const base = this.getRelaySseBaseUrl();
+    if (!base) return;
+
+    const clientId =
+      this.relaySseClientId ||
+      `sse-${this.role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    this.relaySseClientId = clientId;
+
+    try {
+      const es = new EventSource(`${base}/stream?clientId=${encodeURIComponent(clientId)}`);
+      this.relaySse = es;
+
+      es.addEventListener('message', (ev) => {
+        if (gen !== this.sessionGen || this.relaySse !== es) return;
+        let envelope: Record<string, unknown>;
+        try {
+          envelope = JSON.parse(String(ev.data)) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        if (envelope.type === 'RELAY_SSE_CONNECTED') {
+          this.relaySseReady = true;
+          console.log(
+            `[CoupleCam P2P][${this.role === 'host' ? 'Host' : 'Partner'}] Step 1b (Relay SSE): Connected to /api/room/stream -> registering "${this.activeRoomCode}"`,
+          );
+          this.sendRelayRegistration();
+          return;
+        }
+        this.handleRelayEnvelope(envelope, gen);
+      });
+
+      es.addEventListener('error', () => {
+        if (gen !== this.sessionGen || this.relaySse !== es) return;
+        if (es.readyState === EventSource.CLOSED) {
+          this.relaySseReady = false;
+          this.relaySse = null;
+        }
+      });
+    } catch {
+      // SSE unavailable; PeerJS continues independently
+    }
+  }
+
+  private handleRelayEnvelope(envelope: Record<string, unknown>, gen: number) {
+    if (gen !== this.sessionGen) return;
+    const type = typeof envelope.type === 'string' ? envelope.type : '';
+
+    if (type === 'RELAY_HOST_READY' && this.role === 'host') {
+      this.relayHostReady = true;
+      console.log(
+        `[CoupleCam P2P][Host] Step 2 (Relay): Room "${this.activeRoomCode}" open and listening (resumed=${Boolean(envelope.resumed)})`,
+      );
+      this.notifyHostWaiting(gen);
+      return;
+    }
+
+    if (type === 'RELAY_PARTNER_CONNECTED' && this.role === 'host') {
+      const guestName = String(envelope.name ?? 'Partenaire');
+      const guestHasStream = Boolean(envelope.hasStream);
+      console.log(
+        `[CoupleCam P2P][Host] Step 3 (Relay): Partner "${guestName}" arrived -> sending immediate JOIN_CONFIRMED`,
+      );
+      this.sendHandshakeMessage({
+        type: 'JOIN_WELCOME',
+        code: this.activeRoomCode,
+        hostName: this.localName,
+        hasStream: Boolean(this.localStream),
+      });
+      this.sendHandshakeMessage({
+        type: 'JOIN_CONFIRMED',
+        code: this.activeRoomCode,
+        hostName: this.localName,
+        hasStream: Boolean(this.localStream),
+      });
+      this.sendHandshakeMessage({
+        type: 'HELLO',
+        name: this.localName,
+        role: 'host',
+        hasStream: Boolean(this.localStream),
+      });
+      this.callbacks.onMessage({
+        type: 'HELLO',
+        name: guestName,
+        role: 'guest',
+        hasStream: guestHasStream,
+      });
+      this.markRoomEntered(gen, 'relay-partner-connected');
+      return;
+    }
+
+    if (type === 'RELAY_JOINED_ROOM' && this.role === 'guest') {
+      this.relayGuestJoined = true;
+      this.relayRoomNotFound = false;
+      const hostName = String(envelope.hostName ?? 'Hôte');
+      console.log(
+        `[CoupleCam P2P][Partner] Step 3 (Relay): Confirmed in room "${this.activeRoomCode}" (Host="${hostName}") -> entering Hub immediately!`,
+      );
+      this.callbacks.onMessage({
+        type: 'HELLO',
+        name: hostName,
+        role: 'host',
+        hasStream: false,
+      });
+      this.sendPartnerJoinHandshake(gen);
+      // Enter immediately on authoritative server pairing so Partner NEVER gets stuck on "Connexion..."
+      this.markRoomEntered(gen, 'relay-joined-room');
+      return;
+    }
+
+    if (type === 'RELAY_HOST_RECONNECTED' && this.role === 'guest') {
+      const hostName = String(envelope.hostName ?? 'Hôte');
+      this.callbacks.onMessage({
+        type: 'HELLO',
+        name: hostName,
+        role: 'host',
+        hasStream: false,
+      });
+      this.sendPartnerJoinHandshake(gen);
+      return;
+    }
+
+    if (type === 'RELAY_ROOM_NOT_FOUND' && this.role === 'guest') {
+      this.relayRoomNotFound = true;
+      console.log(`[CoupleCam P2P][Partner] Relay reported room "${this.activeRoomCode}" not found.`);
+      if (this.peerUnavailable && this.guestRetryCount >= MAX_GUEST_RETRIES) {
+        this.failRoomNotFound(gen, this.activeRoomCode);
+      } else {
+        // Retry GUEST_JOIN briefly in case Host is returning from WhatsApp/background
+        this.startJoinRetryLoop(gen);
+      }
+      return;
+    }
+
+    if (type === 'RELAY_DATA') {
+      const payload = envelope.data;
+      if (payload && typeof payload === 'object' && 'type' in payload) {
+        this.handleIncomingPeerMessage(payload as PeerMessage, gen, 'relay');
+      }
+      return;
+    }
+
+    if (type === 'RELAY_PEER_LEFT') {
+      const reason = String(envelope.reason ?? '');
+      console.log(`[CoupleCam P2P] Relay reported partner left (reason="${reason}")`);
+      if (reason === 'replaced') {
+        return;
+      }
+      if (this.dataConn?.open) {
+        // Direct P2P DataConnection is still alive, stay connected!
+        return;
+      }
+      this.callbacks.onRemoteStream(null);
+      if (this.hasEnteredRoom) {
+        this.hasEnteredRoom = false;
+        this.callbacks.onStatusChange('disconnected', 'Ton/ta partenaire a quitté le salon.');
+      }
     }
   }
 
@@ -580,9 +983,30 @@ export class DuoPeerService {
     });
   }
 
+  /**
+   * Sends critical handshake packets on BOTH direct P2P and Relay when available,
+   * so a half-open WebRTC DataConnection can never swallow JOIN_REQUEST or JOIN_CONFIRMED.
+   */
+  private sendHandshakeMessage(msg: PeerMessage) {
+    if (this.dataConn && this.dataConn.open) {
+      try {
+        this.dataConn.send(msg);
+      } catch {
+        // Ignore P2P send error; relay copy below still delivers
+      }
+    }
+    this.sendRelayData(msg);
+  }
+
   private sendPartnerJoinHandshake(gen: number) {
     if (gen !== this.sessionGen || this.role !== 'guest') return;
-    console.log(`[CoupleCam P2P][Partner] Step 4: Sending JOIN_REQUEST + HELLO for room "${this.activeRoomCode}"`);
+    console.log(`[CoupleCam P2P][Partner] Step 4: Sending JOIN_HELLO + JOIN_REQUEST + HELLO for room "${this.activeRoomCode}"`);
+    const joinHello: PeerMessage = {
+      type: 'JOIN_HELLO',
+      code: this.activeRoomCode,
+      name: this.localName,
+      hasStream: Boolean(this.localStream),
+    };
     const joinReq: PeerMessage = {
       type: 'JOIN_REQUEST',
       code: this.activeRoomCode,
@@ -595,8 +1019,9 @@ export class DuoPeerService {
       role: 'guest',
       hasStream: Boolean(this.localStream),
     };
-    this.sendEvent(joinReq);
-    this.sendEvent(hello);
+    this.sendHandshakeMessage(joinHello);
+    this.sendHandshakeMessage(joinReq);
+    this.sendHandshakeMessage(hello);
   }
 
   private startJoinRetryLoop(gen: number) {
@@ -612,8 +1037,11 @@ export class DuoPeerService {
         return;
       }
       if (this.dataConn?.open || this.isRelayTransportOpen()) {
-        console.log('[CoupleCam P2P][Partner] Re-sending JOIN_REQUEST awaiting Host confirmation...');
+        console.log('[CoupleCam P2P][Partner] Re-sending JOIN_HELLO awaiting Host welcome...');
         this.sendPartnerJoinHandshake(gen);
+      } else if (this.relayRoomNotFound && this.hasAnyRelayLink()) {
+        console.log(`[CoupleCam P2P][Partner] Retrying GUEST_JOIN for room "${this.activeRoomCode}"...`);
+        this.sendRelayRegistration();
       }
     }, JOIN_RETRY_PING_MS);
   }
@@ -647,6 +1075,14 @@ export class DuoPeerService {
       window.clearInterval(this.joinRetryTimer);
       this.joinRetryTimer = null;
     }
+    if (this.guestPeerRetryTimer !== null) {
+      window.clearTimeout(this.guestPeerRetryTimer);
+      this.guestPeerRetryTimer = null;
+    }
+    if (this.guestAttemptStallTimer !== null) {
+      window.clearTimeout(this.guestAttemptStallTimer);
+      this.guestAttemptStallTimer = null;
+    }
     if (this.iceGraceTimer !== null) {
       window.clearTimeout(this.iceGraceTimer);
       this.iceGraceTimer = null;
@@ -658,13 +1094,13 @@ export class DuoPeerService {
     this.callbacks.onStatusChange('connected', '');
     this.startHeartbeat(gen);
 
-    // Sequence MediaConnection slightly after room confirmation to prevent SDP glare
+    // Launch video/audio MediaConnection IN PARALLEL after room entry — never blocks Hub entry!
     if (this.role === 'guest' && this.localStream && !this.hasSentMediaCall && this.remotePeerId) {
       const targetPeer = this.remotePeerId;
       window.setTimeout(() => {
         if (gen !== this.sessionGen || !this.hasEnteredRoom || this.hasSentMediaCall) return;
         this.initiateMediaCall(targetPeer, gen);
-      }, 200);
+      }, 150);
     }
   }
 
@@ -679,11 +1115,17 @@ export class DuoPeerService {
       return;
     }
 
-    if (msg.type === 'JOIN_REQUEST' && this.role === 'host') {
+    if ((msg.type === 'JOIN_HELLO' || msg.type === 'JOIN_REQUEST') && this.role === 'host') {
       console.log(
-        `[CoupleCam P2P][Host] Received JOIN_REQUEST from "${msg.name}" (via ${via}) -> replying JOIN_CONFIRMED`,
+        `[CoupleCam P2P][Host] Received ${msg.type} from "${msg.name}" (via ${via}) -> replying JOIN_WELCOME`,
       );
-      this.sendEvent({
+      this.sendHandshakeMessage({
+        type: 'JOIN_WELCOME',
+        code: this.activeRoomCode,
+        hostName: this.localName,
+        hasStream: Boolean(this.localStream),
+      });
+      this.sendHandshakeMessage({
         type: 'JOIN_CONFIRMED',
         code: this.activeRoomCode,
         hostName: this.localName,
@@ -695,21 +1137,21 @@ export class DuoPeerService {
         role: 'guest',
         hasStream: msg.hasStream,
       });
-      this.markRoomEntered(gen, `join-request-${via}`, connPeerId);
+      this.markRoomEntered(gen, `join-hello-${via}`, connPeerId);
 
-      // If Partner joined without camera/mic while Host HAS a camera, Host initiates MediaConnection
+      // If Partner joined without camera/mic while Host HAS a camera, Host initiates MediaConnection in parallel
       if (!msg.hasStream && this.localStream && !this.hasSentMediaCall && connPeerId) {
         window.setTimeout(() => {
           if (gen !== this.sessionGen || !this.hasEnteredRoom || this.hasSentMediaCall) return;
           this.initiateMediaCall(connPeerId, gen);
-        }, 200);
+        }, 150);
       }
       return;
     }
 
-    if (msg.type === 'JOIN_CONFIRMED' && this.role === 'guest') {
+    if ((msg.type === 'JOIN_WELCOME' || msg.type === 'JOIN_CONFIRMED') && this.role === 'guest') {
       console.log(
-        `[CoupleCam P2P][Partner] Received JOIN_CONFIRMED from Host "${msg.hostName}" (via ${via})!`,
+        `[CoupleCam P2P][Partner] Received ${msg.type} from Host "${msg.hostName}" (via ${via}) -> entering Hub!`,
       );
       this.callbacks.onMessage({
         type: 'HELLO',
@@ -717,7 +1159,7 @@ export class DuoPeerService {
         role: 'host',
         hasStream: msg.hasStream,
       });
-      this.markRoomEntered(gen, `join-confirmed-${via}`, connPeerId);
+      this.markRoomEntered(gen, `join-welcome-${via}`, connPeerId);
       return;
     }
 
@@ -733,7 +1175,7 @@ export class DuoPeerService {
           window.setTimeout(() => {
             if (gen !== this.sessionGen || !this.hasEnteredRoom || this.hasSentMediaCall) return;
             this.initiateMediaCall(connPeerId, gen);
-          }, 200);
+          }, 150);
         }
       }
     }
@@ -756,17 +1198,27 @@ export class DuoPeerService {
 
     const handleOpen = () => {
       if (gen !== this.sessionGen || this.dataConn !== conn) return;
+      if (this.guestAttemptStallTimer !== null) {
+        window.clearTimeout(this.guestAttemptStallTimer);
+        this.guestAttemptStallTimer = null;
+      }
       console.log(`[CoupleCam P2P][${roleLabel}] Step 4 (PeerJS): DataConnection OPEN with "${conn.peer}"`);
 
       if (this.role === 'host') {
-        console.log(`[CoupleCam P2P][Host] Sending immediate JOIN_CONFIRMED + HELLO to partner "${conn.peer}"`);
-        this.sendEvent({
+        console.log(`[CoupleCam P2P][Host] Sending immediate JOIN_WELCOME + HELLO to partner "${conn.peer}"`);
+        this.sendHandshakeMessage({
+          type: 'JOIN_WELCOME',
+          code: this.activeRoomCode,
+          hostName: this.localName,
+          hasStream: Boolean(this.localStream),
+        });
+        this.sendHandshakeMessage({
           type: 'JOIN_CONFIRMED',
           code: this.activeRoomCode,
           hostName: this.localName,
           hasStream: Boolean(this.localStream),
         });
-        this.sendEvent({
+        this.sendHandshakeMessage({
           type: 'HELLO',
           name: this.localName,
           role: 'host',
@@ -776,6 +1228,10 @@ export class DuoPeerService {
       } else {
         this.sendPartnerJoinHandshake(gen);
         this.startJoinRetryLoop(gen);
+        // Launch parallel MediaConnection right after DataConnection opens (non-blocking)
+        if (this.localStream && !this.hasSentMediaCall) {
+          this.initiateMediaCall(conn.peer, gen);
+        }
       }
     };
 
@@ -845,12 +1301,19 @@ export class DuoPeerService {
           );
           return;
         }
+        if (this.role === 'guest' && !this.hasEnteredRoom && this.peer && !this.peer.destroyed && this.guestRetryCount < MAX_GUEST_RETRIES) {
+          this.dataConn = null;
+          try {
+            conn.close();
+          } catch {
+            // Ignore close error
+          }
+          this.scheduleGuestPeerRetry(this.peer, this.remotePeerId || getPeerRoomId(this.activeRoomCode), this.activeRoomCode, gen, 'ice-failed');
+          return;
+        }
         this.destroy();
         this.callbacks.onRemoteStream(null);
-        this.callbacks.onStatusChange(
-          'error',
-          'Connexion réseau WebRTC impossible entre les deux appareils (pare-feu ou réseau restrictif). Réessaie sur un autre réseau.',
-        );
+        this.callbacks.onStatusChange('error', ERR_NETWORK_BLOCKED);
       }
     });
 
@@ -875,11 +1338,18 @@ export class DuoPeerService {
           `Salon ${this.activeRoomCode} ouvert — en attente de ton/ta partenaire.`,
         );
       } else if (this.role === 'guest') {
+        if (this.peer && !this.peer.destroyed && this.guestRetryCount < MAX_GUEST_RETRIES) {
+          this.scheduleGuestPeerRetry(
+            this.peer,
+            this.remotePeerId || getPeerRoomId(this.activeRoomCode),
+            this.activeRoomCode,
+            gen,
+            'conn-closed',
+          );
+          return;
+        }
         this.destroy();
-        this.callbacks.onStatusChange(
-          'error',
-          `La connexion au salon ${this.activeRoomCode} a été fermée avant confirmation. Réessaie.`,
-        );
+        this.callbacks.onStatusChange('error', ERR_NETWORK_BLOCKED);
       }
     });
 
@@ -903,11 +1373,24 @@ export class DuoPeerService {
         );
         return;
       }
+      if (this.role === 'guest' && !this.hasEnteredRoom && this.peer && !this.peer.destroyed && this.guestRetryCount < MAX_GUEST_RETRIES) {
+        this.dataConn = null;
+        try {
+          conn.close();
+        } catch {
+          // Ignore close error
+        }
+        this.scheduleGuestPeerRetry(
+          this.peer,
+          this.remotePeerId || getPeerRoomId(this.activeRoomCode),
+          this.activeRoomCode,
+          gen,
+          'conn-error',
+        );
+        return;
+      }
       this.destroy();
-      this.callbacks.onStatusChange(
-        'error',
-        'Connexion de données interrompue. Réessaie de te reconnecter au salon.',
-      );
+      this.callbacks.onStatusChange('error', ERR_NETWORK_BLOCKED);
     });
   }
 
@@ -1015,6 +1498,7 @@ export class DuoPeerService {
   public destroy() {
     this.sessionGen += 1;
     this.clearTimers();
+    this.detachLifecycleListeners();
     this.lastRealtimeSendByType.clear();
     this.remotePeerId = null;
     this.hasEnteredRoom = false;
@@ -1023,17 +1507,49 @@ export class DuoPeerService {
     this.hostWaitingNotified = false;
     this.relayRoomNotFound = false;
     this.peerUnavailable = false;
+    this.relayReconnectAttempts = 0;
 
+    const activeCodeSnapshot = this.activeRoomCode;
     const ws = this.relayWs;
     this.relayWs = null;
+    const sse = this.relaySse;
+    const sseClientId = this.relaySseClientId;
+    const sseWasReady = this.relaySseReady;
+    this.relaySse = null;
+    this.relaySseClientId = null;
+    this.relaySseReady = false;
     this.relayHostReady = false;
     this.relayGuestJoined = false;
+
     if (ws) {
       try {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'LEAVE_ROOM', code: this.activeRoomCode }));
+        if (ws.readyState === WebSocket.OPEN && activeCodeSnapshot) {
+          ws.send(JSON.stringify({ type: 'LEAVE_ROOM', code: activeCodeSnapshot }));
         }
         ws.close();
+      } catch {
+        // Ignore close error
+      }
+    }
+
+    if (sse) {
+      if (sseWasReady && sseClientId && activeCodeSnapshot) {
+        const base = this.getRelaySseBaseUrl();
+        if (base) {
+          void fetch(`${base}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'LEAVE_ROOM',
+              code: activeCodeSnapshot,
+              clientId: sseClientId,
+            }),
+            keepalive: true,
+          }).catch(() => {});
+        }
+      }
+      try {
+        sse.close();
       } catch {
         // Ignore close error
       }

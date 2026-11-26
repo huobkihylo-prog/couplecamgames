@@ -325,36 +325,40 @@ class DuoSoundFx {
     this.playTone(392, 0.22, 'sine', 0.055, 349.23, 0.14);
   }
 
-  // --- Parchisi Duo (Royal Love Edition) SFX ---
+  // --- Official Parcheesi SFX ---
   public parchisiDiceRoll() {
-    const clicks = [340, 480, 390, 560, 440, 620];
-    clicks.forEach((f, idx) => {
-      this.playTone(f, 0.045, 'triangle', 0.048, f * 0.82, idx * 0.055);
+    // Crisp double wooden dice rattle
+    const rattle = [290, 460, 350, 540, 410, 610, 490, 680];
+    rattle.forEach((f, idx) => {
+      this.playTone(f, 0.042, 'triangle', 0.052, f * 0.78, idx * 0.046);
     });
   }
 
   public parchisiPawnHop(stepIndex = 0) {
-    const base = 420 + Math.min(10, stepIndex) * 26;
-    this.playTone(base, 0.065, 'sine', 0.06, base * 1.25);
+    // Soft wooden click on each tile step
+    const base = 440 + Math.min(12, stepIndex) * 18;
+    this.playTone(base, 0.052, 'triangle', 0.058, base * 0.72);
+    this.playTone(base * 1.5, 0.03, 'sine', 0.025, base * 1.1, 0.008);
   }
 
   public parchisiCaptureDrama() {
-    this.playTone(520, 0.14, 'sawtooth', 0.065, 290, 0);
-    this.playTone(310, 0.16, 'sawtooth', 0.07, 165, 0.11);
-    this.playTone(190, 0.28, 'triangle', 0.08, 95, 0.22);
+    // Punchy capture burst sound
+    this.playTone(540, 0.12, 'sawtooth', 0.068, 250, 0);
+    this.playTone(320, 0.16, 'triangle', 0.075, 140, 0.09);
+    this.playTone(185, 0.24, 'sawtooth', 0.065, 80, 0.18);
   }
 
-  public parchisiMercySaved() {
-    const notes = [440, 554.37, 659.25, 880];
-    notes.forEach((n, idx) => {
-      this.playTone(n, 0.24, 'sine', 0.065, undefined, idx * 0.075);
-    });
+  public parchisiSafeStarChime() {
+    // Bright bell chime when landing on a Star / Safe tile
+    this.playTone(783.99, 0.18, 'sine', 0.055, undefined, 0);
+    this.playTone(1046.5, 0.26, 'triangle', 0.052, undefined, 0.065);
   }
 
-  public parchisiKarmaChime() {
-    const sparkle = [659.25, 830.61, 987.77, 1318.5];
-    sparkle.forEach((n, idx) => {
-      this.playTone(n, 0.28, 'sine', 0.058, n * 1.03, idx * 0.065);
+  public parchisiBonusPowerChime(bonus: 20 | 10 = 20) {
+    // Ascending golden power chime for +20 capture or +10 home bonus
+    const chord = bonus === 20 ? [523.25, 659.25, 783.99, 1046.5] : [587.33, 739.99, 880, 1174.66];
+    chord.forEach((n, idx) => {
+      this.playTone(n, 0.22, 'triangle', 0.065, n * 1.02, idx * 0.06);
     });
   }
 

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import express from 'express';
+import express, { type Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { normalizeRelayRoomCode, RoomRelayRegistry } from './src/services/roomRelayLogic.ts';
 
@@ -13,18 +13,181 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 
 async function startServer() {
   const app = express();
+  app.use(express.json({ limit: '128kb' }));
   const server = http.createServer(app);
+
+  // Shared room registry powering BOTH WebSocket (`/ws/room`) and HTTP/SSE (`/api/room/*`) relays.
+  // Guarantees instant Host/Partner room entry and game sync across Symmetric NAT, 4G/5G,
+  // mobile app-switches (WhatsApp code copy), and proxies that block WebSocket upgrades.
+  const registry = new RoomRelayRegistry();
+  const wss = new WebSocketServer({ noServer: true });
+  let nextClientSeq = 1;
+
+  interface SseClientEntry {
+    id: string;
+    res: Response;
+    activeCode: string;
+    send: (payload: Record<string, unknown>) => void;
+  }
+
+  const sseClients = new Map<string, SseClientEntry>();
 
   // Health check endpoint
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, rooms: registry.getRoomCount() });
   });
 
-  // Lightweight WebSocket room relay (`/ws/room`) that guarantees instant Host/Partner
-  // room entry and game sync even across Symmetric NAT / 4G / strict firewalls.
-  const registry = new RoomRelayRegistry();
-  const wss = new WebSocketServer({ noServer: true });
-  let nextClientSeq = 1;
+  // Fallback Transport 2: Server-Sent Events stream (`/api/room/stream`) for networks/proxies
+  // where WebSocket upgrades fail or drop. Shares the exact same `RoomRelayRegistry` as `/ws/room`.
+  app.get('/api/room/stream', (req, res) => {
+    const rawId = typeof req.query.clientId === 'string' ? req.query.clientId.trim() : '';
+    const clientId = rawId && rawId.length <= 64
+      ? rawId
+      : `sse-${nextClientSeq++}-${Math.random().toString(36).slice(2, 7)}`;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const safeSend = (payload: Record<string, unknown>) => {
+      if (res.writableEnded) return;
+      try {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        // Ignore closed stream writes
+      }
+    };
+
+    const existing = sseClients.get(clientId);
+    if (existing) {
+      try {
+        existing.res.end();
+      } catch {
+        // Ignore previous stream close
+      }
+    }
+
+    const entry: SseClientEntry = {
+      id: clientId,
+      res,
+      activeCode: existing?.activeCode ?? '',
+      send: safeSend,
+    };
+    sseClients.set(clientId, entry);
+
+    safeSend({ type: 'RELAY_SSE_CONNECTED', clientId });
+
+    const pingTimer = setInterval(() => {
+      if (res.writableEnded) {
+        clearInterval(pingTimer);
+        return;
+      }
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(pingTimer);
+      }
+    }, 15_000);
+
+    req.on('close', () => {
+      clearInterval(pingTimer);
+      const current = sseClients.get(clientId);
+      if (current && current.res === res) {
+        sseClients.delete(clientId);
+        if (current.activeCode) {
+          registry.detachClient(current.activeCode, clientId);
+        }
+      }
+    });
+  });
+
+  // Companion HTTP POST endpoint for SSE clients to send HOST_OPEN / GUEST_JOIN / RELAY_DATA / LEAVE_ROOM
+  app.post('/api/room/action', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const clientId = typeof body.clientId === 'string' ? body.clientId.trim() : '';
+    const type = typeof body.type === 'string' ? body.type : '';
+    const entry = sseClients.get(clientId);
+
+    if (!clientId || !entry) {
+      res.status(409).json({ ok: false, reason: 'sse-not-connected' });
+      return;
+    }
+
+    if (type === 'HOST_OPEN') {
+      const cleanCode = normalizeRelayRoomCode(String(body.code ?? ''));
+      const name = String(body.name ?? 'Hôte').trim() || 'Hôte';
+      if (entry.activeCode && entry.activeCode !== cleanCode) {
+        registry.removeClient(entry.activeCode, clientId);
+      }
+      const result = registry.registerHost(cleanCode, {
+        id: clientId,
+        role: 'host',
+        name,
+        send: entry.send,
+      });
+      if (result.ok) {
+        entry.activeCode = result.code;
+        res.json({ ok: true, code: result.code, resumed: result.resumed });
+      } else {
+        entry.send({ type: 'RELAY_ERROR', reason: result.reason, code: cleanCode });
+        res.status(409).json({ ok: false, reason: result.reason });
+      }
+      return;
+    }
+
+    if (type === 'GUEST_JOIN') {
+      const cleanCode = normalizeRelayRoomCode(String(body.code ?? ''));
+      const name = String(body.name ?? 'Partenaire').trim() || 'Partenaire';
+      const hasStream = Boolean(body.hasStream);
+      if (entry.activeCode && entry.activeCode !== cleanCode) {
+        registry.removeClient(entry.activeCode, clientId);
+      }
+      const result = registry.joinGuest(
+        cleanCode,
+        {
+          id: clientId,
+          role: 'guest',
+          name,
+          hasStream,
+          send: entry.send,
+        },
+        hasStream,
+      );
+      if (result.ok) {
+        entry.activeCode = result.code;
+        res.json({ ok: true, code: result.code });
+      } else {
+        res.status(404).json({ ok: false, reason: result.reason });
+      }
+      return;
+    }
+
+    if (type === 'RELAY_DATA') {
+      const targetCode = normalizeRelayRoomCode(String(body.code ?? entry.activeCode));
+      const data = body.data;
+      if (targetCode && data && typeof data === 'object') {
+        const delivered = registry.forwardMessage(targetCode, clientId, data as Record<string, unknown>);
+        res.json({ ok: delivered });
+        return;
+      }
+      res.status(400).json({ ok: false, reason: 'invalid-payload' });
+      return;
+    }
+
+    if (type === 'LEAVE_ROOM') {
+      const targetCode = normalizeRelayRoomCode(String(body.code ?? entry.activeCode));
+      if (targetCode) {
+        registry.removeClient(targetCode, clientId);
+      }
+      entry.activeCode = '';
+      res.json({ ok: true });
+      return;
+    }
+
+    res.status(400).json({ ok: false, reason: 'unknown-type' });
+  });
 
   interface TrackedSocket extends WebSocket {
     isAlive?: boolean;
@@ -32,7 +195,7 @@ async function startServer() {
 
   server.on('upgrade', (request, socket, head) => {
     const reqUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
-    if (reqUrl.pathname === '/ws/room') {
+    if (reqUrl.pathname === '/ws/room' || reqUrl.pathname === '/ws/room/') {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });
@@ -53,7 +216,8 @@ async function startServer() {
         // Ignore ping errors on closing sockets
       }
     }
-  }, 20000);
+    registry.pruneExpired(Date.now());
+  }, 10_000);
 
   wss.on('close', () => {
     clearInterval(keepaliveInterval);
@@ -122,6 +286,7 @@ async function startServer() {
             id: clientId,
             role: 'guest',
             name,
+            hasStream,
             send: safeSend,
           },
           hasStream,
@@ -149,14 +314,15 @@ async function startServer() {
 
     ws.on('close', () => {
       if (activeCode) {
-        registry.removeClient(activeCode, clientId);
+        // Use grace-period detach on transport drop so mobile app-switching never destroys the room
+        registry.detachClient(activeCode, clientId);
         activeCode = '';
       }
     });
 
     ws.on('error', () => {
       if (activeCode) {
-        registry.removeClient(activeCode, clientId);
+        registry.detachClient(activeCode, clientId);
         activeCode = '';
       }
     });

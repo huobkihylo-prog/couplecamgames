@@ -1,256 +1,283 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  GUEST_EXIT_SQUARE,
-  HOST_EXIT_SQUARE,
+  COLOR_ENTRY_SQUARE,
+  COLOR_START_SQUARE,
+  CORRIDOR_CELLS,
   OUTER_CELLS,
-  PARCHISI_KARMA_SQUARES,
+  PARCHISI_HOME_PROGRESS,
   PARCHISI_SAFE_SQUARES,
-  PARCHISI_THRONE_PROGRESS,
+  PARCHISI_STAR_SQUARES,
   progressToOuterSquare,
-  getPawnBoardPoint,
 } from './parchisiBoard';
 import {
   applyParchisiMove,
   chooseAiParchisiMove,
-  createHandShakeState,
-  dismissParchisiKarmaCard,
+  createInitialParchisiState,
   getLegalParchisiMoves,
-  PARCHISI_KARMA_DECK,
-  passParchisiTurnNoMoves,
-  resolveParchisiMercy,
-  rollParchisiDie,
+  passParchisiTurnOrBonus,
+  rollParchisiDice,
   startParchisiMatch,
-  stepHandShakeDetector,
 } from './parchisiLogic';
 
-test('Board geometry has exactly 68 unique outer squares, 12 safe zones, and 4 non-safe Karma squares', () => {
+test('Board geometry has 68 unique outer tiles, exact Start tiles (1/18/35/52), 8 Star tiles, and exact Home Column entries', () => {
   assert.equal(OUTER_CELLS.length, 68);
-  const uniqueIds = new Set(OUTER_CELLS.map((c) => c.id));
-  assert.equal(uniqueIds.size, 68);
-  assert.equal(PARCHISI_SAFE_SQUARES.length, 12);
-  assert.equal(PARCHISI_KARMA_SQUARES.length, 4);
+  const ids = new Set(OUTER_CELLS.map((c) => c.id));
+  assert.equal(ids.size, 68);
 
-  const safeSet = new Set(PARCHISI_SAFE_SQUARES);
-  for (const k of PARCHISI_KARMA_SQUARES) {
-    assert.equal(safeSet.has(k), false, `Karma square ${k} must not overlap a Safe Zone`);
-  }
+  assert.equal(COLOR_START_SQUARE.red, 1);
+  assert.equal(COLOR_START_SQUARE.green, 18);
+  assert.equal(COLOR_START_SQUARE.yellow, 35);
+  assert.equal(COLOR_START_SQUARE.blue, 52);
 
-  // Host exits at 56 and enters corridor at 51 (progress 63)
-  assert.equal(progressToOuterSquare('host', 0), HOST_EXIT_SQUARE);
-  assert.equal(progressToOuterSquare('host', 63), 51);
-  // Guest exits at 22 and enters corridor at 17 (progress 63)
-  assert.equal(progressToOuterSquare('guest', 0), GUEST_EXIT_SQUARE);
-  assert.equal(progressToOuterSquare('guest', 63), 17);
+  assert.deepEqual([...PARCHISI_STAR_SQUARES], [8, 13, 25, 30, 42, 47, 59, 64]);
+  assert.deepEqual([...PARCHISI_SAFE_SQUARES], [1, 8, 13, 18, 25, 30, 35, 42, 47, 52, 59, 64]);
 
-  // Stacked pawns offset cleanly side-by-side without overlapping
-  const p0 = getPawnBoardPoint('host', 0, 0, 0, 2);
-  const p1 = getPawnBoardPoint('host', 1, 0, 1, 2);
-  assert.ok(Math.hypot(p1.x - p0.x, p1.y - p0.y) >= 16);
+  // After 63 steps from Start, every color reaches its exact Home Column entry tile
+  assert.equal(progressToOuterSquare('red', 63), COLOR_ENTRY_SQUARE.red);
+  assert.equal(progressToOuterSquare('green', 63), COLOR_ENTRY_SQUARE.green);
+  assert.equal(progressToOuterSquare('yellow', 63), COLOR_ENTRY_SQUARE.yellow);
+  assert.equal(progressToOuterSquare('blue', 63), COLOR_ENTRY_SQUARE.blue);
+
+  assert.equal(CORRIDOR_CELLS.red.length, 7);
+  assert.equal(CORRIDOR_CELLS.green.length, 7);
+  assert.equal(CORRIDOR_CELLS.yellow.length, 7);
+  assert.equal(CORRIDOR_CELLS.blue.length, 7);
 });
 
-test('Express mode pre-deploys 1 pawn and allows exit on 5 or 6; Classic requires 5 only', () => {
-  const express = startParchisiMatch('express');
-  assert.equal(express.pawns.host[0].progress, 0);
-  assert.equal(express.pawns.host[1].progress, -1);
-  assert.equal(express.pawns.guest[0].progress, 0);
+test('Rule of 5 allows base exit on die1=5, die2=5, sum=5 (1+4 or 2+3), and Double 5 exits 2 tokens', () => {
+  // 1) die1 === 5 -> spends die 0, leaves die 1 (3) available
+  let st = startParchisiMatch('1v1');
+  st = rollParchisiDice(st, [5, 3]);
+  let moves = getLegalParchisiMoves(st);
+  assert.equal(moves.length, 4); // 4 base tokens can exit
+  assert.equal(moves[0].isExit, true);
+  assert.deepEqual(moves[0].diceUsed, [0]);
 
-  // Rolling 6 in Express allows exiting pawn 1 OR moving pawn 0
-  const expRoll6 = rollParchisiDie(express, 6);
-  assert.ok(expRoll6.legalMoves.some((m) => m.isExit && m.pawnId === 1));
-  assert.ok(expRoll6.legalMoves.some((m) => !m.isExit && m.pawnId === 0 && m.toProgress === 6));
+  st = applyParchisiMove(st, moves[0].id);
+  assert.equal(st.tokens.red[0].progress, 0); // On Tile 1
+  assert.deepEqual(st.usedDice, [true, false]);
+  // Remaining die 3 can move token 0 from 0 -> 3
+  moves = getLegalParchisiMoves(st);
+  assert.equal(moves.length, 1);
+  assert.equal(moves[0].toProgress, 3);
 
-  const classic = startParchisiMatch('classic');
-  assert.ok(classic.pawns.host.every((p) => p.progress === -1));
-  // Rolling 6 in Classic yields NO legal moves
-  const clsRoll6 = rollParchisiDie(classic, 6);
-  assert.equal(clsRoll6.noMovesAvailable, true);
-  assert.equal(clsRoll6.legalMoves.length, 0);
-  // Rolling 5 in Classic allows exiting
-  const clsRoll5 = rollParchisiDie(classic, 5);
-  assert.equal(clsRoll5.legalMoves.length, 4);
-  assert.ok(clsRoll5.legalMoves.every((m) => m.isExit));
+  // 2) Sum of 5 (2 + 3) -> spends BOTH dice to bring 1 token out
+  let stSum = startParchisiMatch('1v1');
+  stSum = rollParchisiDice(stSum, [2, 3]);
+  const sumMoves = getLegalParchisiMoves(stSum);
+  assert.equal(sumMoves.length, 4);
+  assert.deepEqual(sumMoves[0].diceUsed, [0, 1]);
+  stSum = applyParchisiMove(stSum, sumMoves[0].id);
+  assert.equal(stSum.tokens.red[0].progress, 0);
+  // Both dice consumed, not doubles -> advances turn to Yellow
+  assert.equal(stSum.turn, 'yellow');
+  assert.equal(stSum.phase, 'WAIT_ROLL');
+
+  // 3) Double 5 (5 + 5) -> exits 2 tokens onto Start tile (forming blockade) and grants extra roll!
+  let stD5 = startParchisiMatch('1v1');
+  stD5 = rollParchisiDice(stD5, [5, 5]);
+  const firstExit = getLegalParchisiMoves(stD5).find((m) => m.tokenId === 0)!;
+  stD5 = applyParchisiMove(stD5, firstExit.id);
+  assert.equal(stD5.tokens.red[0].progress, 0);
+  const secondExit = getLegalParchisiMoves(stD5).find((m) => m.tokenId === 1 && m.isExit)!;
+  stD5 = applyParchisiMove(stD5, secondExit.id);
+  assert.equal(stD5.tokens.red[1].progress, 0);
+  // Both 5s used on doubles -> extra roll for Red!
+  assert.equal(stD5.turn, 'red');
+  assert.equal(stD5.phase, 'WAIT_ROLL');
 });
 
-test('Rule of 6: grants extra turn, counts as 7 when all 4 pawns are out, and Triple-6 curse returns outer pawn (sparing corridor)', () => {
-  let st = startParchisiMatch('express');
-  // Put all 4 host pawns on board
-  st.pawns.host[0].progress = 10;
-  st.pawns.host[1].progress = 20;
-  st.pawns.host[2].progress = 30;
-  st.pawns.host[3].progress = 40;
+test('Splitting dice across tokens AND combining dice (d1+d2) sequentially on 1 token', () => {
+  let st = startParchisiMatch('1v1');
+  st.tokens.red[0].progress = 2; // Tile 3
+  st.tokens.red[1].progress = 10; // Tile 11
+  st = rollParchisiDice(st, [2, 4]);
 
-  // 1st six -> counts as 7 spaces!
-  const r1 = rollParchisiDie(st, 6);
-  assert.equal(r1.state.effectiveSteps, 7);
-  const m1 = applyParchisiMove(r1.state, 0);
-  assert.equal(m1.accepted, true);
-  assert.equal(m1.state.pawns.host[0].progress, 17);
-  assert.equal(m1.state.turn, 'host'); // Extra turn!
-  assert.equal(m1.state.phase, 'WAIT_ROLL');
+  const moves = getLegalParchisiMoves(st);
+  const t0Moves = moves.filter((m) => m.tokenId === 0);
+  // Token 0 should have +2, +4, and combined +6
+  assert.deepEqual(
+    t0Moves.map((m) => m.label).sort(),
+    ['+2', '+4', '+6'],
+  );
 
-  // 2nd six -> counts as 7 spaces!
-  const r2 = rollParchisiDie(m1.state, 6);
-  const m2 = applyParchisiMove(r2.state, 0);
-  assert.equal(m2.state.pawns.host[0].progress, 24);
-  assert.equal(m2.state.turn, 'host');
+  // Execute combined +6 on token 0 -> moves straight to progress 8 and passes turn to Yellow
+  const combined = t0Moves.find((m) => m.label === '+6')!;
+  const afterCombined = applyParchisiMove(st, combined.id);
+  assert.equal(afterCombined.tokens.red[0].progress, 8);
+  assert.equal(afterCombined.turn, 'yellow');
 
-  // 3rd six -> Triple-6 Curse sends pawn 0 back to base (-1) and ends turn!
-  const r3 = rollParchisiDie(m2.state, 6);
-  assert.equal(r3.tripleSixCurse, true);
-  assert.equal(r3.cursedPawnId, 0);
-  assert.equal(r3.state.pawns.host[0].progress, -1);
-  assert.equal(r3.state.turn, 'guest');
-
-  // Verify corridor pawn is SPARED from Triple-6 curse!
-  let corridorSt = startParchisiMatch('express');
-  corridorSt.pawns.host[0].progress = 66; // inside final corridor
-  corridorSt.lastMovedPawnId.host = 0;
-  corridorSt.consecutiveSixes = 2;
-  const rSpared = rollParchisiDie(corridorSt, 6);
-  assert.equal(rSpared.tripleSixCurse, true);
-  assert.equal(rSpared.cursedPawnId, null);
-  assert.equal(rSpared.state.pawns.host[0].progress, 66);
+  // Alternatively, split: +2 on token 0, then +4 on token 1
+  const split1 = t0Moves.find((m) => m.label === '+2')!;
+  let splitState = applyParchisiMove(st, split1.id);
+  assert.equal(splitState.tokens.red[0].progress, 4);
+  assert.equal(splitState.phase, 'WAIT_MOVE');
+  const split2 = getLegalParchisiMoves(splitState).find((m) => m.tokenId === 1 && m.label === '+4')!;
+  splitState = applyParchisiMove(splitState, split2.id);
+  assert.equal(splitState.tokens.red[1].progress, 14);
+  assert.equal(splitState.turn, 'yellow');
 });
 
-test('Blockade (2 same-color pawns) blocks ALL pawns (including allies) and MUST be broken on rolling a 6', () => {
-  const st = startParchisiMatch('express');
-  // Host forms a blockade on progress 10 (pawns 0 & 1), pawn 2 sits behind at progress 8, pawn 3 at progress 20
-  st.pawns.host[0].progress = 10;
-  st.pawns.host[1].progress = 10;
-  st.pawns.host[2].progress = 8;
-  st.pawns.host[3].progress = 20;
+test('Blockades prevent passing AND landing for both own and opponent tokens', () => {
+  let st = startParchisiMatch('1v1');
+  // Red token 0 at progress 2 (Tile 3)
+  st.tokens.red[0].progress = 2;
+  // Yellow forms a blockade at Tile 6 (Yellow start=35 -> progress 39 => (34+39)%68+1 = 6)
+  assert.equal(progressToOuterSquare('yellow', 39), 6);
+  st.tokens.yellow[0].progress = 39;
+  st.tokens.yellow[1].progress = 39;
 
-  // Roll a 4: pawn 2 (8 -> 12) CANNOT jump over own blockade at 10!
-  const r4 = rollParchisiDie(st, 4);
-  assert.equal(r4.legalMoves.some((m) => m.pawnId === 2), false);
-  assert.equal(r4.legalMoves.some((m) => m.pawnId === 0), true);
-  assert.equal(r4.legalMoves.some((m) => m.pawnId === 3), true);
-
-  // Roll a 6: MUST break the blockade (only pawns 0 and 1 are legal, NOT pawn 3!)
-  const r6 = rollParchisiDie(st, 6);
-  assert.equal(r6.legalMoves.length, 2);
-  assert.ok(r6.legalMoves.every((m) => m.pawnId === 0 || m.pawnId === 1));
-  assert.equal(r6.legalMoves.some((m) => m.pawnId === 3), false);
+  st = rollParchisiDice(st, [3, 6]); // +3 lands on Tile 6 (blocked!), +6 passes Tile 6 (blocked!)
+  const moves = getLegalParchisiMoves(st);
+  assert.equal(moves.length, 0);
 });
 
-test('Capture triggers Mercy Rule Couple: No Mercy grants +20 bonus; Dare Save spares pawn to Safe Zone & grants +10 + Tender Heart', () => {
-  const st = startParchisiMatch('express');
-  // Host progress 4 -> outer square 60 (non-safe). Guest at outer square 60 is progress (60 - 22 = 38).
-  st.pawns.host[0].progress = 1; // sq 57
-  st.pawns.host[1].progress = 12;
-  st.pawns.guest[0].progress = 38; // sq 60
+test('Capturing single opponent on non-safe tile awards +20 bonus; Safe Star tiles protect from capture', () => {
+  let st = startParchisiMatch('1v1');
+  // Red token 0 at progress 1 (Tile 2). Yellow token 0 at Tile 6 (non-safe: yellow progress 39)
+  st.tokens.red[0].progress = 1;
+  st.tokens.yellow[0].progress = 39;
 
-  const r3 = rollParchisiDie(st, 3);
-  const move = applyParchisiMove(r3.state, 0, () => 0.1);
-  assert.equal(move.accepted, true);
-  assert.equal(move.state.phase, 'MERCY_OFFER');
-  assert.equal(move.state.pendingMercy?.square, 60);
+  st = rollParchisiDice(st, [4, 2]); // +4 lands on Tile 6 -> captures Yellow!
+  const captureMove = getLegalParchisiMoves(st).find((m) => m.tokenId === 0 && m.label === '+4')!;
+  assert.equal(captureMove.captures.length, 1);
 
-  // Branch A: No Mercy -> Guest pawn 0 returns to -1, Host enters BONUS_20
-  const noMercy = resolveParchisiMercy(move.state, 'no_mercy');
-  assert.equal(noMercy.pawns.guest[0].progress, -1);
-  assert.equal(noMercy.stats.host.captures, 1);
-  assert.equal(noMercy.phase, 'BONUS_20');
-  const b20 = applyParchisiMove(noMercy, 0);
-  assert.equal(b20.accepted, true);
-  assert.equal(b20.state.pawns.host[0].progress, 24);
+  st = applyParchisiMove(st, captureMove.id);
+  assert.equal(st.tokens.yellow[0].progress, -1); // Sent back to base!
+  assert.deepEqual(st.pendingBonuses, [20]); // Immediate +20 bonus queued!
+  assert.equal(st.phase, 'WAIT_MOVE');
 
-  // Branch B: Offer Dare -> Partner Accepts -> Capturer Validates -> Victim spared on nearest Safe Zone (sq 56 -> guest prog 34) + Host gets BONUS_10 + Tender Heart!
-  const offered = resolveParchisiMercy(move.state, 'offer_dare');
-  assert.equal(offered.pendingMercy?.stage, 'waiting_partner');
-  const accepted = resolveParchisiMercy(offered, 'accept_dare');
-  assert.equal(accepted.pendingMercy?.stage, 'partner_performing');
-  const validated = resolveParchisiMercy(accepted, 'validate_dare');
-  assert.equal(validated.stats.host.tenderHearts, 1);
-  assert.equal(validated.stats.guest.daresCompleted, 1);
-  assert.equal(validated.phase, 'BONUS_10');
-  // Guest pawn was spared on nearest safe square behind 60 (sq 56) and protected by shield!
-  assert.equal(progressToOuterSquare('guest', validated.pawns.guest[0].progress), 56);
-  assert.equal(validated.pawns.guest[0].shieldTurns, 1);
+  // Must play +20 bonus before remaining die (+2)
+  const bonusMoves = getLegalParchisiMoves(st);
+  assert.equal(bonusMoves.length, 1);
+  assert.equal(bonusMoves[0].label, '+20');
+  st = applyParchisiMove(st, bonusMoves[0].id);
+  assert.equal(st.tokens.red[0].progress, 25); // 5 + 20
+  assert.deepEqual(st.pendingBonuses, []);
+  // Now remaining die (+2) is playable!
+  const remMoves = getLegalParchisiMoves(st);
+  assert.equal(remMoves.length, 1);
+  assert.equal(remMoves[0].label, '+2');
+
+  // Safe Star Tile protection check: Tile 8 is a Gray Star Safe tile (Yellow progress 41 -> Tile 8)
+  let safeSt = startParchisiMatch('1v1');
+  safeSt.tokens.red[0].progress = 4; // Tile 5
+  safeSt.tokens.yellow[0].progress = 41; // Tile 8 (Star Safe!)
+  assert.equal(progressToOuterSquare('yellow', 41), 8);
+  safeSt = rollParchisiDice(safeSt, [3, 1]);
+  const safeMove = getLegalParchisiMoves(safeSt).find((m) => m.label === '+3')!;
+  assert.equal(safeMove.captures.length, 0);
+  assert.equal(safeMove.landsOnSafe, true);
+  safeSt = applyParchisiMove(safeSt, safeMove.id);
+  assert.equal(safeSt.tokens.yellow[0].progress, 41); // Yellow NOT captured!
+  assert.deepEqual(safeSt.pendingBonuses, []);
 });
 
-test('Central Throne requires exact roll, grants +10 bonus, and declares GAME_OVER on 4th pawn', () => {
-  const st = startParchisiMatch('express');
-  st.pawns.host[0].progress = 68; // needs exact 3 to reach 71
-  st.pawns.host[1].progress = 10;
-  st.pawns.host[2].progress = 71;
-  st.pawns.host[3].progress = 71;
+test('Three consecutive doubles forfeits 3rd roll and returns last moved token unless inside Home Column', () => {
+  let st = startParchisiMatch('1v1');
+  st.tokens.red[0].progress = 10; // On outer track
+  st.consecutiveDoubles = 2;
+  st.lastMovedTokenId.red = 0;
 
-  // Roll 4 overshoots 71 -> pawn 0 cannot move!
-  const r4 = rollParchisiDie(st, 4);
-  assert.equal(r4.legalMoves.some((m) => m.pawnId === 0), false);
+  st = rollParchisiDice(st, [4, 4]);
+  assert.equal(st.tokens.red[0].progress, -1); // Returned to base!
+  assert.equal(getLegalParchisiMoves(st).length, 0);
+  assert.equal(st.extraRollPending, false);
+  st = passParchisiTurnOrBonus(st);
+  assert.equal(st.turn, 'yellow');
 
-  // Roll 3 enters Throne -> BONUS_10 for pawn 1
-  const r3 = rollParchisiDie(st, 3);
-  const enter = applyParchisiMove(r3.state, 0);
-  assert.equal(enter.state.pawns.host[0].progress, PARCHISI_THRONE_PROGRESS);
-  assert.equal(enter.state.phase, 'BONUS_10');
-
-  // Now put pawn 1 at 61 so BONUS_10 sends pawn 1 straight into Throne -> GAME_OVER!
-  enter.state.pawns.host[1].progress = 61;
-  const win = applyParchisiMove(enter.state, 1);
-  assert.equal(win.state.phase, 'GAME_OVER');
-  assert.equal(win.state.winner, 'host');
+  // Token already inside colored Home Column (progress >= 64) is SPARED
+  let stSafe = startParchisiMatch('1v1');
+  stSafe.tokens.red[0].progress = 66;
+  stSafe.consecutiveDoubles = 2;
+  stSafe.lastMovedTokenId.red = 0;
+  stSafe = rollParchisiDice(stSafe, [2, 2]);
+  assert.equal(stSafe.tokens.red[0].progress, 66); // Spared!
 });
 
-test('Karma Couple deck has >= 16 cards and applies Love Shield / Turbo +3 / Free Roll cleanly', () => {
-  assert.ok(PARCHISI_KARMA_DECK.length >= 16);
+test('Blockade Break rule on doubles forces breaking own blockade if a legal move exists', () => {
+  let st = startParchisiMatch('1v1');
+  // Red owns a blockade on progress 10 (tokens 0 & 1), plus free token 2 at progress 20
+  st.tokens.red[0].progress = 10;
+  st.tokens.red[1].progress = 10;
+  st.tokens.red[2].progress = 20;
 
-  const st = startParchisiMatch('express');
-  // Host progress 0 is sq 56; progress 3 is sq 59 (Karma square!)
-  const r3 = rollParchisiDie(st, 3);
-  // rng = 0 picks card id 0 (shield)
-  const landed = applyParchisiMove(r3.state, 0, () => 0);
-  assert.equal(landed.state.phase, 'KARMA_CARD');
-  assert.equal(landed.state.activeKarma?.effect, 'shield');
-  assert.equal(landed.state.pawns.host[0].shieldTurns, 1);
+  st = rollParchisiDice(st, [3, 3]);
+  assert.equal(st.mustBreakBlockade, true);
+  const moves = getLegalParchisiMoves(st);
+  // Every offered move must come from token 0 or token 1 (the blockade!)
+  assert.ok(moves.length > 0);
+  assert.ok(moves.every((m) => m.tokenId === 0 || m.tokenId === 1));
 
-  const afterDismiss = dismissParchisiKarmaCard(landed.state);
-  assert.equal(afterDismiss.phase, 'WAIT_ROLL');
-  assert.equal(afterDismiss.turn, 'guest');
-
-  // Test Free Roll card (card id 2 -> index 2 / 16 = 0.13)
-  const rFree = rollParchisiDie(st, 3);
-  const landedFree = applyParchisiMove(rFree.state, 0, () => 0.13);
-  assert.equal(landedFree.state.activeKarma?.effect, 'free_roll');
-  const afterFree = dismissParchisiKarmaCard(landedFree.state);
-  assert.equal(afterFree.phase, 'WAIT_ROLL');
-  assert.equal(afterFree.turn, 'host'); // stays Host's turn!
-
-  // Test passParchisiTurnNoMoves cleanly advances turn
-  const cls = startParchisiMatch('classic');
-  const noMoveRoll = rollParchisiDie(cls, 2);
-  assert.equal(noMoveRoll.noMovesAvailable, true);
-  const passed = passParchisiTurnNoMoves(noMoveRoll.state);
-  assert.equal(passed.turn, 'guest');
-  assert.equal(passed.phase, 'WAIT_ROLL');
+  // Once token 0 moves out of blockade, mustBreakBlockade clears and token 2 can use remaining die 3!
+  const breakMove = moves.find((m) => m.tokenId === 0 && m.label === '+3')!;
+  st = applyParchisiMove(st, breakMove.id);
+  assert.equal(st.mustBreakBlockade, false);
+  const nextMoves = getLegalParchisiMoves(st);
+  assert.ok(nextMoves.some((m) => m.tokenId === 2));
 });
 
-test('Smart Solo AI prioritizes: 1) Throne, 2) Capture, 3) Exit on 5, 4) Safe Zone, 5) Furthest pawn', () => {
-  const st = startParchisiMatch('express');
-  st.turn = 'guest';
-  // Pawn 0 can reach Throne on roll 3 (68 -> 71); Pawn 1 can capture Host at sq 26 (guest prog 4) from prog 1
-  st.pawns.guest[0].progress = 68;
-  st.pawns.guest[1].progress = 1;
-  st.pawns.host[0].progress = 38; // sq (56+38-1)%68+1 = 26 -> guest prog 4!
-  const r3 = rollParchisiDie(st, 3);
-  assert.equal(chooseAiParchisiMove(r3.state), 0, 'AI must prioritize entering Throne over capture');
+test('Center Triangle Home requires exact count, awards +10 bonus, and 4th token triggers Victory', () => {
+  let st = startParchisiMatch('1v1');
+  st.tokens.red[0].progress = 68; // Needs exact 3 to reach 71
+  st.tokens.red[1].progress = 15;
+  st = rollParchisiDice(st, [4, 3]); // +4 overshoots 71 (invalid), +3 hits 71 exact!
 
-  // Remove Throne option -> AI must choose Capture (pawn 1)!
-  st.pawns.guest[0].progress = 10;
-  const r3b = rollParchisiDie(st, 3);
-  assert.equal(chooseAiParchisiMove(r3b.state), 1, 'AI must prioritize capturing opponent pawn');
+  const t0Moves = getLegalParchisiMoves(st).filter((m) => m.tokenId === 0);
+  assert.equal(t0Moves.length, 1);
+  assert.equal(t0Moves[0].label, '+3');
+  assert.equal(t0Moves[0].reachesHome, true);
+
+  st = applyParchisiMove(st, t0Moves[0].id);
+  assert.equal(st.tokens.red[0].progress, PARCHISI_HOME_PROGRESS);
+  assert.deepEqual(st.pendingBonuses, [10]); // +10 bonus!
+
+  // Play +10 bonus on token 1
+  const b10 = getLegalParchisiMoves(st).find((m) => m.tokenId === 1 && m.label === '+10')!;
+  st = applyParchisiMove(st, b10.id);
+  assert.equal(st.tokens.red[1].progress, 25);
+
+  // Victory test: 3 tokens already home, 4th enters exact -> GAME_OVER & winner = red
+  let winSt = startParchisiMatch('1v1');
+  winSt.tokens.red[0].progress = 71;
+  winSt.tokens.red[1].progress = 71;
+  winSt.tokens.red[2].progress = 71;
+  winSt.tokens.red[3].progress = 69; // Needs exact 2
+  winSt = rollParchisiDice(winSt, [2, 6]);
+  const winMove = getLegalParchisiMoves(winSt).find((m) => m.tokenId === 3 && m.label === '+2')!;
+  winSt = applyParchisiMove(winSt, winMove.id);
+  assert.equal(winSt.phase, 'GAME_OVER');
+  assert.equal(winSt.winner, 'red');
 });
 
-test('Hand-shake detector triggers dice roll after left-right hand oscillation', () => {
-  let hs = createHandShakeState();
-  let triggered = false;
-  const samples = [0.35, 0.55, 0.34, 0.56, 0.32, 0.58, 0.30];
-  for (const x of samples) {
-    const res = stepHandShakeDetector(hs, true, x, 0.05);
-    hs = res.next;
-    if (res.triggered) triggered = true;
-  }
-  assert.equal(triggered, true);
+test('4-Player Classic mode cycles counter-clockwise (red -> green -> yellow -> blue) and AI picks valid moves', () => {
+  let st = startParchisiMatch('4p');
+  assert.deepEqual(st.activeColors, ['red', 'green', 'yellow', 'blue']);
+  assert.equal(st.tokens.green.length, 4);
+  assert.equal(st.tokens.blue.length, 4);
+
+  // Red rolls 1 & 2 (no 5 -> 0 moves -> passes to Green)
+  st = rollParchisiDice(st, [1, 2]);
+  assert.equal(getLegalParchisiMoves(st).length, 0);
+  st = passParchisiTurnOrBonus(st);
+  assert.equal(st.turn, 'green');
+
+  // Green AI rolls 5 & 4 -> AI chooses exit move cleanly
+  st = rollParchisiDice(st, [5, 4]);
+  const aiMove1 = chooseAiParchisiMove(st);
+  assert.ok(aiMove1 !== null);
+  assert.equal(aiMove1!.isExit, true);
+  st = applyParchisiMove(st, aiMove1!.id);
+
+  // Green AI uses remaining die 4 -> advances turn to Yellow
+  const aiMove2 = chooseAiParchisiMove(st);
+  assert.ok(aiMove2 !== null);
+  st = applyParchisiMove(st, aiMove2!.id);
+  assert.equal(st.turn, 'yellow');
+
+  // Initial state in 1v1 keeps green/blue empty
+  const init1v1 = createInitialParchisiState('1v1');
+  assert.equal(init1v1.tokens.green.length, 0);
+  assert.equal(init1v1.tokens.blue.length, 0);
 });

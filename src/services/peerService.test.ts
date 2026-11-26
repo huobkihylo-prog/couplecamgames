@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildIceServers,
   CONNECT_TIMEOUT_MS,
   DuoPeerService,
   generateRoomCode,
   getPeerRoomId,
+  GUEST_ATTEMPT_STALL_MS,
+  GUEST_RETRY_DELAY_MS,
+  HEARTBEAT_INTERVAL_MS,
   ICE_SERVERS,
   isSignalingOnlyError,
+  MAX_GUEST_RETRIES,
   normalizeRoomCode,
   ROOM_PREFIX,
 } from './peerService';
@@ -36,18 +41,39 @@ test('generateRoomCode always produces a 4-character alphanumeric code with both
   }
 });
 
-test('ICE_SERVERS configures reliable public STUN servers including Google STUN without dead endpoints', () => {
+test('ICE_SERVERS and buildIceServers configure the 4 STUN servers plus optional Vite TURN env vars', () => {
   const urls = ICE_SERVERS.flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]));
   assert.ok(urls.includes('stun:stun.l.google.com:19302'));
-  assert.ok(urls.some((u) => u.startsWith('stun:stun.cloudflare.com')));
+  assert.ok(urls.includes('stun:stun1.l.google.com:19302'));
+  assert.ok(urls.includes('stun:stun2.l.google.com:19302'));
+  assert.ok(urls.includes('stun:stun.cloudflare.com:3478'));
   assert.ok(
     urls.every((u) => !u.includes('openrelay.metered.ca') && !u.includes('global.stun.twilio.com')),
     'should not include unresolvable/unreachable STUN endpoints',
   );
+
+  const withoutTurn = buildIceServers({});
+  assert.equal(withoutTurn.length, 4);
+
+  const withTurn = buildIceServers({
+    VITE_TURN_URL: 'turn:relay.example.com:3478',
+    VITE_TURN_USER: 'demo-user',
+    VITE_TURN_PASS: 'demo-pass',
+  });
+  assert.equal(withTurn.length, 5);
+  assert.deepEqual(withTurn[4], {
+    urls: 'turn:relay.example.com:3478',
+    username: 'demo-user',
+    credential: 'demo-pass',
+  });
 });
 
-test('CONNECT_TIMEOUT_MS enforces the strict 10-second maximum timeout', () => {
-  assert.equal(CONNECT_TIMEOUT_MS, 10000);
+test('Timeout, retry, and heartbeat constants match reliability guarantees', () => {
+  assert.equal(CONNECT_TIMEOUT_MS, 15000);
+  assert.equal(HEARTBEAT_INTERVAL_MS, 20000);
+  assert.equal(MAX_GUEST_RETRIES, 3);
+  assert.equal(GUEST_RETRY_DELAY_MS, 3000);
+  assert.equal(GUEST_ATTEMPT_STALL_MS, 5000);
 });
 
 test('isSignalingOnlyError distinguishes transient signaling issues from peer-unavailable', () => {
@@ -73,7 +99,6 @@ test('sendRealtime throttles per message type so HAND_FRAME never drops HOCKEY_S
     onRemoteStream: () => {},
     onMessage: () => {},
   });
-  // Inject a minimal open DataConnection double to verify throttling behavior cleanly
   (svc as unknown as { dataConn: { open: boolean; send: (m: { type: string }) => void } }).dataConn = {
     open: true,
     send: (m) => sent.push(m.type),
@@ -100,10 +125,84 @@ test('sendRealtime throttles per message type so HAND_FRAME never drops HOCKEY_S
     rallyHits: 0,
     maxPuckSpeed: 100,
   });
-  // Second HAND_FRAME immediately after should be throttled, while HOCKEY_SYNC was delivered
   svc.sendRealtime({ type: 'HAND_FRAME', game: 'air-hockey', x: 0.6, y: 0.5, detected: true, ts: 2 });
 
   assert.deepEqual(sent, ['HAND_FRAME', 'HOCKEY_SYNC']);
+});
+
+test('Guest enters Hub immediately on JOIN_WELCOME without waiting for video MediaConnection', () => {
+  const statuses: string[] = [];
+  const messages: string[] = [];
+  const svc = new DuoPeerService({
+    onStatusChange: (s) => statuses.push(s),
+    onRemoteStream: () => {},
+    onMessage: (m) => messages.push(m.type),
+  });
+
+  const internal = svc as unknown as {
+    role: 'host' | 'guest';
+    activeRoomCode: string;
+    sessionGen: number;
+    hasEnteredRoom: boolean;
+    handleIncomingPeerMessage: (msg: unknown, gen: number, via: 'peerjs' | 'relay', peerId?: string) => void;
+    startHeartbeat: () => void;
+  };
+  internal.role = 'guest';
+  internal.activeRoomCode = 'A7K4';
+  internal.hasEnteredRoom = false;
+  internal.startHeartbeat = () => {};
+
+  internal.handleIncomingPeerMessage(
+    { type: 'JOIN_WELCOME', code: 'A7K4', hostName: 'Alex', hasStream: false },
+    internal.sessionGen,
+    'peerjs',
+    'couplecam-room-a7k4',
+  );
+
+  assert.equal(internal.hasEnteredRoom, true);
+  assert.ok(statuses.includes('connected'));
+  assert.ok(messages.includes('HELLO'));
+});
+
+test('Host replies JOIN_WELCOME immediately on JOIN_HELLO and enters Hub without waiting for video', () => {
+  const statuses: string[] = [];
+  const sentTypes: string[] = [];
+  const svc = new DuoPeerService({
+    onStatusChange: (s) => statuses.push(s),
+    onRemoteStream: () => {},
+    onMessage: () => {},
+  });
+
+  const internal = svc as unknown as {
+    role: 'host' | 'guest';
+    localName: string;
+    activeRoomCode: string;
+    sessionGen: number;
+    hasEnteredRoom: boolean;
+    dataConn: { open: boolean; send: (m: { type: string }) => void };
+    handleIncomingPeerMessage: (msg: unknown, gen: number, via: 'peerjs' | 'relay', peerId?: string) => void;
+    startHeartbeat: () => void;
+  };
+  internal.role = 'host';
+  internal.localName = 'Alex';
+  internal.activeRoomCode = 'A7K4';
+  internal.hasEnteredRoom = false;
+  internal.startHeartbeat = () => {};
+  internal.dataConn = {
+    open: true,
+    send: (m) => sentTypes.push(m.type),
+  };
+
+  internal.handleIncomingPeerMessage(
+    { type: 'JOIN_HELLO', code: 'A7K4', name: 'Léa', hasStream: false },
+    internal.sessionGen,
+    'peerjs',
+    'guest-peer-1',
+  );
+
+  assert.equal(internal.hasEnteredRoom, true);
+  assert.ok(sentTypes.includes('JOIN_WELCOME'));
+  assert.ok(statuses.includes('connected'));
 });
 
 test('Host keeps room open in waiting state if incoming Guest attempt fails ICE before entering', () => {
@@ -153,5 +252,6 @@ test('Host keeps room open in waiting state if incoming Guest attempt fails ICE 
   assert.equal(peerDestroyed, false, 'Host Peer must stay alive so Partner can retry with same code');
   assert.equal(statuses[statuses.length - 1], 'waiting');
 });
+
 
 

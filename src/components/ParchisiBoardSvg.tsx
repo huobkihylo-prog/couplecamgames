@@ -1,668 +1,729 @@
 import { useMemo } from 'react';
 import type {
-  ParchisiEmoteKind,
+  ParchisiColor,
   ParchisiMoveOption,
-  ParchisiPawn,
-  ParchisiPlayer,
   ParchisiState,
+  ParchisiToken,
 } from '../types/duoplay';
 import {
-  EMERALD_CORRIDOR_CELLS,
+  COLOR_PALETTE,
+  CORNER_BASES,
+  CORRIDOR_CELLS,
   getOuterCell,
-  getPawnBoardPoint,
-  GOLD_CORRIDOR_CELLS,
-  GUEST_BASE_SLOTS,
-  GUEST_CORRIDOR_CELLS,
-  HOST_BASE_SLOTS,
-  HOST_CORRIDOR_CELLS,
+  getTokenBoardPoint,
   OUTER_CELLS,
-  PARCHISI_THRONE_PROGRESS,
+  PARCHISI_BOARD_ORIGIN,
+  PARCHISI_BOARD_SIZE,
+  PARCHISI_HOME_PROGRESS,
   PARCHISI_VIEWBOX,
   progressToOuterSquare,
 } from '../game/parchisiBoard';
-import { getCorridorBlockades, getOuterBlockades } from '../game/parchisiLogic';
+import { ALL_PARCHISI_COLORS, getAllOuterBlockadeSquares } from '../game/parchisiLogic';
 
-export interface FloatingEmoteItem {
+export interface FloatingReactionItem {
   id: number;
-  kind: ParchisiEmoteKind;
-  emoji: string;
-  label: string;
-  from: ParchisiPlayer;
-  xPct: number;
+  color: ParchisiColor;
+  text: string;
+  kind: 'emoji' | 'chat';
 }
 
 interface ParchisiBoardSvgProps {
   state: ParchisiState;
-  localRole: ParchisiPlayer;
-  hostName: string;
-  guestName: string;
   legalMoves: ParchisiMoveOption[];
-  hoveredPawnId: number | null;
-  onHoverPawn: (pawnId: number | null) => void;
-  onSelectPawn: (pawnId: number) => void;
-  /** Temporary animated progress override during 120ms/square hop animation */
-  animOverride: { owner: ParchisiPlayer; pawnId: number; progress: number; hopping: boolean } | null;
-  floatingEmotes: FloatingEmoteItem[];
+  canInteract: boolean;
+  selectedTokenId: number | null;
+  hoveredMove: ParchisiMoveOption | null;
+  animOverride: { color: ParchisiColor; tokenId: number; progress: number; hopBoost: boolean } | null;
+  floatingReactions: FloatingReactionItem[];
+  onTokenClick: (tokenId: number) => void;
+  onTokenHover: (tokenId: number | null) => void;
+  onSelectMoveOption: (move: ParchisiMoveOption) => void;
+  onHoverMoveOption: (move: ParchisiMoveOption | null) => void;
+  onDismissPicker: () => void;
 }
+
+const STAR_POINTS =
+  '0,-9.5 2.7,-3.2 9.4,-2.8 4.2,1.6 5.8,8.3 0,4.6 -5.8,8.3 -4.2,1.6 -9.4,-2.8 -2.7,-3.2';
+
+/** Classic 5-point crown emblem centered on glossy 3D game tokens */
+const CROWN_PATH = 'M -7,5 L -8.5,-4 L -3.5,0.5 L 0,-6 L 3.5,0.5 L 8.5,-4 L 7,5 Z';
 
 export function ParchisiBoardSvg({
   state,
-  localRole,
-  hostName,
-  guestName,
   legalMoves,
-  hoveredPawnId,
-  onHoverPawn,
-  onSelectPawn,
+  canInteract,
+  selectedTokenId,
+  hoveredMove,
   animOverride,
-  floatingEmotes,
+  floatingReactions,
+  onTokenClick,
+  onTokenHover,
+  onSelectMoveOption,
+  onHoverMoveOption,
+  onDismissPicker,
 }: ParchisiBoardSvgProps) {
-  const isMyMovePhase =
-    state.turn === localRole &&
-    (state.phase === 'WAIT_MOVE' || state.phase === 'BONUS_20' || state.phase === 'BONUS_10');
+  const O = PARCHISI_BOARD_ORIGIN; // 30
+  const B = PARCHISI_BOARD_SIZE; // 720
+  const C = O + B / 2; // 390
 
-  const legalByPawnId = useMemo(() => {
-    const map = new Map<number, ParchisiMoveOption>();
-    if (isMyMovePhase) {
-      for (const m of legalMoves) map.set(m.pawnId, m);
+  // Group legal moves by tokenId for the active player
+  const movesByTokenId = useMemo(() => {
+    const map = new Map<number, ParchisiMoveOption[]>();
+    if (!canInteract) return map;
+    for (const m of legalMoves) {
+      const list = map.get(m.tokenId) ?? [];
+      list.push(m);
+      map.set(m.tokenId, list);
     }
     return map;
-  }, [isMyMovePhase, legalMoves]);
+  }, [legalMoves, canInteract]);
 
-  // Effective pawns array (applying temporary hop-animation override for smooth step-by-step motion)
-  const displayPawns = useMemo(() => {
-    const all: ParchisiPawn[] = [];
-    for (const owner of ['host', 'guest'] as const) {
-      for (const p of state.pawns[owner]) {
-        if (animOverride && animOverride.owner === owner && animOverride.pawnId === p.id) {
-          all.push({ ...p, progress: animOverride.progress });
-        } else {
-          all.push(p);
-        }
+  // All outer blockade squares (2 same-color tokens)
+  const outerBlockades = useMemo(
+    () => getAllOuterBlockadeSquares(state.tokens),
+    [state.tokens],
+  );
+
+  // Build effective token positions (applying active step-hop animation override)
+  const renderTokens = useMemo(() => {
+    const effectiveList: (ParchisiToken & { hopBoost: boolean })[] = [];
+    for (const color of ALL_PARCHISI_COLORS) {
+      for (const token of state.tokens[color]) {
+        const isAnim =
+          animOverride && animOverride.color === color && animOverride.tokenId === token.id;
+        effectiveList.push({
+          ...token,
+          progress: isAnim ? animOverride.progress : token.progress,
+          hopBoost: Boolean(isAnim && animOverride.hopBoost),
+        });
       }
     }
-    return all;
-  }, [state.pawns, animOverride]);
 
-  // Group pawns by location key to compute clean side-by-side multi-pawn offsets
-  const pawnRenderList = useMemo(() => {
-    const groups = new Map<string, ParchisiPawn[]>();
-    for (const p of displayPawns) {
+    // Group tokens sharing the exact same cell for clean side-by-side placement
+    const groups = new Map<string, (ParchisiToken & { hopBoost: boolean })[]>();
+    for (const t of effectiveList) {
       let key: string;
-      if (p.progress < 0) key = `base:${p.owner}:${p.id}`;
-      else if (p.progress >= PARCHISI_THRONE_PROGRESS) key = `throne:${p.owner}:${p.id}`;
-      else if (p.progress <= 63) key = `outer:${progressToOuterSquare(p.owner, p.progress)}`;
-      else key = `corr:${p.owner}:${p.progress}`;
-      const list = groups.get(key) ?? [];
-      list.push(p);
-      groups.set(key, list);
+      if (t.progress < 0) {
+        key = `base-${t.color}-${t.id}`;
+      } else if (t.progress >= PARCHISI_HOME_PROGRESS) {
+        key = `home-${t.color}-${t.id}`;
+      } else if (t.progress <= 63) {
+        key = `outer-${progressToOuterSquare(t.color, t.progress)}`;
+      } else {
+        key = `corr-${t.color}-${t.progress}`;
+      }
+      const bucket = groups.get(key) ?? [];
+      bucket.push(t);
+      groups.set(key, bucket);
     }
 
-    const rendered: {
-      pawn: ParchisiPawn;
+    const positioned: {
+      token: ParchisiToken & { hopBoost: boolean };
       x: number;
       y: number;
-      scale: number;
-      isPlayable: boolean;
-      isHopping: boolean;
+      stackSize: number;
+      isMovable: boolean;
+      isSelected: boolean;
     }[] = [];
 
-    for (const group of groups.values()) {
-      group.forEach((pawn, idx) => {
-        const pt = getPawnBoardPoint(pawn.owner, pawn.id, pawn.progress, idx, group.length);
-        const isPlayable = pawn.owner === localRole && legalByPawnId.has(pawn.id);
-        const isHopping = Boolean(
-          animOverride && animOverride.owner === pawn.owner && animOverride.pawnId === pawn.id && animOverride.hopping,
-        );
-        rendered.push({
-          pawn,
+    for (const bucket of groups.values()) {
+      const stackSize = bucket.length;
+      bucket.forEach((token, idx) => {
+        const pt = getTokenBoardPoint(token.color, token.id, token.progress, idx, stackSize);
+        const isMovable =
+          canInteract && token.color === state.turn && movesByTokenId.has(token.id);
+        const isSelected =
+          canInteract && token.color === state.turn && selectedTokenId === token.id;
+        positioned.push({
+          token,
           x: pt.x,
           y: pt.y,
-          scale: group.length >= 2 ? 0.84 : 1,
-          isPlayable,
-          isHopping,
+          stackSize,
+          isMovable,
+          isSelected,
         });
       });
     }
 
-    // Sort so playable pawns render on top for effortless tapping
-    rendered.sort((a, b) => Number(a.isPlayable) - Number(b.isPlayable));
-    return rendered;
-  }, [displayPawns, localRole, legalByPawnId, animOverride]);
+    // Draw non-movable tokens first, then movable tokens, then selected/animating tokens on top
+    positioned.sort((a, b) => {
+      const score = (item: (typeof positioned)[number]) =>
+        (item.token.hopBoost ? 8 : 0) +
+        (item.isSelected ? 6 : 0) +
+        (item.isMovable ? 4 : 0);
+      return score(a) - score(b);
+    });
 
-  // Blockades (2 same-color pawns on same cell) for neon lock/shield indicator
-  const blockadeCenters = useMemo(() => {
-    const centers: { x: number; y: number; owner: ParchisiPlayer; key: string }[] = [];
-    const outer = getOuterBlockades(state.pawns);
-    for (const [sq, owner] of outer.entries()) {
-      const cell = getOuterCell(sq);
-      centers.push({ x: cell.cx, y: cell.cy, owner, key: `outer-${sq}` });
+    return positioned;
+  }, [state.tokens, state.turn, animOverride, canInteract, movesByTokenId, selectedTokenId]);
+
+  // Compute target tile preview geometry for hovered move
+  const targetPreview = useMemo(() => {
+    if (!hoveredMove) return null;
+    const pt = getTokenBoardPoint(
+      hoveredMove.color,
+      hoveredMove.tokenId,
+      hoveredMove.toProgress,
+      0,
+      1,
+    );
+    return {
+      x: pt.x,
+      y: pt.y,
+      isCapture: hoveredMove.captures.length > 0,
+      isHome: hoveredMove.reachesHome,
+      label: hoveredMove.label,
+    };
+  }, [hoveredMove]);
+
+  // Selected token floating picker anchor (percentage coords over the square SVG container)
+  const activePicker = useMemo(() => {
+    if (!canInteract || selectedTokenId === null) return null;
+    const options = movesByTokenId.get(selectedTokenId);
+    if (!options || options.length < 2) return null;
+    const found = renderTokens.find(
+      (item) => item.token.color === state.turn && item.token.id === selectedTokenId,
+    );
+    if (!found) return null;
+    const leftPct = Math.max(15, Math.min(85, (found.x / PARCHISI_VIEWBOX) * 100));
+    const preferBelow = found.y < 140;
+    const topPct = preferBelow
+      ? Math.min(88, ((found.y + 38) / PARCHISI_VIEWBOX) * 100)
+      : Math.max(10, ((found.y - 36) / PARCHISI_VIEWBOX) * 100);
+    return {
+      options,
+      leftPct,
+      topPct,
+      preferBelow,
+    };
+  }, [canInteract, selectedTokenId, movesByTokenId, renderTokens, state.turn]);
+
+  // Anchor coordinates for floating emoji / quick chat bubbles per color corner
+  const reactionAnchor = (color: ParchisiColor) => {
+    switch (color) {
+      case 'blue':
+        return { left: '16%', top: '16%' };
+      case 'yellow':
+        return { left: '84%', top: '16%' };
+      case 'red':
+        return { left: '16%', top: '84%' };
+      case 'green':
+        return { left: '84%', top: '84%' };
     }
-    for (const owner of ['host', 'guest'] as const) {
-      const corrSet = getCorridorBlockades(state.pawns, owner);
-      for (const prog of corrSet) {
-        const cell = (owner === 'host' ? HOST_CORRIDOR_CELLS : GUEST_CORRIDOR_CELLS)[prog - 64];
-        if (cell) centers.push({ x: cell.cx, y: cell.cy, owner, key: `corr-${owner}-${prog}` });
-      }
-    }
-    return centers;
-  }, [state.pawns]);
-
-  // Destination preview marker when hovering a playable pawn (or auto-preview when 1 legal move)
-  const previewMove = useMemo(() => {
-    if (!isMyMovePhase) return null;
-    if (hoveredPawnId !== null && legalByPawnId.has(hoveredPawnId)) {
-      return legalByPawnId.get(hoveredPawnId) ?? null;
-    }
-    if (legalMoves.length === 1) return legalMoves[0];
-    return null;
-  }, [isMyMovePhase, hoveredPawnId, legalByPawnId, legalMoves]);
-
-  const previewPoint = useMemo(() => {
-    if (!previewMove) return null;
-    return getPawnBoardPoint(localRole, previewMove.pawnId, previewMove.toProgress, 0, 1);
-  }, [previewMove, localRole]);
-
-  const hostFinished = state.pawns.host.filter((p) => p.progress >= PARCHISI_THRONE_PROGRESS).length;
-  const guestFinished = state.pawns.guest.filter((p) => p.progress >= PARCHISI_THRONE_PROGRESS).length;
+  };
 
   return (
-    <div className="relative aspect-square w-full h-full max-w-full max-h-[85dvh] mx-auto select-none">
+    <div
+      data-testid="parchisi-board-wrapper"
+      className="relative aspect-square w-full h-full max-w-full max-h-full select-none flex items-center justify-center"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onDismissPicker();
+      }}
+    >
       <svg
         viewBox={`0 0 ${PARCHISI_VIEWBOX} ${PARCHISI_VIEWBOX}`}
-        data-testid="parchisi-board-svg"
-        className="aspect-square w-full h-full max-w-full max-h-[85dvh] rounded-[26px] shadow-2xl shadow-black/60 block"
+        className="w-full h-full drop-shadow-[0_14px_30px_rgba(0,0,0,0.62)]"
         role="img"
-        aria-label="Plateau Parchisi Royal Love Edition à 68 cases"
+        aria-label="Official Parcheesi 68-tile board"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onDismissPicker();
+        }}
       >
         <defs>
-          <linearGradient id="royalBoardBg" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#1B1340" />
-            <stop offset="50%" stopColor="#120C2B" />
-            <stop offset="100%" stopColor="#1C1038" />
+          {/* Warm beveled wooden frame gradients */}
+          <linearGradient id="wood-frame-outer" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#D7A16D" />
+            <stop offset="35%" stopColor="#C58B58" />
+            <stop offset="72%" stopColor="#A06636" />
+            <stop offset="100%" stopColor="#7C4A22" />
           </linearGradient>
-          <linearGradient id="goldTrim" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#FDE68A" />
-            <stop offset="50%" stopColor="#F59E0B" />
-            <stop offset="100%" stopColor="#B45309" />
+          <linearGradient id="wood-frame-bevel" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#6D3F1C" />
+            <stop offset="50%" stopColor="#8C562B" />
+            <stop offset="100%" stopColor="#D49B68" />
           </linearGradient>
-          <radialGradient id="rubyYardGrad" cx="50%" cy="50%" r="65%">
-            <stop offset="0%" stopColor="#9F1239" />
-            <stop offset="100%" stopColor="#4C0519" />
+
+          {/* Glossy 3D token radial gradients for all 4 classic colors */}
+          {ALL_PARCHISI_COLORS.map((c) => (
+            <radialGradient key={c} id={`token-grad-${c}`} cx="35%" cy="28%" r="70%">
+              <stop offset="0%" stopColor={COLOR_PALETTE[c].light} />
+              <stop offset="52%" stopColor={COLOR_PALETTE[c].fill} />
+              <stop offset="100%" stopColor={COLOR_PALETTE[c].dark} />
+            </radialGradient>
+          ))}
+
+          {/* Recessed base slot shadow gradient */}
+          <radialGradient id="slot-recess" cx="50%" cy="60%" r="55%">
+            <stop offset="0%" stopColor="rgba(0,0,0,0.28)" />
+            <stop offset="78%" stopColor="rgba(0,0,0,0.08)" />
+            <stop offset="100%" stopColor="rgba(255,255,255,0.22)" />
           </radialGradient>
-          <radialGradient id="cyanYardGrad" cx="50%" cy="50%" r="65%">
-            <stop offset="0%" stopColor="#0E7490" />
-            <stop offset="100%" stopColor="#083344" />
-          </radialGradient>
-          <radialGradient id="goldYardGrad" cx="50%" cy="50%" r="65%">
-            <stop offset="0%" stopColor="#78350F" stopOpacity="0.72" />
-            <stop offset="100%" stopColor="#291707" stopOpacity="0.85" />
-          </radialGradient>
-          <radialGradient id="emeraldYardGrad" cx="50%" cy="50%" r="65%">
-            <stop offset="0%" stopColor="#065F46" stopOpacity="0.72" />
-            <stop offset="100%" stopColor="#022C22" stopOpacity="0.85" />
-          </radialGradient>
-          <radialGradient id="rubyPawnGrad" cx="35%" cy="30%" r="68%">
-            <stop offset="0%" stopColor="#FDA4AF" />
-            <stop offset="45%" stopColor="#F43F5E" />
-            <stop offset="100%" stopColor="#9F1239" />
-          </radialGradient>
-          <radialGradient id="cyanPawnGrad" cx="35%" cy="30%" r="68%">
-            <stop offset="0%" stopColor="#A5F3FC" />
-            <stop offset="45%" stopColor="#06B6D4" />
-            <stop offset="100%" stopColor="#155E75" />
-          </radialGradient>
-          <filter id="pawnShadow" x="-30%" y="-30%" width="160%" height="160%">
-            <feDropShadow dx="0" dy="3" stdDeviation="2.5" floodColor="#000000" floodOpacity="0.55" />
+
+          <filter id="token-shadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="2.5" stdDeviation="2.2" floodColor="#1A0E07" floodOpacity="0.52" />
           </filter>
         </defs>
 
-        {/* Outer Royal Frame */}
-        <rect x="0" y="0" width="760" height="760" rx="28" fill="url(#royalBoardBg)" />
+        {/* 1. Warm Beveled Wooden Outer Frame */}
         <rect
-          x="10"
-          y="10"
-          width="740"
-          height="740"
-          rx="22"
+          x="2"
+          y="2"
+          width={PARCHISI_VIEWBOX - 4}
+          height={PARCHISI_VIEWBOX - 4}
+          rx="28"
+          fill="url(#wood-frame-outer)"
+          stroke="#5A3315"
+          strokeWidth="3"
+        />
+        {/* Top-left wood sheen highlight */}
+        <rect
+          x="8"
+          y="8"
+          width={PARCHISI_VIEWBOX - 16}
+          height={PARCHISI_VIEWBOX - 16}
+          rx="23"
           fill="none"
-          stroke="url(#goldTrim)"
-          strokeWidth="4"
+          stroke="rgba(255,235,205,0.42)"
+          strokeWidth="2.5"
+        />
+        {/* Recessed inner wooden channel border */}
+        <rect
+          x={O - 6}
+          y={O - 6}
+          width={B + 12}
+          height={B + 12}
+          rx="12"
+          fill="#8C562B"
+          stroke="url(#wood-frame-bevel)"
+          strokeWidth="3"
         />
 
-        {/* ==================== 4 CORNER HOME YARDS ==================== */}
+        {/* Crisp white inner board backing */}
+        <rect
+          x={O}
+          y={O}
+          width={B}
+          height={B}
+          rx="6"
+          fill="#FFFFFF"
+          stroke="#6E4422"
+          strokeWidth="2"
+        />
 
-        {/* Top-Left: Decorative Emerald Royal Yard */}
-        <g>
-          <rect
-            x="20"
-            y="20"
-            width="240"
-            height="240"
-            rx="12"
-            fill="url(#emeraldYardGrad)"
-            stroke="#10B981"
-            strokeOpacity="0.45"
-            strokeWidth="2"
-          />
-          <circle cx="140" cy="140" r="64" fill="none" stroke="#34D399" strokeOpacity="0.24" strokeWidth="2" strokeDasharray="6 6" />
-          <text x="140" y="148" textAnchor="middle" fontSize="34" opacity="0.35">
-            💎
-          </text>
-        </g>
-
-        {/* Top-Right: GUEST ROYAL CYAN YARD (#06B6D4) */}
-        <g>
-          <rect
-            x="500"
-            y="20"
-            width="240"
-            height="240"
-            rx="12"
-            fill="url(#cyanYardGrad)"
-            stroke={state.turn === 'guest' ? '#67E8F9' : '#06B6D4'}
-            strokeWidth={state.turn === 'guest' ? '4.5' : '2.5'}
-          />
-          <rect
-            x="514"
-            y="34"
-            width="212"
-            height="212"
-            rx="10"
-            fill="rgba(6,182,212,0.12)"
-            stroke="rgba(165,243,252,0.28)"
-            strokeWidth="1.5"
-          />
-          {GUEST_BASE_SLOTS.map((pt, idx) => (
-            <circle
-              key={`guest-slot-${idx}`}
-              cx={pt.x}
-              cy={pt.y}
-              r="24"
-              fill="rgba(8,51,68,0.75)"
-              stroke="#67E8F9"
-              strokeOpacity="0.5"
-              strokeWidth="2"
-            />
-          ))}
-          <text
-            x="620"
-            y="53"
-            textAnchor="middle"
-            fill="#CFFAFE"
-            fontSize="13"
-            fontWeight="800"
-            fontFamily="Plus Jakarta Sans, sans-serif"
-          >
-            ⭐ {guestName.slice(0, 14)} · {guestFinished}/4
-          </text>
-        </g>
-
-        {/* Bottom-Left: HOST RUBY ROSE YARD (#F43F5E) */}
-        <g>
-          <rect
-            x="20"
-            y="500"
-            width="240"
-            height="240"
-            rx="12"
-            fill="url(#rubyYardGrad)"
-            stroke={state.turn === 'host' ? '#FDA4AF' : '#F43F5E'}
-            strokeWidth={state.turn === 'host' ? '4.5' : '2.5'}
-          />
-          <rect
-            x="34"
-            y="514"
-            width="212"
-            height="212"
-            rx="10"
-            fill="rgba(244,63,94,0.14)"
-            stroke="rgba(253,164,175,0.32)"
-            strokeWidth="1.5"
-          />
-          {HOST_BASE_SLOTS.map((pt, idx) => (
-            <circle
-              key={`host-slot-${idx}`}
-              cx={pt.x}
-              cy={pt.y}
-              r="24"
-              fill="rgba(76,5,25,0.75)"
-              stroke="#FDA4AF"
-              strokeOpacity="0.55"
-              strokeWidth="2"
-            />
-          ))}
-          <text
-            x="140"
-            y="724"
-            textAnchor="middle"
-            fill="#FFE4E6"
-            fontSize="13"
-            fontWeight="800"
-            fontFamily="Plus Jakarta Sans, sans-serif"
-          >
-            ❤️ {hostName.slice(0, 14)} · {hostFinished}/4
-          </text>
-        </g>
-
-        {/* Bottom-Right: Decorative Gold Royal Yard */}
-        <g>
-          <rect
-            x="500"
-            y="500"
-            width="240"
-            height="240"
-            rx="12"
-            fill="url(#goldYardGrad)"
-            stroke="#F59E0B"
-            strokeOpacity="0.45"
-            strokeWidth="2"
-          />
-          <circle cx="620" cy="620" r="64" fill="none" stroke="#FCD34D" strokeOpacity="0.24" strokeWidth="2" strokeDasharray="6 6" />
-          <text x="620" y="628" textAnchor="middle" fontSize="34" opacity="0.35">
-            👑
-          </text>
-        </g>
-
-        {/* ==================== 68 OUTER LOOP SQUARES ==================== */}
-        {OUTER_CELLS.map((cell) => {
-          let fill = '#221949';
-          let stroke = 'rgba(245, 158, 11, 0.35)';
-
-          if (cell.exitFor === 'host') {
-            fill = '#9F1239';
-            stroke = '#FDA4AF';
-          } else if (cell.exitFor === 'guest') {
-            fill = '#0E7490';
-            stroke = '#67E8F9';
-          } else if (cell.isKarma) {
-            fill = '#5B1242';
-            stroke = '#F472B6';
-          } else if (cell.isSafe) {
-            fill = '#3B285A';
-            stroke = '#FBBF24';
-          }
+        {/* 2. Four Corner Home Bases (Blue TL, Yellow TR, Red BL, Green BR) */}
+        {ALL_PARCHISI_COLORS.map((color) => {
+          const base = CORNER_BASES[color];
+          const pal = COLOR_PALETTE[color];
+          const isTurn = state.turn === color && state.phase !== 'READY';
+          const isActiveColor = state.activeColors.includes(color);
 
           return (
-            <g key={`sq-${cell.id}`} data-square={cell.id}>
+            <g key={`base-${color}`}>
               <rect
-                x={cell.x + 1}
-                y={cell.y + 1}
-                width={cell.w - 2}
-                height={cell.h - 2}
-                rx="4"
-                fill={fill}
-                stroke={stroke}
-                strokeWidth={cell.isSafe || cell.isKarma ? '1.8' : '1'}
+                x={base.x}
+                y={base.y}
+                width={base.size}
+                height={base.size}
+                fill={pal.fill}
+                stroke="#6E4422"
+                strokeWidth="1.5"
+                opacity={isActiveColor ? 1 : 0.88}
               />
-
-              {/* Square Number */}
-              <text
-                x={cell.orientation === 'horizontal' ? cell.x + 11 : cell.cx}
-                y={cell.orientation === 'horizontal' ? cell.cy + 3.5 : cell.y + 12}
-                textAnchor="middle"
-                fill={cell.isSafe ? '#FDE68A' : cell.isKarma ? '#FBCFE8' : 'rgba(255,255,255,0.42)'}
-                fontSize="9"
-                fontWeight="700"
-                fontFamily="JetBrains Mono, monospace"
-              >
-                {cell.id}
-              </text>
-
-              {/* Safe Zone Golden Star/Shield Marker */}
-              {cell.isSafe && (
-                <text
-                  x={cell.orientation === 'horizontal' ? cell.x + cell.w - 14 : cell.cx}
-                  y={cell.orientation === 'horizontal' ? cell.cy + 4.5 : cell.y + cell.h - 9}
-                  textAnchor="middle"
-                  fill="#FACC15"
-                  fontSize="12"
-                >
-                  ★
-                </text>
-              )}
-
-              {/* Karma Couple Heart Marker */}
-              {cell.isKarma && (
-                <text
-                  x={cell.cx}
-                  y={cell.cy + 5}
-                  textAnchor="middle"
-                  fill="#FB7185"
-                  fontSize="14"
-                >
-                  ♥
-                </text>
-              )}
+              {/* Soft inset white classic square border inside corner base */}
+              <rect
+                x={base.x + 14}
+                y={base.y + 14}
+                width={base.size - 28}
+                height={base.size - 28}
+                rx="18"
+                fill="rgba(255,255,255,0.12)"
+                stroke={isTurn ? '#FEF08A' : 'rgba(255,255,255,0.42)'}
+                strokeWidth={isTurn ? '3.5' : '2'}
+              />
+              {/* 4 Recessed Darker Circular Token Slots */}
+              {base.slots.map((slot, idx) => (
+                <g key={`slot-${color}-${idx}`}>
+                  <circle
+                    cx={slot.x}
+                    cy={slot.y}
+                    r="27"
+                    fill={pal.slot}
+                    stroke="rgba(255,255,255,0.45)"
+                    strokeWidth="2"
+                  />
+                  <circle cx={slot.x} cy={slot.y} r="25" fill="url(#slot-recess)" />
+                </g>
+              ))}
             </g>
           );
         })}
 
-        {/* ==================== 4 COLORED 7-SQUARE FINAL CORRIDORS ==================== */}
-        {HOST_CORRIDOR_CELLS.map((c) => (
-          <g key={`hc-${c.index}`}>
-            <rect
-              x={c.x + 1}
-              y={c.y + 1}
-              width={c.w - 2}
-              height={c.h - 2}
-              rx="4"
-              fill="#881337"
-              stroke="#FB7185"
-              strokeWidth="1.4"
-            />
-            <text x={c.cx} y={c.cy + 4} textAnchor="middle" fill="#FDA4AF" fontSize="9.5" fontWeight="700" opacity="0.65">
-              {c.index + 1}
-            </text>
-          </g>
-        ))}
+        {/* 3. Exact 68-Tile Numbered Outer Track (Counter-Clockwise 1..68) */}
+        {OUTER_CELLS.map((cell) => {
+          let fill = '#FFFFFF';
+          let numColor = '#736E68';
 
-        {GUEST_CORRIDOR_CELLS.map((c) => (
-          <g key={`gc-${c.index}`}>
-            <rect
-              x={c.x + 1}
-              y={c.y + 1}
-              width={c.w - 2}
-              height={c.h - 2}
-              rx="4"
-              fill="#155E75"
-              stroke="#22D3EE"
-              strokeWidth="1.4"
-            />
-            <text x={c.cx} y={c.cy + 4} textAnchor="middle" fill="#A5F3FC" fontSize="9.5" fontWeight="700" opacity="0.65">
-              {c.index + 1}
-            </text>
-          </g>
-        ))}
+          if (cell.startFor) {
+            fill = COLOR_PALETTE[cell.startFor].fill;
+            numColor = cell.startFor === 'yellow' ? '#4A3102' : 'rgba(255,255,255,0.92)';
+          } else if (cell.isStar) {
+            fill = '#D4D0C9';
+            numColor = '#4F4B46';
+          }
 
-        {GOLD_CORRIDOR_CELLS.map((c) => (
-          <rect
-            key={`goldc-${c.index}`}
-            x={c.x + 1}
-            y={c.y + 1}
-            width={c.w - 2}
-            height={c.h - 2}
-            rx="4"
-            fill="#451A03"
-            fillOpacity="0.7"
-            stroke="#F59E0B"
-            strokeOpacity="0.35"
-            strokeWidth="1"
-          />
-        ))}
+          const isHorizontal = cell.orientation === 'horizontal';
+          const numX = cell.isStar
+            ? isHorizontal
+              ? cell.x + 13
+              : cell.cx
+            : cell.cx;
+          const numY = cell.isStar
+            ? isHorizontal
+              ? cell.cy + 3.5
+              : cell.y + 13
+            : cell.cy + 3.5;
 
-        {EMERALD_CORRIDOR_CELLS.map((c) => (
-          <rect
-            key={`emec-${c.index}`}
-            x={c.x + 1}
-            y={c.y + 1}
-            width={c.w - 2}
-            height={c.h - 2}
-            rx="4"
-            fill="#064E3B"
-            fillOpacity="0.7"
-            stroke="#10B981"
-            strokeOpacity="0.35"
-            strokeWidth="1"
-          />
-        ))}
+          return (
+            <g key={`outer-${cell.id}`}>
+              <rect
+                x={cell.x}
+                y={cell.y}
+                width={cell.w}
+                height={cell.h}
+                fill={fill}
+                stroke="#A8A29A"
+                strokeWidth="1.25"
+              />
+              {/* Centered dark-gray 5-point Star on the 8 Star Safe Tiles */}
+              {cell.isStar && (
+                <polygon
+                  points={STAR_POINTS}
+                  transform={`translate(${cell.cx}, ${cell.cy}) scale(1.05)`}
+                  fill="#6E6963"
+                  opacity="0.72"
+                />
+              )}
+              {/* Subtle centered safe circle ring on Colored Start Tiles */}
+              {cell.startFor && (
+                <circle
+                  cx={cell.cx}
+                  cy={cell.cy}
+                  r="10"
+                  fill="none"
+                  stroke={cell.startFor === 'yellow' ? 'rgba(74,49,2,0.32)' : 'rgba(255,255,255,0.45)'}
+                  strokeWidth="1.6"
+                />
+              )}
+              {/* Crisp subtle tile number (1..68) */}
+              <text
+                x={numX}
+                y={numY}
+                textAnchor="middle"
+                fontSize="9.5"
+                fontWeight="700"
+                fill={numColor}
+                style={{ fontVariantNumeric: 'tabular-nums' }}
+              >
+                {cell.id}
+              </text>
+            </g>
+          );
+        })}
 
-        {/* ==================== CENTRAL ROYAL THRONE (MAISON FINALE) ==================== */}
+        {/* 4. Four Colored 7-Tile Home Columns */}
+        {ALL_PARCHISI_COLORS.map((color) =>
+          CORRIDOR_CELLS[color].map((cell) => (
+            <g key={`corr-${color}-${cell.index}`}>
+              <rect
+                x={cell.x}
+                y={cell.y}
+                width={cell.w}
+                height={cell.h}
+                fill={COLOR_PALETTE[color].fill}
+                stroke={color === 'yellow' ? '#B8860B' : 'rgba(255,255,255,0.48)'}
+                strokeWidth="1.25"
+              />
+              {/* Subtle chevron arrow pointing toward center triangle on first & last home-column tiles */}
+              {(cell.index === 0 || cell.index === 6) && (
+                <circle
+                  cx={cell.cx}
+                  cy={cell.cy}
+                  r="3.2"
+                  fill={color === 'yellow' ? 'rgba(74,49,2,0.28)' : 'rgba(255,255,255,0.4)'}
+                />
+              )}
+            </g>
+          )),
+        )}
+
+        {/* 5. Center 4-Triangle Goal (Red Left, Green Bottom, Yellow Right, Blue Top) */}
         <g>
-          {/* 4 directional royal wings meeting at the center */}
-          <polygon points="260,260 500,260 380,380" fill="#065F46" fillOpacity="0.62" stroke="#F59E0B" strokeWidth="1.5" />
-          <polygon points="500,260 500,500 380,380" fill="#0E7490" fillOpacity="0.88" stroke="#F59E0B" strokeWidth="1.5" />
-          <polygon points="260,500 500,500 380,380" fill="#78350F" fillOpacity="0.62" stroke="#F59E0B" strokeWidth="1.5" />
-          <polygon points="260,260 260,500 380,380" fill="#9F1239" fillOpacity="0.88" stroke="#F59E0B" strokeWidth="1.5" />
-
-          {/* Golden Center Throne Medallion */}
-          <circle cx="380" cy="380" r="36" fill="#1E133D" stroke="url(#goldTrim)" strokeWidth="4" />
-          <circle cx="380" cy="380" r="28" fill="rgba(250,204,21,0.16)" stroke="#FDE68A" strokeWidth="1" strokeDasharray="3 3" />
-          <text x="380" y="388" textAnchor="middle" fontSize="24">
-            👑
-          </text>
+          {/* Red Left Triangle */}
+          <polygon
+            points={`${O + 240},${O + 240} ${C},${C} ${O + 240},${O + 480}`}
+            fill={COLOR_PALETTE.red.fill}
+            stroke="#5D3A1A"
+            strokeWidth="1.8"
+          />
+          {/* Green Bottom Triangle */}
+          <polygon
+            points={`${O + 240},${O + 480} ${C},${C} ${O + 480},${O + 480}`}
+            fill={COLOR_PALETTE.green.fill}
+            stroke="#5D3A1A"
+            strokeWidth="1.8"
+          />
+          {/* Yellow Right Triangle */}
+          <polygon
+            points={`${O + 480},${O + 240} ${C},${C} ${O + 480},${O + 480}`}
+            fill={COLOR_PALETTE.yellow.fill}
+            stroke="#5D3A1A"
+            strokeWidth="1.8"
+          />
+          {/* Blue Top Triangle */}
+          <polygon
+            points={`${O + 240},${O + 240} ${C},${C} ${O + 480},${O + 240}`}
+            fill={COLOR_PALETTE.blue.fill}
+            stroke="#5D3A1A"
+            strokeWidth="1.8"
+          />
+          {/* Center brass medallion crest */}
+          <circle
+            cx={C}
+            cy={C}
+            r="22"
+            fill="#FFF7DF"
+            stroke="#8C562B"
+            strokeWidth="3"
+          />
+          <path
+            d={CROWN_PATH}
+            transform={`translate(${C}, ${C + 1}) scale(1.15)`}
+            fill="#D97706"
+            stroke="#78350F"
+            strokeWidth="0.9"
+          />
         </g>
 
-        {/* ==================== BLOCKADE / BARRAGE WALL BADGES ==================== */}
-        {blockadeCenters.map((b) => (
-          <g key={b.key} pointerEvents="none">
-            <rect
-              x={b.x - 11}
-              y={b.y - 11}
-              width="22"
-              height="22"
-              rx="6"
-              fill="#0F0A24"
-              stroke={b.owner === 'host' ? '#FDA4AF' : '#67E8F9'}
-              strokeWidth="1.8"
-            />
-            <text x={b.x} y={b.y + 4} textAnchor="middle" fontSize="11">
-              🔒
-            </text>
-          </g>
-        ))}
-
-        {/* ==================== DESTINATION PREVIEW MARKER ==================== */}
-        {previewPoint && previewMove && (
-          <g
-            pointerEvents="none"
-            data-testid="parchisi-move-preview"
-            transform={`translate(${previewPoint.x}, ${previewPoint.y})`}
-          >
-            <circle
-              r="21"
-              fill={previewMove.captures ? 'rgba(239, 68, 68, 0.25)' : 'rgba(250, 204, 21, 0.22)'}
-              stroke={previewMove.captures ? '#FB7185' : '#FACC15'}
-              strokeWidth="3"
-              strokeDasharray="5 4"
+        {/* 6. Subtle Blockade Shield/Lock Badges on Outer Track Squares with 2 Same-Color Tokens */}
+        {Array.from(outerBlockades.entries()).map(([square, owner]) => {
+          const cell = getOuterCell(square);
+          const bx = cell.orientation === 'horizontal' ? cell.x + cell.w - 9 : cell.cx;
+          const by = cell.orientation === 'horizontal' ? cell.cy : cell.y + 9;
+          return (
+            <g
+              key={`blockade-${square}`}
+              transform={`translate(${bx}, ${by})`}
+              className="pointer-events-none"
             >
-              <animateTransform
-                attributeName="transform"
-                type="rotate"
-                from="0"
-                to="360"
-                dur="3s"
+              <circle
+                r="7.5"
+                fill="#1F120A"
+                stroke="#FACC15"
+                strokeWidth="1.5"
+              />
+              <path
+                d="M 0,-4.2 L 3.4,-2.4 L 3.4,0.8 C 3.4,2.8 1.8,4.1 0,4.8 C -1.8,4.1 -3.4,2.8 -3.4,0.8 L -3.4,-2.4 Z"
+                fill={COLOR_PALETTE[owner].light}
+              />
+            </g>
+          );
+        })}
+
+        {/* 7. Target Landing Tile Preview */}
+        {targetPreview && (
+          <g className="pointer-events-none">
+            <circle
+              cx={targetPreview.x}
+              cy={targetPreview.y}
+              r="22"
+              fill={targetPreview.isCapture ? 'rgba(229,57,53,0.28)' : 'rgba(250,204,21,0.32)'}
+              stroke={targetPreview.isCapture ? '#EF4444' : '#FACC15'}
+              strokeWidth="3.5"
+              strokeDasharray="6 4"
+            >
+              <animate
+                attributeName="r"
+                values="19;24;19"
+                dur="0.85s"
                 repeatCount="indefinite"
               />
             </circle>
-            <text y="5" textAnchor="middle" fontSize="14">
-              {previewMove.captures ? '⚔️' : previewMove.reachesThrone ? '👑' : '✦'}
-            </text>
+            <circle
+              cx={targetPreview.x}
+              cy={targetPreview.y}
+              r="5"
+              fill={targetPreview.isCapture ? '#EF4444' : '#FACC15'}
+            />
           </g>
         )}
 
-        {/* ==================== ALL 8 PAWNS (HOST RUBY + GUEST CYAN) ==================== */}
-        {pawnRenderList.map(({ pawn, x, y, scale, isPlayable, isHopping }) => {
-          const isHostPawn = pawn.owner === 'host';
-          const grad = isHostPawn ? 'url(#rubyPawnGrad)' : 'url(#cyanPawnGrad)';
-          const rim = isHostPawn ? '#FFE4E6' : '#CFFAFE';
-          const hopBoost = isHopping ? 1.18 : 1;
-          const totalScale = scale * hopBoost;
+        {/* 8. Glossy 3D Game Tokens */}
+        {renderTokens.map(({ token, x, y, stackSize, isMovable, isSelected }) => {
+          const pal = COLOR_PALETTE[token.color];
+          const baseScale = stackSize >= 2 ? 0.78 : 1;
+          const hopScale = token.hopBoost ? 1.2 : isSelected ? 1.12 : 1;
+          const totalScale = baseScale * hopScale;
 
           return (
             <g
-              key={`pawn-${pawn.owner}-${pawn.id}`}
-              data-testid={`parchisi-pawn-${pawn.owner}-${pawn.id}`}
-              data-playable={isPlayable ? 'true' : 'false'}
-              data-progress={pawn.progress}
-              role={isPlayable ? 'button' : undefined}
-              tabIndex={isPlayable ? 0 : undefined}
-              aria-label={`Pion ${pawn.id + 1} ${isHostPawn ? hostName : guestName}`}
-              onMouseEnter={() => isPlayable && onHoverPawn(pawn.id)}
-              onMouseLeave={() => isPlayable && onHoverPawn(null)}
-              onClick={() => isPlayable && onSelectPawn(pawn.id)}
+              key={`token-${token.color}-${token.id}`}
+              data-testid={`parchisi-token-${token.color}-${token.id}`}
+              data-movable={isMovable ? 'true' : 'false'}
+              transform={`translate(${x}, ${y}) scale(${totalScale})`}
+              style={{
+                transition: 'transform 105ms cubic-bezier(0.22, 1, 0.36, 1)',
+                cursor: isMovable ? 'pointer' : 'default',
+              }}
+              role={isMovable ? 'button' : undefined}
+              tabIndex={isMovable ? 0 : undefined}
+              aria-label={
+                isMovable
+                  ? `Move ${pal.label} token ${token.id + 1}`
+                  : `${pal.label} token ${token.id + 1}`
+              }
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isMovable) onTokenClick(token.id);
+              }}
               onKeyDown={(e) => {
-                if (isPlayable && (e.key === 'Enter' || e.key === ' ')) {
+                if (isMovable && (e.key === 'Enter' || e.key === ' ')) {
                   e.preventDefault();
-                  onSelectPawn(pawn.id);
+                  onTokenClick(token.id);
                 }
               }}
-              style={{
-                transform: `translate(${x}px, ${y}px) scale(${totalScale})`,
-                transition: 'transform 115ms cubic-bezier(0.22, 1, 0.36, 1)',
-                cursor: isPlayable ? 'pointer' : 'default',
+              onMouseEnter={() => {
+                if (isMovable) onTokenHover(token.id);
               }}
-              filter="url(#pawnShadow)"
+              onMouseLeave={() => {
+                if (isMovable) onTokenHover(null);
+              }}
             >
-              {/* Generous invisible hit area for effortless mobile tapping */}
-              {isPlayable && <circle r="24" fill="transparent" />}
-
-              {/* Pulsing golden playable halo */}
-              {isPlayable && (
-                <circle r="19" fill="none" stroke="#FACC15" strokeWidth="3.5" opacity="0.92">
-                  <animate attributeName="r" values="16;22;16" dur="1.1s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.95;0.35;0.95" dur="1.1s" repeatCount="indefinite" />
-                </circle>
+              {/* Pulsing golden highlight ring whenever token has a valid move */}
+              {isMovable && (
+                <>
+                  <circle
+                    r="21"
+                    fill="none"
+                    stroke="#FACC15"
+                    strokeWidth="3.2"
+                    opacity="0.95"
+                  >
+                    <animate
+                      attributeName="r"
+                      values="17;24;17"
+                      dur="1.15s"
+                      repeatCount="indefinite"
+                    />
+                    <animate
+                      attributeName="opacity"
+                      values="0.95;0.25;0.95"
+                      dur="1.15s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                  <circle
+                    r="18"
+                    fill="none"
+                    stroke="#FEF08A"
+                    strokeWidth="2.4"
+                  />
+                </>
               )}
 
-              {/* Love Shield 1-turn immunity aura */}
-              {pawn.shieldTurns > 0 && (
+              {/* Generous invisible hit area for mobile finger taps */}
+              {isMovable && <circle r="24" fill="transparent" />}
+
+              {/* Glossy 3D Disc */}
+              <g filter="url(#token-shadow)">
+                {/* Outer bevel ring */}
                 <circle
-                  r="18"
-                  fill="rgba(244, 114, 182, 0.22)"
-                  stroke="#F472B6"
-                  strokeWidth="2.4"
-                  strokeDasharray="4 3"
+                  r="15.5"
+                  fill={pal.dark}
+                  stroke={isSelected ? '#FEF08A' : '#FFFFFF'}
+                  strokeWidth={isSelected ? '2.8' : '2'}
                 />
-              )}
-
-              {/* Jewel Pawn Body */}
-              <circle r="13.5" fill={grad} stroke={isPlayable ? '#FEF08A' : rim} strokeWidth={isPlayable ? '3' : '2.2'} />
-
-              {/* Specular highlight */}
-              <ellipse cx="-3.5" cy="-4.5" rx="4.5" ry="2.8" fill="rgba(255,255,255,0.45)" transform="rotate(-25 -3.5 -4.5)" />
-
-              {/* Center Heart (Host) or Star (Guest) Icon */}
-              <text
-                y="4.5"
-                textAnchor="middle"
-                fill="#FFFFFF"
-                fontSize="11.5"
-                fontWeight="800"
-                pointerEvents="none"
-              >
-                {isHostPawn ? '♥' : '★'}
-              </text>
+                {/* Main colored glossy dome */}
+                <circle r="13.2" fill={`url(#token-grad-${token.color})`} />
+                {/* Top specular glass highlight crescent */}
+                <ellipse
+                  cx="-3"
+                  cy="-6"
+                  rx="6.5"
+                  ry="3.4"
+                  fill="rgba(255,255,255,0.42)"
+                  transform="rotate(-18 -3 -6)"
+                />
+                {/* Centered Crown Emblem */}
+                <path
+                  d={CROWN_PATH}
+                  transform="translate(0, 1) scale(0.76)"
+                  fill={token.color === 'yellow' ? '#5A3703' : '#FFF9E6'}
+                  opacity="0.95"
+                />
+              </g>
             </g>
           );
         })}
       </svg>
 
-      {/* ==================== FLOATING TEASING EMOTES OVER BOARD ==================== */}
-      {floatingEmotes.length > 0 && (
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden z-20">
-          {floatingEmotes.map((em) => (
-            <div
-              key={em.id}
-              style={{ left: `${em.xPct}%` }}
-              className="absolute bottom-10 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#130D2B]/92 border border-white/25 shadow-xl animate-bounce"
+      {/* 9. Crisp Floating Move Picker Pills (+2, +5, +7) above clicked token */}
+      {activePicker && (
+        <div
+          data-testid="parchisi-move-picker"
+          style={{
+            left: `${activePicker.leftPct}%`,
+            top: `${activePicker.topPct}%`,
+            transform: activePicker.preferBelow
+              ? 'translate(-50%, 0%)'
+              : 'translate(-50%, -100%)',
+          }}
+          className="absolute z-30 flex items-center gap-1.5 px-2 py-1.5 rounded-full bg-[#241222]/95 border-2 border-[#FACC15] shadow-[0_10px_24px_rgba(0,0,0,0.65)]"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {activePicker.options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              data-testid={`parchisi-move-opt-${opt.id}`}
+              onClick={() => onSelectMoveOption(opt)}
+              onMouseEnter={() => onHoverMoveOption(opt)}
+              onMouseLeave={() => onHoverMoveOption(null)}
+              className={`min-h-[34px] px-3 py-1 rounded-full text-xs sm:text-sm font-extrabold tabular-nums whitespace-nowrap transition-transform active:scale-95 ${
+                opt.captures.length > 0
+                  ? 'bg-[#E53935] text-white hover:bg-[#EF5350]'
+                  : opt.reachesHome
+                    ? 'bg-[#2E9E5B] text-white hover:bg-[#38B86B]'
+                    : 'bg-gradient-to-b from-[#FEF08A] to-[#EAB308] text-[#2B1503] hover:brightness-105'
+              }`}
             >
-              <span className="text-xl">{em.emoji}</span>
-              <span className="text-xs font-extrabold text-white whitespace-nowrap">{em.label}</span>
-            </div>
+              {opt.label}
+              {opt.captures.length > 0 ? ' ⚔' : opt.reachesHome ? ' 👑' : ''}
+            </button>
           ))}
         </div>
       )}
+
+      {/* 10. Floating Emoji & Quick Chat Reaction Bubbles */}
+      {floatingReactions.map((item) => {
+        const pos = reactionAnchor(item.color);
+        return (
+          <div
+            key={item.id}
+            style={{ left: pos.left, top: pos.top }}
+            className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-1/2 animate-bounce"
+          >
+            <div
+              className={
+                item.kind === 'emoji'
+                  ? 'px-3 py-1.5 rounded-full bg-[#241222]/90 border border-[#FACC15]/70 text-2xl sm:text-3xl shadow-xl'
+                  : 'px-3 py-1.5 rounded-2xl bg-[#241222]/95 border border-[#E0A458]/80 text-xs sm:text-sm font-bold text-[#FEF3C7] shadow-xl whitespace-nowrap'
+              }
+            >
+              {item.text}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

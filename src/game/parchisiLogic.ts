@@ -1,926 +1,1103 @@
 import type {
-  ParchisiKarmaEffect,
+  ParchisiBonusAmount,
+  ParchisiColor,
   ParchisiMode,
   ParchisiMoveOption,
-  ParchisiPawn,
-  ParchisiPlayer,
+  ParchisiPlayerStats,
   ParchisiState,
+  ParchisiToken,
 } from '../types/duoplay';
 import {
-  isKarmaSquare,
+  COLOR_PALETTE,
+  COLOR_START_SQUARE,
   isSafeSquare,
-  outerSquareToProgress,
-  PARCHISI_SAFE_SQUARES,
-  PARCHISI_THRONE_PROGRESS,
+  PARCHISI_HOME_PROGRESS,
   PARCHISI_TOTAL_SQUARES,
   progressToOuterSquare,
 } from './parchisiBoard';
 
-export interface ParchisiKarmaCardDef {
-  id: number;
-  effect: ParchisiKarmaEffect;
-  emoji: string;
+export const ALL_PARCHISI_COLORS: readonly ParchisiColor[] = ['red', 'green', 'yellow', 'blue'];
+export const PARCHISI_TURN_SECONDS = 30;
+export const PARCHISI_STEP_ANIM_MS = 105;
+
+export function getActiveColorsForMode(mode: ParchisiMode): ParchisiColor[] {
+  return mode === '4p' ? ['red', 'green', 'yellow', 'blue'] : ['red', 'yellow'];
 }
 
-/** 16 varied Karma Couple cards: 6 tactical bonuses + 10 complicity/romance prompts */
-export const PARCHISI_KARMA_DECK: readonly ParchisiKarmaCardDef[] = [
-  { id: 0, effect: 'shield', emoji: '🛡️' },
-  { id: 1, effect: 'turbo3', emoji: '⚡' },
-  { id: 2, effect: 'free_roll', emoji: '🎲' },
-  { id: 3, effect: 'complicity', emoji: '💌' },
-  { id: 4, effect: 'complicity', emoji: '😊' },
-  { id: 5, effect: 'complicity', emoji: '✨' },
-  { id: 6, effect: 'shield', emoji: '🛡️' },
-  { id: 7, effect: 'turbo3', emoji: '⚡' },
-  { id: 8, effect: 'free_roll', emoji: '🎲' },
-  { id: 9, effect: 'complicity', emoji: '💋' },
-  { id: 10, effect: 'complicity', emoji: '👀' },
-  { id: 11, effect: 'complicity', emoji: '🎵' },
-  { id: 12, effect: 'complicity', emoji: '🌙' },
-  { id: 13, effect: 'complicity', emoji: '🔥' },
-  { id: 14, effect: 'complicity', emoji: '🥂' },
-  { id: 15, effect: 'complicity', emoji: '👑' },
-];
-
-export const PARCHISI_MERCY_COUNTDOWN_SEC = 8;
-export const PARCHISI_MERCY_DARE_COUNT = 12;
-export const PARCHISI_FINAL_DARE_COUNT = 10;
-
-export function otherPlayer(p: ParchisiPlayer): ParchisiPlayer {
-  return p === 'host' ? 'guest' : 'host';
+export function getNextActiveColor(activeColors: ParchisiColor[], current: ParchisiColor): ParchisiColor {
+  const idx = activeColors.indexOf(current);
+  if (idx === -1) return activeColors[0] ?? 'red';
+  return activeColors[(idx + 1) % activeColors.length];
 }
 
-function clonePawns(pawns: Record<ParchisiPlayer, ParchisiPawn[]>): Record<ParchisiPlayer, ParchisiPawn[]> {
+function createEmptyStats(): Record<ParchisiColor, ParchisiPlayerStats> {
   return {
-    host: pawns.host.map((p) => ({ ...p })),
-    guest: pawns.guest.map((p) => ({ ...p })),
+    red: { captures: 0, doublesRolled: 0, homeEntries: 0 },
+    green: { captures: 0, doublesRolled: 0, homeEntries: 0 },
+    yellow: { captures: 0, doublesRolled: 0, homeEntries: 0 },
+    blue: { captures: 0, doublesRolled: 0, homeEntries: 0 },
   };
 }
 
-function makeInitialPawns(mode: ParchisiMode): Record<ParchisiPlayer, ParchisiPawn[]> {
-  const build = (owner: ParchisiPlayer): ParchisiPawn[] =>
-    [0, 1, 2, 3].map((id) => ({
-      id,
-      owner,
-      progress: mode === 'express' && id === 0 ? 0 : -1,
-      shieldTurns: 0,
-    }));
-  return { host: build('host'), guest: build('guest') };
+function createEmptyLastMoved(): Record<ParchisiColor, number | null> {
+  return { red: null, green: null, yellow: null, blue: null };
 }
 
-export function createInitialParchisiState(mode: ParchisiMode = 'express'): ParchisiState {
+function buildInitialTokens(mode: ParchisiMode): Record<ParchisiColor, ParchisiToken[]> {
+  const active = new Set(getActiveColorsForMode(mode));
+  const make = (color: ParchisiColor): ParchisiToken[] =>
+    active.has(color)
+      ? [0, 1, 2, 3].map((id) => ({ id, color, progress: -1 }))
+      : [];
+
+  return {
+    red: make('red'),
+    green: make('green'),
+    yellow: make('yellow'),
+    blue: make('blue'),
+  };
+}
+
+export function createInitialParchisiState(
+  mode: ParchisiMode = '1v1',
+  nowMs = Date.now(),
+): ParchisiState {
   return {
     phase: 'READY',
     mode,
-    turn: 'host',
-    dieValue: null,
-    effectiveSteps: 0,
+    activeColors: getActiveColorsForMode(mode),
+    turn: 'red',
+    dice: null,
+    usedDice: [false, false],
+    pendingBonuses: [],
     rollSeq: 0,
-    consecutiveSixes: 0,
-    extraTurnPending: false,
-    lastMovedPawnId: { host: null, guest: null },
-    pawns: makeInitialPawns(mode),
-    pendingMercy: null,
-    activeKarma: null,
-    usedKarmaIds: [],
+    consecutiveDoubles: 0,
+    extraRollPending: false,
+    mustBreakBlockade: false,
+    lastMovedTokenId: createEmptyLastMoved(),
+    tokens: buildInitialTokens(mode),
     lastMoveAnim: null,
     lastEventText: '',
-    history: [],
+    lastEventTone: 'neutral',
     winner: null,
-    finalDareIndex: 0,
-    stats: {
-      host: { captures: 0, daresCompleted: 0, sixesRolled: 0, tenderHearts: 0, karmaCards: 0 },
-      guest: { captures: 0, daresCompleted: 0, sixesRolled: 0, tenderHearts: 0, karmaCards: 0 },
-    },
+    stats: createEmptyStats(),
+    turnStartedAt: nowMs,
     stateSeq: 0,
   };
 }
 
-export function startParchisiMatch(mode: ParchisiMode): ParchisiState {
-  const base = createInitialParchisiState(mode);
+export function startParchisiMatch(
+  mode: ParchisiMode,
+  nowMs = Date.now(),
+): ParchisiState {
+  const base = createInitialParchisiState(mode, nowMs);
   return {
     ...base,
     phase: 'WAIT_ROLL',
-    turn: 'host',
+    lastEventText: 'Red starts! Roll both dice.',
     stateSeq: 1,
   };
 }
 
-/** Return all outer squares (1..68) that currently have a 2-pawn same-color blockade. */
-export function getOuterBlockades(
-  pawns: Record<ParchisiPlayer, ParchisiPawn[]>,
-): Map<number, ParchisiPlayer> {
-  const counts = new Map<string, number>();
-  const result = new Map<number, ParchisiPlayer>();
-  for (const owner of ['host', 'guest'] as const) {
-    for (const p of pawns[owner]) {
-      const sq = progressToOuterSquare(owner, p.progress);
-      if (sq === null) continue;
-      const key = `${owner}:${sq}`;
-      const next = (counts.get(key) ?? 0) + 1;
-      counts.set(key, next);
-      if (next >= 2) {
-        result.set(sq, owner);
-      }
-    }
-  }
-  return result;
-}
-
-/** Return corridor progress cells (64..70) where an owner has a 2-pawn blockade. */
-export function getCorridorBlockades(
-  pawns: Record<ParchisiPlayer, ParchisiPawn[]>,
-  owner: ParchisiPlayer,
-): Set<number> {
-  const counts = new Map<number, number>();
-  const blocked = new Set<number>();
-  for (const p of pawns[owner]) {
-    if (p.progress >= 64 && p.progress <= 70) {
-      const next = (counts.get(p.progress) ?? 0) + 1;
-      counts.set(p.progress, next);
-      if (next >= 2) blocked.add(p.progress);
-    }
-  }
-  return blocked;
-}
-
-/** Count total pawns (both players combined) on a specific outer square 1..68 */
-export function getPawnsAtOuterSquare(
-  pawns: Record<ParchisiPlayer, ParchisiPawn[]>,
+/** Collect all tokens sitting on a specific outer board square (1..68). */
+export function getTokensAtOuterSquare(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
   square: number,
-): ParchisiPawn[] {
-  const res: ParchisiPawn[] = [];
-  for (const owner of ['host', 'guest'] as const) {
-    for (const p of pawns[owner]) {
-      if (progressToOuterSquare(owner, p.progress) === square) {
-        res.push(p);
+  exclude?: { color: ParchisiColor; tokenId: number },
+): ParchisiToken[] {
+  const list: ParchisiToken[] = [];
+  for (const color of ALL_PARCHISI_COLORS) {
+    for (const token of tokens[color]) {
+      if (exclude && token.color === exclude.color && token.id === exclude.tokenId) continue;
+      if (token.progress >= 0 && token.progress <= 63) {
+        if (progressToOuterSquare(color, token.progress) === square) {
+          list.push(token);
+        }
       }
     }
   }
-  return res;
+  return list;
 }
 
-/** True if all 4 of a player's pawns are out of base (progress >= 0) -> 6 counts as 7! */
-export function areAllPawnsOut(pawns: Record<ParchisiPlayer, ParchisiPawn[]>, owner: ParchisiPlayer): boolean {
-  return pawns[owner].every((p) => p.progress >= 0);
-}
-
-/** Check if a given pawn currently sits inside a blockade of its own color. */
-export function isPawnInOwnBlockade(
-  pawns: Record<ParchisiPlayer, ParchisiPawn[]>,
-  pawn: ParchisiPawn,
-): boolean {
-  if (pawn.progress < 0 || pawn.progress >= PARCHISI_THRONE_PROGRESS) return false;
-  if (pawn.progress <= 63) {
-    const sq = progressToOuterSquare(pawn.owner, pawn.progress)!;
-    return getOuterBlockades(pawns).get(sq) === pawn.owner;
-  }
-  return getCorridorBlockades(pawns, pawn.owner).has(pawn.progress);
+/** Collect tokens of a given color sitting on a specific home-column progress (64..70). */
+function getCorridorTokensAtProgress(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+  color: ParchisiColor,
+  progress: number,
+  excludeTokenId?: number,
+): ParchisiToken[] {
+  return tokens[color].filter(
+    (t) => t.id !== excludeTokenId && t.progress === progress,
+  );
 }
 
 /**
- * Evaluate whether moving a specific pawn by `steps` (or exiting base if `isExit`) is legal,
- * enforcing ALL authentic Parchisi rules (barrage walls, 2-pawn square capacity, exact Throne entry, safe zones, shield).
+ * Returns the blockade owner color on an outer square (1..68) if 2 tokens of the SAME color occupy it.
  */
-function evaluateSinglePawnMove(
-  state: ParchisiState,
-  owner: ParchisiPlayer,
-  pawn: ParchisiPawn,
-  steps: number,
-  allowExit: boolean,
-): ParchisiMoveOption | null {
-  const outerBlockades = getOuterBlockades(state.pawns);
-  const myCorrBlockades = getCorridorBlockades(state.pawns, owner);
+export function getOuterSquareBlockadeOwner(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+  square: number,
+): ParchisiColor | null {
+  const occ = getTokensAtOuterSquare(tokens, square);
+  if (occ.length < 2) return null;
+  for (const color of ALL_PARCHISI_COLORS) {
+    const count = occ.filter((t) => t.color === color).length;
+    if (count >= 2) return color;
+  }
+  return null;
+}
 
-  // Case 1: Exiting from Home Yard
-  if (pawn.progress === -1) {
-    if (!allowExit) return null;
-    const exitSq = progressToOuterSquare(owner, 0)!;
-    const occupants = getPawnsAtOuterSquare(state.pawns, exitSq);
-    const ownOnExit = occupants.filter((o) => o.owner === owner).length;
-    // Cannot exit if exit square is blocked by 2 own pawns OR 2 opponent pawns (blockade) OR already at 2-pawn max capacity
-    if (ownOnExit >= 2 || occupants.length >= 2) return null;
-    return {
-      pawnId: pawn.id,
-      fromProgress: -1,
-      toProgress: 0,
-      steps: 1,
-      path: [0],
-      isExit: true,
-      captures: null,
-      reachesThrone: false,
-      landsOnSafe: true,
-      landsOnKarma: false,
-      breaksBlockade: false,
-    };
+/**
+ * Checks whether a specific token is currently part of a same-color blockade (2 own tokens on same tile 0..70).
+ */
+export function isTokenInOwnBlockade(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+  token: ParchisiToken,
+): boolean {
+  if (token.progress < 0 || token.progress >= PARCHISI_HOME_PROGRESS) return false;
+  const count = tokens[token.color].filter((t) => t.progress === token.progress).length;
+  return count >= 2;
+}
+
+/** Returns true if a player currently holds at least one blockade on tiles 0..70. */
+export function playerHasAnyBlockade(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+  color: ParchisiColor,
+): boolean {
+  const counts = new Map<number, number>();
+  for (const t of tokens[color]) {
+    if (t.progress >= 0 && t.progress < PARCHISI_HOME_PROGRESS) {
+      const next = (counts.get(t.progress) ?? 0) + 1;
+      if (next >= 2) return true;
+      counts.set(t.progress, next);
+    }
+  }
+  return false;
+}
+
+/** Returns all outer square IDs (1..68) currently holding a same-color blockade for visual rendering. */
+export function getAllOuterBlockadeSquares(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+): Map<number, ParchisiColor> {
+  const map = new Map<number, ParchisiColor>();
+  for (const color of ALL_PARCHISI_COLORS) {
+    const bySq = new Map<number, number>();
+    for (const t of tokens[color]) {
+      const sq = progressToOuterSquare(color, t.progress);
+      if (sq !== null) {
+        const next = (bySq.get(sq) ?? 0) + 1;
+        bySq.set(sq, next);
+        if (next >= 2) {
+          map.set(sq, color);
+        }
+      }
+    }
+  }
+  return map;
+}
+
+function cloneTokens(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+): Record<ParchisiColor, ParchisiToken[]> {
+  return {
+    red: tokens.red.map((t) => ({ ...t })),
+    green: tokens.green.map((t) => ({ ...t })),
+    yellow: tokens.yellow.map((t) => ({ ...t })),
+    blue: tokens.blue.map((t) => ({ ...t })),
+  };
+}
+
+interface StepEval {
+  toProgress: number;
+  path: number[];
+  capture: { color: ParchisiColor; tokenId: number; square: number } | null;
+  reachesHome: boolean;
+  landsOnSafe: boolean;
+}
+
+/**
+ * Evaluates a single contiguous advance of `steps` for a token already on the board (`0 <= progress < 71`).
+ * Strictly enforces:
+ *  - Exact count to enter Center Triangle Goal (71)
+ *  - No passing through or landing on ANY same-color blockade (own or opponent)
+ *  - Max 2 tokens per tile on track & home column
+ *  - Capturing single opponent token on non-safe outer tile
+ */
+function evaluateBoardAdvance(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+  token: ParchisiToken,
+  steps: number,
+): StepEval | null {
+  if (token.progress < 0 || token.progress >= PARCHISI_HOME_PROGRESS || steps <= 0) {
+    return null;
   }
 
-  // Already in Central Throne
-  if (pawn.progress >= PARCHISI_THRONE_PROGRESS) return null;
-
-  const targetProgress = pawn.progress + steps;
-  // Exact entry required for Central Throne
-  if (targetProgress > PARCHISI_THRONE_PROGRESS) return null;
+  const targetProgress = token.progress + steps;
+  // Exact count required to enter the Center Triangle Goal (71)
+  if (targetProgress > PARCHISI_HOME_PROGRESS) {
+    return null;
+  }
 
   const path: number[] = [];
-  for (let stepProg = pawn.progress + 1; stepProg <= targetProgress; stepProg++) {
-    path.push(stepProg);
-    if (stepProg <= 63) {
-      const sq = progressToOuterSquare(owner, stepProg)!;
-      // Nobody (not even allies!) can pass through OR land on a blockade
-      if (outerBlockades.has(sq)) return null;
-    } else if (stepProg <= 70) {
-      // Corridor blockade check
-      if (myCorrBlockades.has(stepProg)) return null;
+
+  for (let s = 1; s <= steps; s++) {
+    const p = token.progress + s;
+    path.push(p);
+
+    if (p <= 63) {
+      const sq = progressToOuterSquare(token.color, p)!;
+      // No token (own or opponent) can pass through or land on a same-color blockade
+      if (getOuterSquareBlockadeOwner(tokens, sq) !== null) {
+        return null;
+      }
+    } else if (p < PARCHISI_HOME_PROGRESS) {
+      // Own home column (64..70): cannot pass through or land on an own blockade (2 own tokens)
+      const corrOcc = getCorridorTokensAtProgress(tokens, token.color, p, token.id);
+      if (corrOcc.length >= 2) {
+        return null;
+      }
     }
   }
 
-  // Destination checks
-  if (targetProgress === PARCHISI_THRONE_PROGRESS) {
+  // Landing tile checks
+  if (targetProgress === PARCHISI_HOME_PROGRESS) {
     return {
-      pawnId: pawn.id,
-      fromProgress: pawn.progress,
-      toProgress: targetProgress,
-      steps,
+      toProgress: PARCHISI_HOME_PROGRESS,
       path,
-      isExit: false,
-      captures: null,
-      reachesThrone: true,
+      capture: null,
+      reachesHome: true,
       landsOnSafe: true,
-      landsOnKarma: false,
-      breaksBlockade: isPawnInOwnBlockade(state.pawns, pawn),
     };
   }
 
   if (targetProgress >= 64) {
-    // Inside own corridor: max 2 own pawns allowed per corridor square
-    const ownInTarget = state.pawns[owner].filter((p) => p.progress === targetProgress).length;
-    if (ownInTarget >= 2) return null;
+    // Home column landing already verified < 2 own tokens above
     return {
-      pawnId: pawn.id,
-      fromProgress: pawn.progress,
       toProgress: targetProgress,
-      steps,
       path,
-      isExit: false,
-      captures: null,
-      reachesThrone: false,
+      capture: null,
+      reachesHome: false,
       landsOnSafe: true,
-      landsOnKarma: false,
-      breaksBlockade: isPawnInOwnBlockade(state.pawns, pawn),
     };
   }
 
-  // Landing on outer ring (0..63)
-  const destSq = progressToOuterSquare(owner, targetProgress)!;
-  const occupants = getPawnsAtOuterSquare(state.pawns, destSq);
-  const safe = isSafeSquare(destSq);
-  const karma = isKarmaSquare(destSq);
-  const enemy = otherPlayer(owner);
-  const enemiesHere = occupants.filter((o) => o.owner === enemy);
-  const alliesHere = occupants.filter((o) => o.owner === owner);
+  const landingSq = progressToOuterSquare(token.color, targetProgress)!;
+  const occ = getTokensAtOuterSquare(tokens, landingSq, {
+    color: token.color,
+    tokenId: token.id,
+  });
 
-  // Max 2 pawns per square on safe zones (or 2 allies forming a blockade)
-  if (alliesHere.length >= 2) return null;
-
-  let captureInfo: ParchisiMoveOption['captures'] = null;
-  if (enemiesHere.length > 0) {
-    if (safe) {
-      // On safe zone: can share if total < 2
-      if (occupants.length >= 2) return null;
-    } else {
-      // Non-safe square with 1 enemy pawn
-      const targetEnemy = enemiesHere[0];
-      if (targetEnemy.shieldTurns > 0) {
-        // Love Shield protects this enemy pawn! Can coexist if < 2 total, no capture
-        if (occupants.length >= 2) return null;
-      } else {
-        // Capture! (Even if 1 ally + 1 enemy? In Parchis non-safe can't have mixed unless shielded)
-        captureInfo = { owner: enemy, pawnId: targetEnemy.id, square: destSq };
-      }
-    }
-  } else if (occupants.length >= 2) {
+  // Every outer tile holds at most 2 tokens
+  if (occ.length >= 2) {
     return null;
   }
 
+  const safe = isSafeSquare(landingSq);
+  let capture: StepEval['capture'] = null;
+
+  if (occ.length === 1) {
+    const other = occ[0];
+    if (other.color !== token.color && !safe) {
+      capture = {
+        color: other.color,
+        tokenId: other.id,
+        square: landingSq,
+      };
+    }
+  }
+
   return {
-    pawnId: pawn.id,
-    fromProgress: pawn.progress,
     toProgress: targetProgress,
-    steps,
     path,
-    isExit: false,
-    captures: captureInfo,
-    reachesThrone: false,
+    capture,
+    reachesHome: false,
     landsOnSafe: safe,
-    landsOnKarma: karma,
-    breaksBlockade: isPawnInOwnBlockade(state.pawns, pawn),
   };
 }
 
 /**
- * Compute all legal move options for the active player in WAIT_MOVE, BONUS_20, or BONUS_10.
- * Strictly enforces:
- *  - Express exit on 5 or 6 / Classic exit on 5 only
- *  - All 4 pawns out -> 6 moves 7 spaces
- *  - Mandatory blockade breaking when rolling a 6
+ * Evaluate applying both dice sequentially (`firstSteps` then `secondSteps`) to the same token,
+ * checking intermediate tile legality, blockades, and intermediate captures.
+ */
+function evaluateCombinedBoardAdvance(
+  tokens: Record<ParchisiColor, ParchisiToken[]>,
+  token: ParchisiToken,
+  d1: number,
+  d2: number,
+): {
+  toProgress: number;
+  path: number[];
+  captures: { color: ParchisiColor; tokenId: number; square: number }[];
+  reachesHome: boolean;
+  landsOnSafe: boolean;
+} | null {
+  const tryOrder = (first: number, second: number) => {
+    const step1 = evaluateBoardAdvance(tokens, token, first);
+    if (!step1 || step1.reachesHome) return null;
+
+    // Build virtual board after step1 (including removing any captured opponent on intermediate tile)
+    const nextTokens = cloneTokens(tokens);
+    const movedToken = nextTokens[token.color].find((t) => t.id === token.id)!;
+    movedToken.progress = step1.toProgress;
+    if (step1.capture) {
+      const cap = nextTokens[step1.capture.color].find((t) => t.id === step1.capture!.tokenId);
+      if (cap) cap.progress = -1;
+    }
+
+    const step2 = evaluateBoardAdvance(nextTokens, movedToken, second);
+    if (!step2) return null;
+
+    const captures: { color: ParchisiColor; tokenId: number; square: number }[] = [];
+    if (step1.capture) captures.push(step1.capture);
+    if (step2.capture) captures.push(step2.capture);
+
+    return {
+      toProgress: step2.toProgress,
+      path: [...step1.path, ...step2.path],
+      captures,
+      reachesHome: step2.reachesHome,
+      landsOnSafe: step2.landsOnSafe,
+    };
+  };
+
+  // Prefer the order that lands cleanly (or captures on final tile); fall back to swapped order if blocked
+  const orderA = tryOrder(d1, d2);
+  if (orderA) return orderA;
+  if (d1 !== d2) {
+    return tryOrder(d2, d1);
+  }
+  return null;
+}
+
+/**
+ * Computes ALL legal move options for the active player in the current state.
+ * Handles:
+ *  - Pending +20 (capture) and +10 (center home) bonuses first
+ *  - Rule of 5 base exits (die1=5, die2=5, die1+die2=5, and 5+5 double exit)
+ *  - Single-die moves (d1, d2) and combined sequential moves (d1+d2)
+ *  - Mandatory Blockade Break rule when rolling doubles
  */
 export function getLegalParchisiMoves(state: ParchisiState): ParchisiMoveOption[] {
-  if (state.phase !== 'WAIT_MOVE' && state.phase !== 'BONUS_20' && state.phase !== 'BONUS_10') {
-    return [];
-  }
-  const owner = state.turn;
-  const isBonus = state.phase === 'BONUS_20' || state.phase === 'BONUS_10';
-  const steps =
-    state.phase === 'BONUS_20'
-      ? 20
-      : state.phase === 'BONUS_10'
-        ? 10
-        : state.effectiveSteps;
+  if (state.phase !== 'WAIT_MOVE') return [];
+  const color = state.turn;
+  const myTokens = state.tokens[color];
+  const rawMoves: ParchisiMoveOption[] = [];
 
-  const allowExit =
-    !isBonus &&
-    (state.dieValue === 5 || (state.mode === 'express' && state.dieValue === 6));
-
-  const rawOptions: ParchisiMoveOption[] = [];
-  for (const pawn of state.pawns[owner]) {
-    const opt = evaluateSinglePawnMove(state, owner, pawn, steps, allowExit);
-    if (opt) rawOptions.push(opt);
-  }
-
-  // Authentic Parchis rule: on rolling a 6 (regular move, not bonus), if the player has a blockade
-  // and at least one blockade pawn can legally move, they MUST break a blockade!
-  if (!isBonus && state.dieValue === 6) {
-    const blockadeBreakers = rawOptions.filter((o) => o.breaksBlockade);
-    if (blockadeBreakers.length > 0) {
-      return blockadeBreakers;
+  // 1. Pending +20 or +10 bonus must be played immediately before remaining dice
+  if (state.pendingBonuses.length > 0) {
+    const bonus = state.pendingBonuses[0];
+    for (const token of myTokens) {
+      if (token.progress < 0 || token.progress >= PARCHISI_HOME_PROGRESS) continue;
+      const evalRes = evaluateBoardAdvance(state.tokens, token, bonus);
+      if (!evalRes) continue;
+      rawMoves.push({
+        id: `t${token.id}:bonus-${bonus}`,
+        tokenId: token.id,
+        color,
+        fromProgress: token.progress,
+        toProgress: evalRes.toProgress,
+        steps: bonus,
+        diceUsed: [],
+        bonusUsed: bonus,
+        label: `+${bonus}`,
+        path: evalRes.path,
+        isExit: false,
+        captures: evalRes.capture ? [evalRes.capture] : [],
+        reachesHome: evalRes.reachesHome,
+        landsOnSafe: evalRes.landsOnSafe,
+        breaksBlockade: isTokenInOwnBlockade(state.tokens, token),
+      });
     }
+    return rawMoves;
   }
 
-  return rawOptions;
-}
+  // 2. Regular 2-dice phase
+  if (!state.dice) return [];
+  const [d1, d2] = state.dice;
+  const [u1, u2] = state.usedDice;
+  if (u1 && u2) return [];
 
-/** Tick down Love Shield immunity on a player's pawns when their next turn starts */
-function decayShieldsFor(
-  pawns: Record<ParchisiPlayer, ParchisiPawn[]>,
-  owner: ParchisiPlayer,
-): Record<ParchisiPlayer, ParchisiPawn[]> {
-  const next = clonePawns(pawns);
-  for (const p of next[owner]) {
-    if (p.shieldTurns > 0) {
-      p.shieldTurns = Math.max(0, p.shieldTurns - 1);
+  const startSq = COLOR_START_SQUARE[color];
+  const startOccupancy = getTokensAtOuterSquare(state.tokens, startSq).length;
+  const canExitStart = startOccupancy < 2;
+
+  for (const token of myTokens) {
+    if (token.progress >= PARCHISI_HOME_PROGRESS) continue;
+
+    // Rule of 5: Exiting corner home base
+    if (token.progress === -1) {
+      if (!canExitStart) continue;
+
+      if (!u1 && d1 === 5) {
+        rawMoves.push({
+          id: `t${token.id}:exit-d0`,
+          tokenId: token.id,
+          color,
+          fromProgress: -1,
+          toProgress: 0,
+          steps: 5,
+          diceUsed: [0],
+          bonusUsed: null,
+          label: 'Exit (5)',
+          path: [0],
+          isExit: true,
+          captures: [],
+          reachesHome: false,
+          landsOnSafe: true,
+          breaksBlockade: false,
+        });
+      } else if (!u2 && d2 === 5) {
+        rawMoves.push({
+          id: `t${token.id}:exit-d1`,
+          tokenId: token.id,
+          color,
+          fromProgress: -1,
+          toProgress: 0,
+          steps: 5,
+          diceUsed: [1],
+          bonusUsed: null,
+          label: 'Exit (5)',
+          path: [0],
+          isExit: true,
+          captures: [],
+          reachesHome: false,
+          landsOnSafe: true,
+          breaksBlockade: false,
+        });
+      } else if (!u1 && !u2 && d1 + d2 === 5) {
+        rawMoves.push({
+          id: `t${token.id}:exit-sum`,
+          tokenId: token.id,
+          color,
+          fromProgress: -1,
+          toProgress: 0,
+          steps: 5,
+          diceUsed: [0, 1],
+          bonusUsed: null,
+          label: 'Exit (5)',
+          path: [0],
+          isExit: true,
+          captures: [],
+          reachesHome: false,
+          landsOnSafe: true,
+          breaksBlockade: false,
+        });
+      }
+      continue;
     }
-  }
-  return next;
-}
 
-function advanceTurnOrExtra(state: ParchisiState, eventText: string): ParchisiState {
-  const nextHistory = eventText ? [eventText, ...state.history].slice(0, 8) : state.history;
-  if (state.extraTurnPending) {
-    return {
-      ...state,
-      phase: 'WAIT_ROLL',
-      dieValue: null,
-      effectiveSteps: 0,
-      extraTurnPending: false,
-      lastEventText: eventText,
-      history: nextHistory,
-      stateSeq: state.stateSeq + 1,
-    };
-  }
-  const nextPlayer = otherPlayer(state.turn);
-  return {
-    ...state,
-    phase: 'WAIT_ROLL',
-    turn: nextPlayer,
-    dieValue: null,
-    effectiveSteps: 0,
-    consecutiveSixes: 0,
-    extraTurnPending: false,
-    pawns: decayShieldsFor(state.pawns, nextPlayer),
-    lastEventText: eventText,
-    history: nextHistory,
-    stateSeq: state.stateSeq + 1,
-  };
-}
+    // Token already on the board (0..70)
+    const breaksBlockade = isTokenInOwnBlockade(state.tokens, token);
 
-export interface RollOutcome {
-  state: ParchisiState;
-  dieValue: number;
-  tripleSixCurse: boolean;
-  cursedPawnId: number | null;
-  noMovesAvailable: boolean;
-  legalMoves: ParchisiMoveOption[];
-}
-
-/**
- * Roll the die for the active player (deterministic optional `forcedDie` for unit tests!).
- */
-export function rollParchisiDie(
-  state: ParchisiState,
-  forcedDie?: number,
-  rng: () => number = Math.random,
-): RollOutcome {
-  if (state.phase !== 'WAIT_ROLL') {
-    return {
-      state,
-      dieValue: state.dieValue ?? 1,
-      tripleSixCurse: false,
-      cursedPawnId: null,
-      noMovesAvailable: false,
-      legalMoves: [],
-    };
-  }
-
-  const die = forcedDie !== undefined ? Math.max(1, Math.min(6, Math.round(forcedDie))) : Math.floor(rng() * 6) + 1;
-  const owner = state.turn;
-  const isSix = die === 6;
-  const nextConsecutiveSixes = isSix ? state.consecutiveSixes + 1 : 0;
-  const nextStats = {
-    host: { ...state.stats.host },
-    guest: { ...state.stats.guest },
-  };
-  if (isSix) nextStats[owner].sixesRolled += 1;
-
-  // Rule: Triple-6 Curse! Cancels 3rd roll & sends last moved pawn back to base (unless safe in final corridor!)
-  if (nextConsecutiveSixes >= 3) {
-    const nextPawns = clonePawns(state.pawns);
-    const lastId = state.lastMovedPawnId[owner];
-    let cursedPawnId: number | null = null;
-    if (lastId !== null) {
-      const target = nextPawns[owner].find((p) => p.id === lastId);
-      if (target && target.progress >= 0 && target.progress <= 63) {
-        target.progress = -1;
-        target.shieldTurns = 0;
-        cursedPawnId = target.id;
+    if (!u1) {
+      const m1 = evaluateBoardAdvance(state.tokens, token, d1);
+      if (m1) {
+        rawMoves.push({
+          id: `t${token.id}:d0`,
+          tokenId: token.id,
+          color,
+          fromProgress: token.progress,
+          toProgress: m1.toProgress,
+          steps: d1,
+          diceUsed: [0],
+          bonusUsed: null,
+          label: `+${d1}`,
+          path: m1.path,
+          isExit: false,
+          captures: m1.capture ? [m1.capture] : [],
+          reachesHome: m1.reachesHome,
+          landsOnSafe: m1.landsOnSafe,
+          breaksBlockade,
+        });
       }
     }
-    const nextPlayer = otherPlayer(owner);
-    const finalPawns = decayShieldsFor(nextPawns, nextPlayer);
-    const eventText = cursedPawnId !== null ? 'TRIPLE_SIX_CURSED' : 'TRIPLE_SIX_SPARED';
-    const nextState: ParchisiState = {
-      ...state,
-      phase: 'WAIT_ROLL',
-      turn: nextPlayer,
-      dieValue: 6,
-      effectiveSteps: 0,
-      rollSeq: state.rollSeq + 1,
-      consecutiveSixes: 0,
-      extraTurnPending: false,
-      pawns: finalPawns,
-      stats: nextStats,
-      lastEventText: eventText,
-      history: [eventText, ...state.history].slice(0, 8),
-      stateSeq: state.stateSeq + 1,
-    };
-    return {
-      state: nextState,
-      dieValue: 6,
-      tripleSixCurse: true,
-      cursedPawnId,
-      noMovesAvailable: false,
-      legalMoves: [],
-    };
-  }
 
-  // Rule: if all 4 pawns are already out of base, a 6 counts as 7 spaces!
-  const effectiveSteps = isSix && areAllPawnsOut(state.pawns, owner) ? 7 : die;
+    // Avoid duplicate identical pill when both dice are unused and equal (doubles)
+    if (!u2 && (u1 || d2 !== d1)) {
+      const m2 = evaluateBoardAdvance(state.tokens, token, d2);
+      if (m2) {
+        rawMoves.push({
+          id: `t${token.id}:d1`,
+          tokenId: token.id,
+          color,
+          fromProgress: token.progress,
+          toProgress: m2.toProgress,
+          steps: d2,
+          diceUsed: [1],
+          bonusUsed: null,
+          label: `+${d2}`,
+          path: m2.path,
+          isExit: false,
+          captures: m2.capture ? [m2.capture] : [],
+          reachesHome: m2.reachesHome,
+          landsOnSafe: m2.landsOnSafe,
+          breaksBlockade,
+        });
+      }
+    }
 
-  const candidateState: ParchisiState = {
-    ...state,
-    phase: 'WAIT_MOVE',
-    dieValue: die,
-    effectiveSteps,
-    rollSeq: state.rollSeq + 1,
-    consecutiveSixes: nextConsecutiveSixes,
-    extraTurnPending: isSix,
-    stats: nextStats,
-    lastEventText: '',
-    stateSeq: state.stateSeq + 1,
-  };
-
-  const legalMoves = getLegalParchisiMoves(candidateState);
-  return {
-    state: candidateState,
-    dieValue: die,
-    tripleSixCurse: false,
-    cursedPawnId: null,
-    noMovesAvailable: legalMoves.length === 0,
-    legalMoves,
-  };
-}
-
-/** Called after 1s toast when no legal moves exist after a roll (or bonus). */
-export function passParchisiTurnNoMoves(state: ParchisiState): ParchisiState {
-  if (state.phase !== 'WAIT_MOVE' && state.phase !== 'BONUS_20' && state.phase !== 'BONUS_10') {
-    return state;
-  }
-  return advanceTurnOrExtra(state, 'NO_MOVES');
-}
-
-/** Find nearest Safe Zone square at or behind `square` for a spared victim pawn. */
-export function findNearestSafeSquareBehind(
-  victimOwner: ParchisiPlayer,
-  fromSquare: number,
-  pawns: Record<ParchisiPlayer, ParchisiPawn[]>,
-): number {
-  const fromProg = outerSquareToProgress(victimOwner, fromSquare);
-  // Walk backward along victim's track from fromProg down to 0 to find nearest safe square with room (< 2 pawns)
-  for (let p = fromProg; p >= 0; p--) {
-    const sq = progressToOuterSquare(victimOwner, p)!;
-    if (isSafeSquare(sq)) {
-      const occ = getPawnsAtOuterSquare(pawns, sq);
-      if (occ.length < 2) return sq;
+    // Combined move (d1 + d2) sequentially on the same token when both dice are unused
+    if (!u1 && !u2) {
+      const mSum = evaluateCombinedBoardAdvance(state.tokens, token, d1, d2);
+      if (mSum) {
+        rawMoves.push({
+          id: `t${token.id}:sum`,
+          tokenId: token.id,
+          color,
+          fromProgress: token.progress,
+          toProgress: mSum.toProgress,
+          steps: d1 + d2,
+          diceUsed: [0, 1],
+          bonusUsed: null,
+          label: `+${d1 + d2}`,
+          path: mSum.path,
+          isExit: false,
+          captures: mSum.captures,
+          reachesHome: mSum.reachesHome,
+          landsOnSafe: mSum.landsOnSafe,
+          breaksBlockade,
+        });
+      }
     }
   }
-  // Fallback: check any safe zone with space
-  for (const sq of PARCHISI_SAFE_SQUARES) {
-    if (getPawnsAtOuterSquare(pawns, sq).length < 2) return sq;
+
+  // Official Blockade Break Rule on Doubles:
+  // If rolling doubles while holding an own blockade, player must break a blockade if a legal move exists.
+  if (state.mustBreakBlockade) {
+    const breakingMoves = rawMoves.filter((m) => m.breaksBlockade);
+    if (breakingMoves.length > 0) {
+      return breakingMoves;
+    }
   }
-  return progressToOuterSquare(victimOwner, 0)!;
-}
 
-function drawNextKarmaCard(usedIds: number[], rng: () => number): ParchisiKarmaCardDef {
-  const available = PARCHISI_KARMA_DECK.filter((c) => !usedIds.includes(c.id));
-  const pool = available.length > 0 ? available : PARCHISI_KARMA_DECK;
-  return pool[Math.floor(rng() * pool.length)];
-}
-
-/** Helper: transition into BONUS_20 or BONUS_10 if at least 1 valid pawn can take the bonus, else end/extra turn. */
-function enterBonusOrFinishTurn(
-  state: ParchisiState,
-  bonusPhase: 'BONUS_20' | 'BONUS_10',
-  eventText: string,
-): ParchisiState {
-  const candidate: ParchisiState = {
-    ...state,
-    phase: bonusPhase,
-    effectiveSteps: bonusPhase === 'BONUS_20' ? 20 : 10,
-    lastEventText: eventText,
-    history: [eventText, ...state.history].slice(0, 8),
-    stateSeq: state.stateSeq + 1,
-  };
-  const legal = getLegalParchisiMoves(candidate);
-  if (legal.length === 0) {
-    return advanceTurnOrExtra(candidate, `${eventText}_SKIPPED`);
-  }
-  return candidate;
-}
-
-export interface MoveExecutionResult {
-  accepted: boolean;
-  state: ParchisiState;
-  option: ParchisiMoveOption | null;
+  return rawMoves;
 }
 
 /**
- * Execute a legal pawn move for the active player (during WAIT_MOVE, BONUS_20, or BONUS_10).
+ * Rolls two 6-sided dice for the active player, enforcing:
+ *  - Doubles grant an extra roll
+ *  - 3 consecutive doubles forfeit the 3rd roll and return last moved token (if outside home column) to base
+ *  - Blockade Break requirement on doubles if owning a blockade
+ */
+export function rollParchisiDice(
+  state: ParchisiState,
+  forcedDice?: [number, number],
+  rng: () => number = Math.random,
+  nowMs = Date.now(),
+): ParchisiState {
+  if (state.phase !== 'WAIT_ROLL') return state;
+
+  const d1 = forcedDice
+    ? Math.max(1, Math.min(6, Math.round(forcedDice[0])))
+    : Math.floor(rng() * 6) + 1;
+  const d2 = forcedDice
+    ? Math.max(1, Math.min(6, Math.round(forcedDice[1])))
+    : Math.floor(rng() * 6) + 1;
+
+  const color = state.turn;
+  const colorLabel = COLOR_PALETTE[color].label;
+  const isDoubles = d1 === d2;
+  const nextConsecutiveDoubles = isDoubles ? state.consecutiveDoubles + 1 : 0;
+
+  const nextStats: Record<ParchisiColor, ParchisiPlayerStats> = {
+    red: { ...state.stats.red },
+    green: { ...state.stats.green },
+    yellow: { ...state.stats.yellow },
+    blue: { ...state.stats.blue },
+  };
+  if (isDoubles) {
+    nextStats[color].doublesRolled += 1;
+  }
+
+  // Three-Doubles Penalty
+  if (nextConsecutiveDoubles >= 3) {
+    const nextTokens = cloneTokens(state.tokens);
+    const lastId = state.lastMovedTokenId[color];
+    const targetToken =
+      lastId !== null ? nextTokens[color].find((t) => t.id === lastId) : undefined;
+
+    let penaltyText = `3 consecutive doubles (${d1}-${d2})! Roll forfeited.`;
+    if (targetToken && targetToken.progress >= 0 && targetToken.progress <= 63) {
+      targetToken.progress = -1;
+      penaltyText = `3 consecutive doubles! ${colorLabel}'s last token returns to base!`;
+    } else if (targetToken && targetToken.progress >= 64 && targetToken.progress < PARCHISI_HOME_PROGRESS) {
+      penaltyText = `3 consecutive doubles! ${colorLabel}'s token is safe inside home column.`;
+    }
+
+    return {
+      ...state,
+      phase: 'WAIT_MOVE',
+      dice: [d1, d2],
+      usedDice: [true, true],
+      pendingBonuses: [],
+      rollSeq: state.rollSeq + 1,
+      consecutiveDoubles: 0,
+      extraRollPending: false,
+      mustBreakBlockade: false,
+      tokens: nextTokens,
+      stats: nextStats,
+      lastMoveAnim: null,
+      lastEventText: penaltyText,
+      lastEventTone: 'warning',
+      turnStartedAt: nowMs,
+      stateSeq: state.stateSeq + 1,
+    };
+  }
+
+  const mustBreak = isDoubles && playerHasAnyBlockade(state.tokens, color);
+  const rolledText = isDoubles
+    ? `${colorLabel} rolled Double ${d1}! Extra roll earned.${mustBreak ? ' Break a blockade!' : ''}`
+    : `${colorLabel} rolled ${d1} & ${d2}.`;
+
+  return {
+    ...state,
+    phase: 'WAIT_MOVE',
+    dice: [d1, d2],
+    usedDice: [false, false],
+    pendingBonuses: [],
+    rollSeq: state.rollSeq + 1,
+    consecutiveDoubles: nextConsecutiveDoubles,
+    extraRollPending: isDoubles,
+    mustBreakBlockade: mustBreak,
+    stats: nextStats,
+    lastMoveAnim: null,
+    lastEventText: rolledText,
+    lastEventTone: isDoubles ? 'bonus' : 'neutral',
+    turnStartedAt: nowMs,
+    stateSeq: state.stateSeq + 1,
+  };
+}
+
+/**
+ * Executes a validated move option for the active player, awarding +20 on capture,
+ * +10 on center triangle home entry, checking Victory (all 4 tokens at 71), and managing dice/turn flow.
  */
 export function applyParchisiMove(
   state: ParchisiState,
-  pawnId: number,
-  rng: () => number = Math.random,
-): MoveExecutionResult {
+  moveOptionId: string,
+  nowMs = Date.now(),
+): ParchisiState {
+  if (state.phase !== 'WAIT_MOVE') return state;
   const legal = getLegalParchisiMoves(state);
-  const option = legal.find((o) => o.pawnId === pawnId) ?? null;
-  if (!option) {
-    return { accepted: false, state, option: null };
+  const move = legal.find((m) => m.id === moveOptionId);
+  if (!move) return state;
+
+  const color = state.turn;
+  const colorLabel = COLOR_PALETTE[color].label;
+  const nextTokens = cloneTokens(state.tokens);
+  const movedToken = nextTokens[color].find((t) => t.id === move.tokenId);
+  if (!movedToken) return state;
+
+  movedToken.progress = move.toProgress;
+
+  const nextStats: Record<ParchisiColor, ParchisiPlayerStats> = {
+    red: { ...state.stats.red },
+    green: { ...state.stats.green },
+    yellow: { ...state.stats.yellow },
+    blue: { ...state.stats.blue },
+  };
+
+  // Start from remaining pending bonuses (shift current if this was a bonus move)
+  const nextBonuses: ParchisiBonusAmount[] =
+    move.bonusUsed !== null ? state.pendingBonuses.slice(1) : [...state.pendingBonuses];
+
+  // Apply captures -> send opponents to base & award +20 bonus per capture
+  const capturedList: { color: ParchisiColor; tokenId: number }[] = [];
+  for (const cap of move.captures) {
+    const victim = nextTokens[cap.color].find((t) => t.id === cap.tokenId);
+    if (victim) {
+      victim.progress = -1;
+      capturedList.push({ color: cap.color, tokenId: cap.tokenId });
+      nextStats[color].captures += 1;
+      nextBonuses.unshift(20);
+    }
   }
 
-  const owner = state.turn;
-  const nextPawns = clonePawns(state.pawns);
-  const movingPawn = nextPawns[owner].find((p) => p.id === pawnId)!;
-  movingPawn.progress = option.toProgress;
+  // Apply home entry -> award +10 bonus
+  if (move.reachesHome) {
+    nextStats[color].homeEntries += 1;
+    nextBonuses.unshift(10);
+  }
+
+  const nextUsedDice: [boolean, boolean] = [...state.usedDice];
+  for (const idx of move.diceUsed) {
+    if (idx === 0 || idx === 1) {
+      nextUsedDice[idx] = true;
+    }
+  }
+
+  const nextLastMoved: Record<ParchisiColor, number | null> = {
+    ...state.lastMovedTokenId,
+    [color]: move.tokenId,
+  };
 
   const animSeq = (state.lastMoveAnim?.seq ?? 0) + 1;
-  const nextLastMoved = { ...state.lastMovedPawnId, [owner]: pawnId };
-
-  const baseUpdated: ParchisiState = {
-    ...state,
-    pawns: nextPawns,
-    lastMovedPawnId: nextLastMoved,
-    lastMoveAnim: {
-      seq: animSeq,
-      owner,
-      pawnId,
-      path: option.path,
-    },
+  const lastMoveAnim = {
+    seq: animSeq,
+    color,
+    tokenId: move.tokenId,
+    path: move.path,
+    captured: capturedList,
+    reachedHome: move.reachesHome,
+    landedSafe: move.landsOnSafe,
   };
 
-  // 1. Check Central Throne arrival -> Victory OR +10 Bonus!
-  if (option.reachesThrone) {
-    const allFinished = nextPawns[owner].every((p) => p.progress >= PARCHISI_THRONE_PROGRESS);
-    if (allFinished) {
+  // Victory check: all 4 tokens in Center Triangle Goal (71)
+  const allHome = nextTokens[color].every((t) => t.progress >= PARCHISI_HOME_PROGRESS);
+  if (allHome) {
+    return {
+      ...state,
+      phase: 'GAME_OVER',
+      tokens: nextTokens,
+      usedDice: [true, true],
+      pendingBonuses: [],
+      mustBreakBlockade: false,
+      lastMovedTokenId: nextLastMoved,
+      lastMoveAnim,
+      lastEventText: `${colorLabel} wins Official Parcheesi!`,
+      lastEventTone: 'win',
+      winner: color,
+      stats: nextStats,
+      turnStartedAt: nowMs,
+      stateSeq: state.stateSeq + 1,
+    };
+  }
+
+  // Determine event banner text & tone
+  let eventText = `${colorLabel} moved ${move.label}.`;
+  let eventTone: ParchisiState['lastEventTone'] = 'neutral';
+  if (capturedList.length > 0) {
+    eventText = `Captured! ${colorLabel} earns +20 bonus!`;
+    eventTone = 'capture';
+  } else if (move.reachesHome) {
+    eventText = `Home! ${colorLabel} earns +10 bonus!`;
+    eventTone = 'bonus';
+  } else if (move.isExit) {
+    eventText = `${colorLabel} entered the board!`;
+    eventTone = 'safe';
+  } else if (move.landsOnSafe && move.toProgress <= 63) {
+    eventText = `${colorLabel} reached a Safe Star tile.`;
+    eventTone = 'safe';
+  }
+
+  const nextMustBreakBlockade = move.breaksBlockade ? false : state.mustBreakBlockade;
+
+  // 1. If bonuses remain, stay in WAIT_MOVE to play the bonus immediately
+  if (nextBonuses.length > 0) {
+    return {
+      ...state,
+      phase: 'WAIT_MOVE',
+      tokens: nextTokens,
+      usedDice: nextUsedDice,
+      pendingBonuses: nextBonuses,
+      mustBreakBlockade: nextMustBreakBlockade,
+      lastMovedTokenId: nextLastMoved,
+      lastMoveAnim,
+      lastEventText: eventText,
+      lastEventTone: eventTone,
+      stats: nextStats,
+      turnStartedAt: nowMs,
+      stateSeq: state.stateSeq + 1,
+    };
+  }
+
+  // 2. If a die is still unused, stay in WAIT_MOVE
+  if (!nextUsedDice[0] || !nextUsedDice[1]) {
+    return {
+      ...state,
+      phase: 'WAIT_MOVE',
+      tokens: nextTokens,
+      usedDice: nextUsedDice,
+      pendingBonuses: [],
+      mustBreakBlockade: nextMustBreakBlockade,
+      lastMovedTokenId: nextLastMoved,
+      lastMoveAnim,
+      lastEventText: eventText,
+      lastEventTone: eventTone,
+      stats: nextStats,
+      turnStartedAt: nowMs,
+      stateSeq: state.stateSeq + 1,
+    };
+  }
+
+  // 3. Both dice spent and no bonuses remain -> Extra roll on doubles, or advance turn
+  if (state.extraRollPending) {
+    return {
+      ...state,
+      phase: 'WAIT_ROLL',
+      dice: null,
+      usedDice: [false, false],
+      pendingBonuses: [],
+      extraRollPending: false,
+      mustBreakBlockade: false,
+      tokens: nextTokens,
+      lastMovedTokenId: nextLastMoved,
+      lastMoveAnim,
+      lastEventText: `${colorLabel} gets an extra roll for doubles!`,
+      lastEventTone: 'bonus',
+      stats: nextStats,
+      turnStartedAt: nowMs,
+      stateSeq: state.stateSeq + 1,
+    };
+  }
+
+  const nextTurn = getNextActiveColor(state.activeColors, color);
+  return {
+    ...state,
+    phase: 'WAIT_ROLL',
+    turn: nextTurn,
+    dice: null,
+    usedDice: [false, false],
+    pendingBonuses: [],
+    consecutiveDoubles: 0,
+    extraRollPending: false,
+    mustBreakBlockade: false,
+    tokens: nextTokens,
+    lastMovedTokenId: nextLastMoved,
+    lastMoveAnim,
+    lastEventText: `${COLOR_PALETTE[nextTurn].label}'s turn.`,
+    lastEventTone: eventTone,
+    stats: nextStats,
+    turnStartedAt: nowMs,
+    stateSeq: state.stateSeq + 1,
+  };
+}
+
+/**
+ * Called automatically when `getLegalParchisiMoves(state).length === 0` during `WAIT_MOVE`.
+ * Drops an unplayable +20/+10 bonus smoothly, or advances turn / grants doubles extra roll.
+ */
+export function passParchisiTurnOrBonus(
+  state: ParchisiState,
+  nowMs = Date.now(),
+): ParchisiState {
+  if (state.phase !== 'WAIT_MOVE') return state;
+
+  // If a +20/+10 bonus had no legal moves, drop it and continue remaining bonuses or remaining dice
+  if (state.pendingBonuses.length > 0) {
+    const dropped = state.pendingBonuses[0];
+    const remainingBonuses = state.pendingBonuses.slice(1);
+    const hasRemainingDice = !state.usedDice[0] || !state.usedDice[1];
+
+    if (remainingBonuses.length > 0 || hasRemainingDice) {
       return {
-        accepted: true,
-        option,
-        state: {
-          ...baseUpdated,
-          phase: 'GAME_OVER',
-          winner: owner,
-          finalDareIndex: Math.floor(rng() * PARCHISI_FINAL_DARE_COUNT),
-          lastEventText: 'VICTORY',
-          history: ['VICTORY', ...state.history].slice(0, 8),
-          stateSeq: state.stateSeq + 1,
-        },
+        ...state,
+        phase: 'WAIT_MOVE',
+        pendingBonuses: remainingBonuses,
+        lastEventText: `No legal move for +${dropped} bonus — continuing turn.`,
+        lastEventTone: 'neutral',
+        turnStartedAt: nowMs,
+        stateSeq: state.stateSeq + 1,
       };
     }
-    return {
-      accepted: true,
-      option,
-      state: enterBonusOrFinishTurn(baseUpdated, 'BONUS_10', 'THRONE_BONUS_10'),
-    };
-  }
 
-  // 2. Check Capture -> Trigger Mercy Rule Couple (MERCY_OFFER) with 8s countdown!
-  if (option.captures) {
-    const dareIndex = Math.floor(rng() * PARCHISI_MERCY_DARE_COUNT);
-    return {
-      accepted: true,
-      option,
-      state: {
-        ...baseUpdated,
-        phase: 'MERCY_OFFER',
-        pendingMercy: {
-          capturer: owner,
-          capturerPawnId: pawnId,
-          victim: option.captures.owner,
-          victimPawnId: option.captures.pawnId,
-          square: option.captures.square,
-          dareIndex,
-          stage: 'choose',
-          countdownSec: PARCHISI_MERCY_COUNTDOWN_SEC,
-        },
-        lastEventText: 'CAPTURE_OFFER',
-        history: ['CAPTURE_OFFER', ...state.history].slice(0, 8),
+    // No bonuses or dice left after dropping bonus
+    if (state.extraRollPending) {
+      return {
+        ...state,
+        phase: 'WAIT_ROLL',
+        dice: null,
+        usedDice: [false, false],
+        pendingBonuses: [],
+        extraRollPending: false,
+        mustBreakBlockade: false,
+        lastEventText: `No legal move for +${dropped} bonus — roll doubles bonus!`,
+        lastEventTone: 'bonus',
+        turnStartedAt: nowMs,
         stateSeq: state.stateSeq + 1,
-      },
-    };
-  }
-
-  // 3. Check Karma Couple Square -> Draw surprise card!
-  if (option.landsOnKarma) {
-    const card = drawNextKarmaCard(state.usedKarmaIds, rng);
-    const nextUsed =
-      state.usedKarmaIds.length + 1 >= PARCHISI_KARMA_DECK.length
-        ? [card.id]
-        : [...state.usedKarmaIds, card.id];
-    const nextStats = {
-      host: { ...state.stats.host },
-      guest: { ...state.stats.guest },
-    };
-    nextStats[owner].karmaCards += 1;
-
-    // Apply Love Shield immediately on card draw so visual aura lights up right away
-    if (card.effect === 'shield') {
-      movingPawn.shieldTurns = 1;
+      };
     }
 
-    return {
-      accepted: true,
-      option,
-      state: {
-        ...baseUpdated,
-        phase: 'KARMA_CARD',
-        stats: nextStats,
-        usedKarmaIds: nextUsed,
-        activeKarma: {
-          cardId: card.id,
-          effect: card.effect,
-          triggeredBy: owner,
-          pawnId,
-          square: progressToOuterSquare(owner, option.toProgress)!,
-        },
-        lastEventText: `KARMA_${card.effect.toUpperCase()}`,
-        history: [`KARMA_${card.effect.toUpperCase()}`, ...state.history].slice(0, 8),
-        stateSeq: state.stateSeq + 1,
-      },
-    };
-  }
-
-  // 4. Normal landing -> Extra turn if rolled 6, else pass turn
-  return {
-    accepted: true,
-    option,
-    state: advanceTurnOrExtra(baseUpdated, option.isExit ? 'PAWN_EXIT' : 'PAWN_MOVED'),
-  };
-}
-
-/**
- * Resolve Mercy Rule ("Rachat par Gage") decision steps:
- *  - 'no_mercy': Send victim pawn to base, grant +20 bonus!
- *  - 'offer_dare': Capturer proposes the drawn webcam dare to victim
- *  - 'accept_dare': Victim accepts and performs live on webcam
- *  - 'decline_dare': Victim declines -> falls back to 'no_mercy' (+20 bonus!)
- *  - 'validate_dare': Capturer validates dare -> victim saved to nearest Safe Zone + capturer gets +10 bonus + "Cœur Tendre" badge!
- */
-export function resolveParchisiMercy(
-  state: ParchisiState,
-  choice: 'no_mercy' | 'offer_dare' | 'accept_dare' | 'decline_dare' | 'validate_dare',
-): ParchisiState {
-  if (state.phase !== 'MERCY_OFFER' || !state.pendingMercy) return state;
-  const mercy = state.pendingMercy;
-  const nextStats = {
-    host: { ...state.stats.host },
-    guest: { ...state.stats.guest },
-  };
-
-  if (choice === 'offer_dare' && mercy.stage === 'choose') {
+    const nextTurn = getNextActiveColor(state.activeColors, state.turn);
     return {
       ...state,
-      pendingMercy: { ...mercy, stage: 'waiting_partner', countdownSec: 0 },
-      stateSeq: state.stateSeq + 1,
-    };
-  }
-
-  if (choice === 'accept_dare' && mercy.stage === 'waiting_partner') {
-    return {
-      ...state,
-      pendingMercy: { ...mercy, stage: 'partner_performing', countdownSec: 0 },
-      stateSeq: state.stateSeq + 1,
-    };
-  }
-
-  if (choice === 'validate_dare' && (mercy.stage === 'partner_performing' || mercy.stage === 'waiting_partner')) {
-    const nextPawns = clonePawns(state.pawns);
-    const victimPawn = nextPawns[mercy.victim].find((p) => p.id === mercy.victimPawnId);
-    if (victimPawn) {
-      // Relocate spared pawn to nearest safe zone behind capture square
-      const safeSq = findNearestSafeSquareBehind(mercy.victim, mercy.square, nextPawns);
-      victimPawn.progress = outerSquareToProgress(mercy.victim, safeSq);
-      victimPawn.shieldTurns = 1;
-    }
-    nextStats[mercy.capturer].tenderHearts += 1;
-    nextStats[mercy.victim].daresCompleted += 1;
-
-    const cleared: ParchisiState = {
-      ...state,
-      pawns: nextPawns,
-      pendingMercy: null,
-      stats: nextStats,
-    };
-    return enterBonusOrFinishTurn(cleared, 'BONUS_10', 'MERCY_SAVED_BONUS_10');
-  }
-
-  // 'no_mercy' or 'decline_dare' -> Full capture +20 bonus!
-  const nextPawns = clonePawns(state.pawns);
-  const victimPawn = nextPawns[mercy.victim].find((p) => p.id === mercy.victimPawnId);
-  if (victimPawn) {
-    victimPawn.progress = -1;
-    victimPawn.shieldTurns = 0;
-  }
-  nextStats[mercy.capturer].captures += 1;
-
-  const cleared: ParchisiState = {
-    ...state,
-    pawns: nextPawns,
-    pendingMercy: null,
-    stats: nextStats,
-  };
-  return enterBonusOrFinishTurn(cleared, 'BONUS_20', 'CAPTURE_BONUS_20');
-}
-
-/**
- * Dismiss active Karma Couple card and apply its effect (Turbo +3, Free Roll, Shield, or Complicity).
- */
-export function dismissParchisiKarmaCard(
-  state: ParchisiState,
-  rng: () => number = Math.random,
-): ParchisiState {
-  if (state.phase !== 'KARMA_CARD' || !state.activeKarma) return state;
-  const karma = state.activeKarma;
-  const cleared: ParchisiState = { ...state, activeKarma: null };
-
-  if (karma.effect === 'free_roll') {
-    // Immediate free reroll without penalizing consecutive sixes
-    return {
-      ...cleared,
       phase: 'WAIT_ROLL',
-      dieValue: null,
-      effectiveSteps: 0,
-      extraTurnPending: false,
-      lastEventText: 'KARMA_FREE_ROLL',
+      turn: nextTurn,
+      dice: null,
+      usedDice: [false, false],
+      pendingBonuses: [],
+      consecutiveDoubles: 0,
+      extraRollPending: false,
+      mustBreakBlockade: false,
+      lastEventText: `No legal move for +${dropped} bonus — ${COLOR_PALETTE[nextTurn].label}'s turn.`,
+      lastEventTone: 'neutral',
+      turnStartedAt: nowMs,
       stateSeq: state.stateSeq + 1,
     };
   }
 
-  if (karma.effect === 'turbo3') {
-    // Advance the pawn by +3 immediately if legal (not blocked by a wall)
-    const turboState: ParchisiState = {
-      ...cleared,
-      phase: 'WAIT_MOVE',
-      effectiveSteps: 3,
-      dieValue: 3,
+  // Normal dice had 0 legal moves (or 3rd consecutive double forfeited)
+  if (state.extraRollPending) {
+    return {
+      ...state,
+      phase: 'WAIT_ROLL',
+      dice: null,
+      usedDice: [false, false],
+      pendingBonuses: [],
+      extraRollPending: false,
+      mustBreakBlockade: false,
+      lastEventText: `No legal moves — extra roll for doubles!`,
+      lastEventTone: 'bonus',
+      turnStartedAt: nowMs,
+      stateSeq: state.stateSeq + 1,
     };
-    const legal = getLegalParchisiMoves(turboState);
-    const preferred = legal.find((m) => m.pawnId === karma.pawnId) ?? legal[0];
-    if (preferred) {
-      const moved = applyParchisiMove(turboState, preferred.pawnId, rng);
-      return moved.state;
-    }
-    return advanceTurnOrExtra(cleared, 'KARMA_TURBO_BLOCKED');
   }
 
-  // 'shield' (already applied) or 'complicity'
-  return advanceTurnOrExtra(cleared, 'KARMA_DONE');
-}
-
-/**
- * Smart Solo AI Move Evaluator (strictly follows requested priority order):
- *  1) Enter Central Throne
- *  2) Capture opponent pawn
- *  3) Exit a pawn from home yard (on 5 or 6 in Express)
- *  4) Land on a Safe Zone (star/shield)
- *  5) Advance the pawn closest to victory (highest progress)
- */
-export function chooseAiParchisiMove(state: ParchisiState): number | null {
-  const legal = getLegalParchisiMoves(state);
-  if (legal.length === 0) return null;
-  if (legal.length === 1) return legal[0].pawnId;
-
-  const scoreOption = (opt: ParchisiMoveOption): number => {
-    let score = 0;
-    if (opt.reachesThrone) score += 10000;
-    if (opt.captures) score += 5000;
-    if (opt.isExit) score += 2500;
-    if (opt.landsOnSafe) score += 1200;
-    if (opt.landsOnKarma) score += 450;
-    // Prefer moving the pawn closest to victory
-    score += opt.toProgress * 10;
-    return score;
+  const nextTurn = getNextActiveColor(state.activeColors, state.turn);
+  return {
+    ...state,
+    phase: 'WAIT_ROLL',
+    turn: nextTurn,
+    dice: null,
+    usedDice: [false, false],
+    pendingBonuses: [],
+    consecutiveDoubles: 0,
+    extraRollPending: false,
+    mustBreakBlockade: false,
+    lastEventText: `${COLOR_PALETTE[nextTurn].label}'s turn.`,
+    lastEventTone: 'neutral',
+    turnStartedAt: nowMs,
+    stateSeq: state.stateSeq + 1,
   };
-
-  let best = legal[0];
-  let bestScore = scoreOption(best);
-  for (let i = 1; i < legal.length; i++) {
-    const s = scoreOption(legal[i]);
-    if (s > bestScore) {
-      bestScore = s;
-      best = legal[i];
-    }
-  }
-  return best.pawnId;
 }
 
 /**
- * Hand-shake detector for optional MediaPipe HandLandmarker "Dé à la main" roll trigger.
- * Tracks left-right direction reversals of mirrored palmX.
+ * Checks how many opponent tokens are within 1..12 tiles behind `square` on the outer track.
  */
+function countThreateningOpponentsBehind(
+  state: ParchisiState,
+  myColor: ParchisiColor,
+  square: number,
+): number {
+  let threats = 0;
+  for (const otherColor of state.activeColors) {
+    if (otherColor === myColor) continue;
+    for (const token of state.tokens[otherColor]) {
+      const oppSq = progressToOuterSquare(otherColor, token.progress);
+      if (oppSq === null) continue;
+      const dist = (square - oppSq + PARCHISI_TOTAL_SQUARES) % PARCHISI_TOTAL_SQUARES;
+      if (dist >= 1 && dist <= 12) {
+        threats += 1;
+      }
+    }
+  }
+  return threats;
+}
+
+/**
+ * Smart AI evaluator for Solo Mode (Yellow AI) & 4-Player Mode (Green & Blue AI bots).
+ * Prioritizes: Home entry (+10) -> Captures (+20) -> Base exits on 5 -> Home column entry
+ * -> Safe stars -> Escaping threats -> Forming strategic blockades -> Advancing leaders.
+ */
+export function chooseAiParchisiMove(state: ParchisiState): ParchisiMoveOption | null {
+  const moves = getLegalParchisiMoves(state);
+  if (moves.length === 0) return null;
+  if (moves.length === 1) return moves[0];
+
+  const color = state.turn;
+  let best = moves[0];
+  let bestScore = -Infinity;
+
+  for (const m of moves) {
+    let score = 0;
+
+    if (m.reachesHome) score += 270;
+    if (m.captures.length > 0) {
+      score += 235 * m.captures.length;
+    }
+    if (m.isExit) score += 145;
+    if (m.fromProgress <= 63 && m.toProgress >= 64) score += 120;
+    if (m.landsOnSafe && m.toProgress <= 63) score += 62;
+
+    // Escape danger if currently exposed on a non-safe tile
+    const fromSq = progressToOuterSquare(color, m.fromProgress);
+    if (fromSq !== null && !isSafeSquare(fromSq)) {
+      const currentThreats = countThreateningOpponentsBehind(state, color, fromSq);
+      if (currentThreats > 0) {
+        score += 48 * Math.min(2, currentThreats);
+      }
+    }
+
+    // Evaluate landing safety & blockade formation
+    const toSq = progressToOuterSquare(color, m.toProgress);
+    if (toSq !== null) {
+      const ownThere = state.tokens[color].filter(
+        (t) => t.id !== m.tokenId && progressToOuterSquare(color, t.progress) === toSq,
+      ).length;
+      if (ownThere === 1) {
+        // Forming a protective blockade!
+        score += 36;
+      } else if (!isSafeSquare(toSq)) {
+        const landingThreats = countThreateningOpponentsBehind(state, color, toSq);
+        score -= 42 * Math.min(2, landingThreats);
+      }
+    }
+
+    // Slightly prefer splitting when both single moves are useful, or combining to escape/capture
+    score += m.toProgress * 0.55;
+    score += m.steps * 1.4;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = m;
+    }
+  }
+
+  return best;
+}
+
+// --- Hand-Shake Dice Roll Detector (for optional MediaPipe HandLandmarker toggle) ---
+
 export interface HandShakeDetectorState {
-  lastX: number | null;
-  lastDir: -1 | 0 | 1;
-  shakeEnergy: number; // 0..1
-  cooldownSec: number;
+  lastX: number;
+  lastY: number;
+  initialized: boolean;
+  energy: number;
+  lastTriggerMs: number;
 }
 
 export function createHandShakeState(): HandShakeDetectorState {
-  return { lastX: null, lastDir: 0, shakeEnergy: 0, cooldownSec: 0 };
-}
-
-export function stepHandShakeDetector(
-  prev: HandShakeDetectorState,
-  handDetected: boolean,
-  palmX: number,
-  dt: number,
-): { next: HandShakeDetectorState; triggered: boolean; intensity: number } {
-  const cooldownSec = Math.max(0, prev.cooldownSec - dt);
-  if (!handDetected) {
-    const decayed = Math.max(0, prev.shakeEnergy - dt * 2.2);
-    return {
-      next: { lastX: null, lastDir: 0, shakeEnergy: decayed, cooldownSec },
-      triggered: false,
-      intensity: decayed,
-    };
-  }
-
-  let energy = Math.max(0, prev.shakeEnergy - dt * 1.15);
-  let lastDir = prev.lastDir;
-
-  if (prev.lastX !== null) {
-    const dx = palmX - prev.lastX;
-    if (Math.abs(dx) > 0.032) {
-      const dir: -1 | 1 = dx > 0 ? 1 : -1;
-      if (lastDir !== 0 && dir !== lastDir) {
-        // Direction reversal while shaking hand left-right!
-        energy = Math.min(1, energy + Math.min(0.45, Math.abs(dx) * 3.8));
-      } else {
-        energy = Math.min(1, energy + Math.abs(dx) * 0.65);
-      }
-      lastDir = dir;
-    }
-  }
-
-  const triggered = cooldownSec <= 0 && energy >= 0.88;
   return {
-    next: {
-      lastX: palmX,
-      lastDir,
-      shakeEnergy: triggered ? 0 : energy,
-      cooldownSec: triggered ? 1.4 : cooldownSec,
-    },
-    triggered,
-    intensity: energy,
+    lastX: 0.5,
+    lastY: 0.5,
+    initialized: false,
+    energy: 0,
+    lastTriggerMs: 0,
   };
 }
 
-export const PARCHISI_LOOP_SIZE = PARCHISI_TOTAL_SQUARES;
+export function stepHandShakeDetector(
+  detector: HandShakeDetectorState,
+  handDetected: boolean,
+  x: number,
+  y: number,
+  nowMs: number,
+): { triggered: boolean; intensity: number } {
+  if (!handDetected) {
+    detector.initialized = false;
+    detector.energy *= 0.8;
+    return { triggered: false, intensity: Math.min(1, detector.energy) };
+  }
+
+  if (!detector.initialized) {
+    detector.initialized = true;
+    detector.lastX = x;
+    detector.lastY = y;
+    return { triggered: false, intensity: Math.min(1, detector.energy) };
+  }
+
+  const speed = Math.hypot(x - detector.lastX, y - detector.lastY);
+  detector.lastX = x;
+  detector.lastY = y;
+
+  detector.energy = Math.min(1.4, detector.energy * 0.82 + speed * 4.5);
+
+  const canTrigger = nowMs - detector.lastTriggerMs > 1600;
+  if (canTrigger && detector.energy >= 0.92) {
+    detector.lastTriggerMs = nowMs;
+    detector.energy = 0;
+    return { triggered: true, intensity: 1 };
+  }
+
+  return { triggered: false, intensity: Math.min(1, detector.energy / 0.92) };
+}

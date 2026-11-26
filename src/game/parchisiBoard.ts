@@ -1,20 +1,87 @@
-import type { ParchisiPlayer } from '../types/duoplay';
+import type { ParchisiColor } from '../types/duoplay';
 
-export const PARCHISI_VIEWBOX = 760;
+export const PARCHISI_VIEWBOX = 780;
+export const PARCHISI_BOARD_ORIGIN = 30;
+export const PARCHISI_BOARD_SIZE = 720; // spans 30..750 inside 780x780 beveled wood frame
 export const PARCHISI_TOTAL_SQUARES = 68;
 export const PARCHISI_CORRIDOR_LEN = 7;
-export const PARCHISI_THRONE_PROGRESS = 71; // -1 base, 0..63 loop, 64..70 corridor, 71 throne
+export const PARCHISI_HOME_PROGRESS = 71; // -1 base, 0..63 outer track, 64..70 home column, 71 center goal
 
-export const HOST_EXIT_SQUARE = 56; // Bottom-Left Ruby Rose
-export const GUEST_EXIT_SQUARE = 22; // Top-Right Royal Cyan
+/** Exact Classic Official Parcheesi Start Tiles (counter-clockwise) */
+export const COLOR_START_SQUARE: Record<ParchisiColor, number> = {
+  red: 1,     // Bottom row of left arm, 4th tile from center
+  green: 18,  // Right column of bottom arm, 4th tile from center
+  yellow: 35, // Top row of right arm, 4th tile from center
+  blue: 52,   // Left column of top arm, 4th tile from center
+};
 
-/** 12 Authentic Spanish Parchis Safe Zones (4 exits + 4 corridor entries + 4 mid-arm refuges) */
-export const PARCHISI_SAFE_SQUARES: readonly number[] = [
-  5, 12, 17, 22, 29, 34, 39, 46, 51, 56, 63, 68,
+/** Exact Home-Column Entry Cap Squares (progress === 63 -> enters 7-tile colored column) */
+export const COLOR_ENTRY_SQUARE: Record<ParchisiColor, number> = {
+  red: 64,    // Left arm middle cap
+  green: 13,  // Bottom arm middle cap
+  yellow: 30, // Right arm middle cap
+  blue: 47,   // Top arm middle cap
+};
+
+/** 8 Gray Star Safe Tiles */
+export const PARCHISI_STAR_SQUARES: readonly number[] = [
+  8, 13, 25, 30, 42, 47, 59, 64,
 ];
 
-/** 4 Symmetrical "Karma Couple" heart squares (never overlapping safe zones) */
-export const PARCHISI_KARMA_SQUARES: readonly number[] = [8, 25, 42, 59];
+/** All 12 Safe Tiles (4 Colored Start tiles + 8 Gray Star tiles) */
+export const PARCHISI_SAFE_SQUARES: readonly number[] = [
+  1, 8, 13, 18, 25, 30, 35, 42, 47, 52, 59, 64,
+];
+
+export const COLOR_PALETTE: Record<
+  ParchisiColor,
+  {
+    fill: string;
+    dark: string;
+    light: string;
+    slot: string;
+    ring: string;
+    text: string;
+    label: string;
+  }
+> = {
+  red: {
+    fill: '#E53935',
+    dark: '#A31B1B',
+    light: '#FF7961',
+    slot: '#B71C1C',
+    ring: '#FF5252',
+    text: '#FFFFFF',
+    label: 'Red',
+  },
+  green: {
+    fill: '#2E9E5B',
+    dark: '#1A6537',
+    light: '#66D28F',
+    slot: '#1F7A43',
+    ring: '#4ADE80',
+    text: '#FFFFFF',
+    label: 'Green',
+  },
+  yellow: {
+    fill: '#FBC02D',
+    dark: '#B87E04',
+    light: '#FFF176',
+    slot: '#C9900A',
+    ring: '#FDE047',
+    text: '#2B1B05',
+    label: 'Yellow',
+  },
+  blue: {
+    fill: '#1E88E5',
+    dark: '#0E5094',
+    light: '#64B5F6',
+    slot: '#1565C0',
+    ring: '#38BDF8',
+    text: '#FFFFFF',
+    label: 'Blue',
+  },
+};
 
 export interface BoardCellRect {
   id: number;
@@ -26,9 +93,21 @@ export interface BoardCellRect {
   cy: number;
   orientation: 'horizontal' | 'vertical';
   isSafe: boolean;
-  isKarma: boolean;
-  exitFor?: 'host' | 'guest' | 'gold' | 'emerald';
-  entryFor?: 'host' | 'guest' | 'gold' | 'emerald';
+  isStar: boolean;
+  startFor?: ParchisiColor;
+  entryFor?: ParchisiColor;
+}
+
+export interface CorridorCellRect {
+  index: number; // 0..6
+  color: ParchisiColor;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  cx: number;
+  cy: number;
+  orientation: 'horizontal' | 'vertical';
 }
 
 export interface Point2D {
@@ -37,44 +116,45 @@ export interface Point2D {
 }
 
 const SAFE_SET = new Set<number>(PARCHISI_SAFE_SQUARES);
-const KARMA_SET = new Set<number>(PARCHISI_KARMA_SQUARES);
+const STAR_SET = new Set<number>(PARCHISI_STAR_SQUARES);
 
 export function isSafeSquare(square: number): boolean {
   return SAFE_SET.has(square);
 }
 
-export function isKarmaSquare(square: number): boolean {
-  return KARMA_SET.has(square);
+export function isStarSquare(square: number): boolean {
+  return STAR_SET.has(square);
 }
 
 /**
- * Convert a player's loop progress (0..63) to board square number (1..68).
- * Returns null if pawn is in home base (-1), final corridor (64..70), or Throne (71).
+ * Convert a token's loop progress (0..63) to board tile number (1..68) running counter-clockwise.
+ * Returns null if token is in base (-1), colored home column (64..70), or center goal (71).
  */
-export function progressToOuterSquare(owner: ParchisiPlayer, progress: number): number | null {
+export function progressToOuterSquare(color: ParchisiColor, progress: number): number | null {
   if (progress < 0 || progress > 63) return null;
-  const start = owner === 'host' ? HOST_EXIT_SQUARE : GUEST_EXIT_SQUARE;
+  const start = COLOR_START_SQUARE[color];
   return ((start - 1 + progress) % PARCHISI_TOTAL_SQUARES) + 1;
 }
 
 /**
- * Convert an outer board square (1..68) to a player's loop progress (0..63).
+ * Convert an outer board square (1..68) to a color's loop progress (0..63).
  */
-export function outerSquareToProgress(owner: ParchisiPlayer, square: number): number {
-  const start = owner === 'host' ? HOST_EXIT_SQUARE : GUEST_EXIT_SQUARE;
-  const delta = (square - start + PARCHISI_TOTAL_SQUARES) % PARCHISI_TOTAL_SQUARES;
-  return delta;
+export function outerSquareToProgress(color: ParchisiColor, square: number): number {
+  const start = COLOR_START_SQUARE[color];
+  return (square - start + PARCHISI_TOTAL_SQUARES) % PARCHISI_TOTAL_SQUARES;
 }
 
 /**
- * Build exact pixel-aligned rectangles for all 68 outer squares (1..68)
- * inside the 760x760 royal board viewBox.
- * Outer board spans 20..740 (720x720):
- *  - Corner yards: 240x240
- *  - Arms: 3 lanes of 80px x 8 steps of 30px
+ * Build exact pixel-aligned rectangles for all 68 numbered outer track tiles (1..68)
+ * running counter-clockwise inside the 720x720 board (x: 30..750, y: 30..750).
+ *  - 4 corner yards: 240x240 each
+ *  - 4 arms: 3 lanes of 80px × 8 steps of 30px
+ *  - Center goal box: 240x240 (x: 270..510, y: 270..510)
  */
 function buildOuterCells(): BoardCellRect[] {
   const cells: BoardCellRect[] = [];
+  const O = PARCHISI_BOARD_ORIGIN; // 30
+
   const pushCell = (
     id: number,
     x: number,
@@ -83,17 +163,17 @@ function buildOuterCells(): BoardCellRect[] {
     h: number,
     orientation: 'horizontal' | 'vertical',
   ) => {
-    let exitFor: BoardCellRect['exitFor'];
-    let entryFor: BoardCellRect['entryFor'];
-    if (id === 56) exitFor = 'host';
-    else if (id === 22) exitFor = 'guest';
-    else if (id === 5) exitFor = 'gold';
-    else if (id === 39) exitFor = 'emerald';
+    let startFor: ParchisiColor | undefined;
+    let entryFor: ParchisiColor | undefined;
+    if (id === 1) startFor = 'red';
+    else if (id === 18) startFor = 'green';
+    else if (id === 35) startFor = 'yellow';
+    else if (id === 52) startFor = 'blue';
 
-    if (id === 51) entryFor = 'host';
-    else if (id === 17) entryFor = 'guest';
-    else if (id === 68) entryFor = 'gold';
-    else if (id === 34) entryFor = 'emerald';
+    if (id === 64) entryFor = 'red';
+    else if (id === 13) entryFor = 'green';
+    else if (id === 30) entryFor = 'yellow';
+    else if (id === 47) entryFor = 'blue';
 
     cells.push({
       id,
@@ -105,201 +185,255 @@ function buildOuterCells(): BoardCellRect[] {
       cy: y + h / 2,
       orientation,
       isSafe: SAFE_SET.has(id),
-      isKarma: KARMA_SET.has(id),
-      exitFor,
+      isStar: STAR_SET.has(id),
+      startFor,
       entryFor,
     });
   };
 
-  // 1..8: Bottom arm right column going UP toward center
-  for (let k = 0; k < 8; k++) {
-    pushCell(1 + k, 420, 710 - k * 30, 80, 30, 'horizontal');
+  // Left arm bottom row inner half (tiles 1..4 going RIGHT toward center)
+  // Full row has 8 tiles at x = O + k*30 (k=0..7). k=4 is 4th tile from center -> Tile 1 (Red Start)!
+  for (let i = 0; i < 4; i++) {
+    const k = 4 + i;
+    pushCell(1 + i, O + k * 30, O + 400, 30, 80, 'vertical');
   }
-  // 9..16: Right arm bottom row going RIGHT
+
+  // Bottom arm left column (tiles 5..12 going DOWN away from center)
   for (let k = 0; k < 8; k++) {
-    pushCell(9 + k, 500 + k * 30, 420, 30, 80, 'vertical');
+    pushCell(5 + k, O + 240, O + 480 + k * 30, 80, 30, 'horizontal');
   }
-  // 17: Right arm middle cap (Guest Cyan corridor entry)
-  pushCell(17, 710, 340, 30, 80, 'vertical');
-  // 18..25: Right arm top row going LEFT (22 = Guest Cyan exit)
+
+  // Bottom arm middle cap (tile 13 — Gray Star & Green Home Column entry)
+  pushCell(13, O + 320, O + 690, 80, 30, 'horizontal');
+
+  // Bottom arm right column (tiles 14..21 going UP toward center; k=4 -> Tile 18 = Green Start)
   for (let k = 0; k < 8; k++) {
-    pushCell(18 + k, 710 - k * 30, 260, 30, 80, 'vertical');
+    pushCell(14 + k, O + 400, O + 690 - k * 30, 80, 30, 'horizontal');
   }
-  // 26..33: Top arm right column going UP
+
+  // Right arm bottom row (tiles 22..29 going RIGHT away from center; k=3 -> Tile 25 = Gray Star)
   for (let k = 0; k < 8; k++) {
-    pushCell(26 + k, 420, 230 - k * 30, 80, 30, 'horizontal');
+    pushCell(22 + k, O + 480 + k * 30, O + 400, 30, 80, 'vertical');
   }
-  // 34: Top arm middle cap (Emerald decorative entry)
-  pushCell(34, 340, 20, 80, 30, 'horizontal');
-  // 35..42: Top arm left column going DOWN
+
+  // Right arm middle cap (tile 30 — Gray Star & Yellow Home Column entry)
+  pushCell(30, O + 690, O + 320, 30, 80, 'vertical');
+
+  // Right arm top row (tiles 31..38 going LEFT toward center; k=4 -> Tile 35 = Yellow Start)
   for (let k = 0; k < 8; k++) {
-    pushCell(35 + k, 260, 20 + k * 30, 80, 30, 'horizontal');
+    pushCell(31 + k, O + 690 - k * 30, O + 240, 30, 80, 'vertical');
   }
-  // 43..50: Left arm top row going LEFT
+
+  // Top arm right column (tiles 39..46 going UP away from center; k=3 -> Tile 42 = Gray Star)
   for (let k = 0; k < 8; k++) {
-    pushCell(43 + k, 230 - k * 30, 260, 30, 80, 'vertical');
+    pushCell(39 + k, O + 400, O + 210 - k * 30, 80, 30, 'horizontal');
   }
-  // 51: Left arm middle cap (Host Ruby corridor entry)
-  pushCell(51, 20, 340, 30, 80, 'vertical');
-  // 52..59: Left arm bottom row going RIGHT (56 = Host Ruby exit)
+
+  // Top arm middle cap (tile 47 — Gray Star & Blue Home Column entry)
+  pushCell(47, O + 320, O, 80, 30, 'horizontal');
+
+  // Top arm left column (tiles 48..55 going DOWN toward center; k=4 -> Tile 52 = Blue Start)
   for (let k = 0; k < 8; k++) {
-    pushCell(52 + k, 20 + k * 30, 420, 30, 80, 'vertical');
+    pushCell(48 + k, O + 240, O + k * 30, 80, 30, 'horizontal');
   }
-  // 60..67: Bottom arm left column going DOWN
+
+  // Left arm top row (tiles 56..63 going LEFT away from center; k=3 -> Tile 59 = Gray Star)
   for (let k = 0; k < 8; k++) {
-    pushCell(60 + k, 260, 500 + k * 30, 80, 30, 'horizontal');
+    pushCell(56 + k, O + 210 - k * 30, O + 240, 30, 80, 'vertical');
   }
-  // 68: Bottom arm middle cap (Gold decorative entry)
-  pushCell(68, 340, 710, 80, 30, 'horizontal');
+
+  // Left arm middle cap (tile 64 — Gray Star & Red Home Column entry)
+  pushCell(64, O, O + 320, 30, 80, 'vertical');
+
+  // Left arm bottom row outer half (tiles 65..68 going RIGHT toward Tile 1)
+  for (let k = 0; k < 4; k++) {
+    pushCell(65 + k, O + k * 30, O + 400, 30, 80, 'vertical');
+  }
 
   return cells;
 }
 
 export const OUTER_CELLS: readonly BoardCellRect[] = buildOuterCells();
-
 const OUTER_CELL_MAP = new Map<number, BoardCellRect>(OUTER_CELLS.map((c) => [c.id, c]));
 
 export function getOuterCell(square: number): BoardCellRect {
   const cell = OUTER_CELL_MAP.get(square);
   if (!cell) {
-    throw new Error(`Invalid Parchisi square: ${square}`);
+    throw new Error(`Invalid Parcheesi outer square: ${square}`);
   }
   return cell;
 }
 
-export interface CorridorCellRect {
-  index: number; // 0..6
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  cx: number;
-  cy: number;
-  orientation: 'horizontal' | 'vertical';
-}
-
-/** 7 colored final corridor squares for Host Ruby (Left arm middle row going RIGHT) */
-export const HOST_CORRIDOR_CELLS: readonly CorridorCellRect[] = Array.from(
-  { length: PARCHISI_CORRIDOR_LEN },
-  (_, idx) => ({
+/** 7-tile colored home columns for all 4 colors leading directly into the center triangle goal */
+export const CORRIDOR_CELLS: Record<ParchisiColor, readonly CorridorCellRect[]> = {
+  // Red: Left arm middle row going RIGHT from x=60 to x=270
+  red: Array.from({ length: PARCHISI_CORRIDOR_LEN }, (_, idx) => ({
     index: idx,
-    x: 50 + idx * 30,
-    y: 340,
+    color: 'red' as const,
+    x: PARCHISI_BOARD_ORIGIN + 30 + idx * 30,
+    y: PARCHISI_BOARD_ORIGIN + 320,
     w: 30,
     h: 80,
-    cx: 50 + idx * 30 + 15,
-    cy: 380,
-    orientation: 'vertical',
-  }),
-);
-
-/** 7 colored final corridor squares for Guest Cyan (Right arm middle row going LEFT) */
-export const GUEST_CORRIDOR_CELLS: readonly CorridorCellRect[] = Array.from(
-  { length: PARCHISI_CORRIDOR_LEN },
-  (_, idx) => ({
+    cx: PARCHISI_BOARD_ORIGIN + 30 + idx * 30 + 15,
+    cy: PARCHISI_BOARD_ORIGIN + 360,
+    orientation: 'vertical' as const,
+  })),
+  // Green: Bottom arm middle column going UP from y=690 to y=480
+  green: Array.from({ length: PARCHISI_CORRIDOR_LEN }, (_, idx) => ({
     index: idx,
-    x: 680 - idx * 30,
-    y: 340,
+    color: 'green' as const,
+    x: PARCHISI_BOARD_ORIGIN + 320,
+    y: PARCHISI_BOARD_ORIGIN + 660 - idx * 30,
+    w: 80,
+    h: 30,
+    cx: PARCHISI_BOARD_ORIGIN + 360,
+    cy: PARCHISI_BOARD_ORIGIN + 660 - idx * 30 + 15,
+    orientation: 'horizontal' as const,
+  })),
+  // Yellow: Right arm middle row going LEFT from x=690 to x=480
+  yellow: Array.from({ length: PARCHISI_CORRIDOR_LEN }, (_, idx) => ({
+    index: idx,
+    color: 'yellow' as const,
+    x: PARCHISI_BOARD_ORIGIN + 660 - idx * 30,
+    y: PARCHISI_BOARD_ORIGIN + 320,
     w: 30,
     h: 80,
-    cx: 680 - idx * 30 + 15,
-    cy: 380,
-    orientation: 'vertical',
-  }),
-);
-
-/** Decorative 7-square corridors for Gold (Bottom) and Emerald (Top) */
-export const GOLD_CORRIDOR_CELLS: readonly CorridorCellRect[] = Array.from(
-  { length: PARCHISI_CORRIDOR_LEN },
-  (_, idx) => ({
+    cx: PARCHISI_BOARD_ORIGIN + 660 - idx * 30 + 15,
+    cy: PARCHISI_BOARD_ORIGIN + 360,
+    orientation: 'vertical' as const,
+  })),
+  // Blue: Top arm middle column going DOWN from y=60 to y=270
+  blue: Array.from({ length: PARCHISI_CORRIDOR_LEN }, (_, idx) => ({
     index: idx,
-    x: 340,
-    y: 680 - idx * 30,
+    color: 'blue' as const,
+    x: PARCHISI_BOARD_ORIGIN + 320,
+    y: PARCHISI_BOARD_ORIGIN + 30 + idx * 30,
     w: 80,
     h: 30,
-    cx: 380,
-    cy: 680 - idx * 30 + 15,
-    orientation: 'horizontal',
-  }),
-);
+    cx: PARCHISI_BOARD_ORIGIN + 360,
+    cy: PARCHISI_BOARD_ORIGIN + 30 + idx * 30 + 15,
+    orientation: 'horizontal' as const,
+  })),
+};
 
-export const EMERALD_CORRIDOR_CELLS: readonly CorridorCellRect[] = Array.from(
-  { length: PARCHISI_CORRIDOR_LEN },
-  (_, idx) => ({
-    index: idx,
-    x: 340,
-    y: 50 + idx * 30,
-    w: 80,
-    h: 30,
-    cx: 380,
-    cy: 50 + idx * 30 + 15,
-    orientation: 'horizontal',
-  }),
-);
+/** 4 corner home base rectangles & 4 recessed circular token slots per color */
+export const CORNER_BASES: Record<
+  ParchisiColor,
+  { x: number; y: number; size: number; slots: readonly Point2D[] }
+> = {
+  // Top-Left: Blue
+  blue: {
+    x: PARCHISI_BOARD_ORIGIN,
+    y: PARCHISI_BOARD_ORIGIN,
+    size: 240,
+    slots: [
+      { x: PARCHISI_BOARD_ORIGIN + 76, y: PARCHISI_BOARD_ORIGIN + 76 },
+      { x: PARCHISI_BOARD_ORIGIN + 164, y: PARCHISI_BOARD_ORIGIN + 76 },
+      { x: PARCHISI_BOARD_ORIGIN + 76, y: PARCHISI_BOARD_ORIGIN + 164 },
+      { x: PARCHISI_BOARD_ORIGIN + 164, y: PARCHISI_BOARD_ORIGIN + 164 },
+    ],
+  },
+  // Top-Right: Yellow
+  yellow: {
+    x: PARCHISI_BOARD_ORIGIN + 480,
+    y: PARCHISI_BOARD_ORIGIN,
+    size: 240,
+    slots: [
+      { x: PARCHISI_BOARD_ORIGIN + 556, y: PARCHISI_BOARD_ORIGIN + 76 },
+      { x: PARCHISI_BOARD_ORIGIN + 644, y: PARCHISI_BOARD_ORIGIN + 76 },
+      { x: PARCHISI_BOARD_ORIGIN + 556, y: PARCHISI_BOARD_ORIGIN + 164 },
+      { x: PARCHISI_BOARD_ORIGIN + 644, y: PARCHISI_BOARD_ORIGIN + 164 },
+    ],
+  },
+  // Bottom-Left: Red
+  red: {
+    x: PARCHISI_BOARD_ORIGIN,
+    y: PARCHISI_BOARD_ORIGIN + 480,
+    size: 240,
+    slots: [
+      { x: PARCHISI_BOARD_ORIGIN + 76, y: PARCHISI_BOARD_ORIGIN + 556 },
+      { x: PARCHISI_BOARD_ORIGIN + 164, y: PARCHISI_BOARD_ORIGIN + 556 },
+      { x: PARCHISI_BOARD_ORIGIN + 76, y: PARCHISI_BOARD_ORIGIN + 644 },
+      { x: PARCHISI_BOARD_ORIGIN + 164, y: PARCHISI_BOARD_ORIGIN + 644 },
+    ],
+  },
+  // Bottom-Right: Green
+  green: {
+    x: PARCHISI_BOARD_ORIGIN + 480,
+    y: PARCHISI_BOARD_ORIGIN + 480,
+    size: 240,
+    slots: [
+      { x: PARCHISI_BOARD_ORIGIN + 556, y: PARCHISI_BOARD_ORIGIN + 556 },
+      { x: PARCHISI_BOARD_ORIGIN + 644, y: PARCHISI_BOARD_ORIGIN + 556 },
+      { x: PARCHISI_BOARD_ORIGIN + 556, y: PARCHISI_BOARD_ORIGIN + 644 },
+      { x: PARCHISI_BOARD_ORIGIN + 644, y: PARCHISI_BOARD_ORIGIN + 644 },
+    ],
+  },
+};
 
-/** Home yard pawn resting coordinates (4 neatly spaced pedestals per corner yard) */
-export const HOST_BASE_SLOTS: readonly Point2D[] = [
-  { x: 96, y: 576 },
-  { x: 184, y: 576 },
-  { x: 96, y: 664 },
-  { x: 184, y: 664 },
-];
-
-export const GUEST_BASE_SLOTS: readonly Point2D[] = [
-  { x: 576, y: 96 },
-  { x: 664, y: 96 },
-  { x: 576, y: 184 },
-  { x: 664, y: 184 },
-];
-
-/** Central Throne resting slots for finished pawns (progress === 71) */
-export const HOST_THRONE_SLOTS: readonly Point2D[] = [
-  { x: 300, y: 356 },
-  { x: 300, y: 404 },
-  { x: 332, y: 368 },
-  { x: 332, y: 392 },
-];
-
-export const GUEST_THRONE_SLOTS: readonly Point2D[] = [
-  { x: 460, y: 356 },
-  { x: 460, y: 404 },
-  { x: 428, y: 368 },
-  { x: 428, y: 392 },
-];
+/** Center 4-Triangle Goal resting slots for finished tokens (progress === 71) */
+export const CENTER_HOME_SLOTS: Record<ParchisiColor, readonly Point2D[]> = {
+  // Left Red triangle (vertices: 270,270 -> 390,390 -> 270,510)
+  red: [
+    { x: 298, y: 356 },
+    { x: 298, y: 424 },
+    { x: 334, y: 374 },
+    { x: 334, y: 406 },
+  ],
+  // Bottom Green triangle (vertices: 270,510 -> 390,390 -> 510,510)
+  green: [
+    { x: 356, y: 482 },
+    { x: 424, y: 482 },
+    { x: 374, y: 446 },
+    { x: 406, y: 446 },
+  ],
+  // Right Yellow triangle (vertices: 510,270 -> 390,390 -> 510,510)
+  yellow: [
+    { x: 482, y: 356 },
+    { x: 482, y: 424 },
+    { x: 446, y: 374 },
+    { x: 446, y: 406 },
+  ],
+  // Top Blue triangle (vertices: 270,270 -> 390,390 -> 510,270)
+  blue: [
+    { x: 356, y: 298 },
+    { x: 424, y: 298 },
+    { x: 374, y: 334 },
+    { x: 406, y: 334 },
+  ],
+};
 
 /**
- * Compute crisp SVG coordinates for a pawn at any progress (-1..71),
- * automatically spacing stacked pawns cleanly side-by-side along the 80px cell axis.
+ * Compute crisp SVG coordinates for a token at any progress (-1..71),
+ * automatically placing 2 tokens cleanly side-by-side along the 80px cell axis.
  */
-export function getPawnBoardPoint(
-  owner: ParchisiPlayer,
-  pawnId: number,
+export function getTokenBoardPoint(
+  color: ParchisiColor,
+  tokenId: number,
   progress: number,
   stackIndex = 0,
   stackSize = 1,
 ): Point2D {
   if (progress < 0) {
-    const slots = owner === 'host' ? HOST_BASE_SLOTS : GUEST_BASE_SLOTS;
-    return slots[pawnId % 4];
+    return CORNER_BASES[color].slots[tokenId % 4];
   }
-  if (progress >= PARCHISI_THRONE_PROGRESS) {
-    const slots = owner === 'host' ? HOST_THRONE_SLOTS : GUEST_THRONE_SLOTS;
-    return slots[pawnId % 4];
+  if (progress >= PARCHISI_HOME_PROGRESS) {
+    return CENTER_HOME_SLOTS[color][tokenId % 4];
   }
 
-  let cx = 380;
-  let cy = 380;
+  let cx = 390;
+  let cy = 390;
   let orientation: 'horizontal' | 'vertical' = 'horizontal';
 
   if (progress <= 63) {
-    const sq = progressToOuterSquare(owner, progress)!;
+    const sq = progressToOuterSquare(color, progress)!;
     const cell = getOuterCell(sq);
     cx = cell.cx;
     cy = cell.cy;
     orientation = cell.orientation;
   } else {
     const corrIdx = progress - 64;
-    const cell = (owner === 'host' ? HOST_CORRIDOR_CELLS : GUEST_CORRIDOR_CELLS)[corrIdx];
+    const cell = CORRIDOR_CELLS[color][corrIdx];
     cx = cell.cx;
     cy = cell.cy;
     orientation = cell.orientation;
@@ -309,9 +443,9 @@ export function getPawnBoardPoint(
     return { x: cx, y: cy };
   }
 
-  // Spread 2+ pawns cleanly side-by-side along the 80px axis (no unreadable overlap!)
-  const spread = stackSize === 2 ? 19 : 14;
-  const offset = (stackIndex - (stackSize - 1) / 2) * spread * 2;
+  // Spread 2 tokens cleanly side-by-side along the 80px cell axis
+  const spacing = stackSize === 2 ? 20 : 14;
+  const offset = (stackIndex - (stackSize - 1) / 2) * spacing * 2;
   return orientation === 'horizontal'
     ? { x: cx + offset * 0.5, y: cy }
     : { x: cx, y: cy + offset * 0.5 };

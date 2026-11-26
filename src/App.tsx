@@ -575,7 +575,7 @@ function CoupleCamApp() {
         onMessage: (msg) => {
           if (msg.type === 'HELLO') {
             setPartnerName(msg.name || 'Partenaire');
-          } else if (msg.type === 'JOIN_CONFIRMED') {
+          } else if (msg.type === 'JOIN_CONFIRMED' || msg.type === 'JOIN_WELCOME') {
             setPartnerName(msg.hostName || 'Hôte');
           } else if (msg.type === 'SELECT_GAME') {
             soundFx.click();
@@ -711,6 +711,9 @@ function CoupleCamApp() {
       auto === 'couple-jam'
     ) {
       handleStartSoloMode(auto);
+    } else if (initialJoinCode.length === 4) {
+      // Direct invite link (?room=XXXX): pre-fill code and launch room connection automatically
+      handleJoinRoom(initialJoinCode);
     }
     // Run only once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps

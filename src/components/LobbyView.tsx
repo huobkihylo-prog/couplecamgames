@@ -502,9 +502,12 @@ export function LobbyView({
                 </div>
 
                 {isJoining && (
-                  <div className="flex items-center justify-between gap-2 pt-1 text-xs text-white/80">
-                    <span className="truncate">
-                      {statusMessage || `${t.joiningBtn} (${roomCode || joinCodeInput})`}
+                  <div className="flex items-center justify-between gap-2 pt-1 text-xs text-white/85">
+                    <span className="inline-flex items-center gap-1.5 min-w-0">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#38BDF8] shrink-0" />
+                      <span data-testid="lobby-join-step" className="truncate font-medium">
+                        {statusMessage || '1/3 Connexion au serveur...'}
+                      </span>
                     </span>
                     <button
                       type="button"
@@ -517,16 +520,46 @@ export function LobbyView({
                 )}
               </form>
 
-              {/* Validation or Connection Error */}
+              {/* Validation or Connection Error with explicit Retry & Back actions */}
               {(formError ||
                 connectionStatus === 'error' ||
                 (connectionStatus === 'disconnected' && Boolean(statusMessage))) && (
-                <p
+                <div
                   role="alert"
-                  className="rounded-xl bg-[#EF4444]/20 border border-[#EF4444]/45 px-3.5 py-2.5 text-xs sm:text-sm font-medium text-[#FECACA]"
+                  className="rounded-xl bg-[#EF4444]/20 border border-[#EF4444]/45 px-3.5 py-3 text-xs sm:text-sm font-medium text-[#FECACA] space-y-2.5"
                 >
-                  {formError || statusMessage}
-                </p>
+                  <p>{formError || statusMessage}</p>
+                  {!formError && connectionStatus === 'error' && (
+                    <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        data-testid="lobby-retry-btn"
+                        onClick={() => {
+                          const targetCode = normalizeRoomCode(joinCodeInput);
+                          if (targetCode.length === 4) {
+                            onJoinRoom(targetCode);
+                          } else {
+                            onCreateRoom();
+                          }
+                        }}
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-extrabold bg-white text-[#161130] hover:bg-white/90 transition-all whitespace-nowrap"
+                      >
+                        🔄 Réessayer
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="lobby-back-btn"
+                        onClick={() => {
+                          setFormError(null);
+                          onCancelRoom();
+                        }}
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold bg-white/12 text-white border border-white/20 hover:bg-white/20 transition-all whitespace-nowrap"
+                      >
+                        ← Retour
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* 4. Distinct Secondary Solo Button at the bottom */}
