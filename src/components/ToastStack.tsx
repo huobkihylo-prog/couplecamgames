@@ -27,14 +27,14 @@ export function ToastStack({ toasts }: ToastStackProps) {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.94 }}
             transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="pointer-events-auto max-w-sm w-full sm:w-auto flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-[#1A1533]/92 backdrop-blur-xl border border-white/20 text-white text-sm font-medium shadow-xl shadow-[#7C3AED]/25"
+            className="pointer-events-auto max-w-sm w-full sm:w-auto flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-white/95 backdrop-blur-xl border border-[#EAE4DC] text-[#1F242D] text-sm font-semibold shadow-[0_10px_30px_rgba(31,36,45,0.12)]"
           >
             {toast.tone === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-[#34D399] shrink-0" />
+              <CheckCircle2 className="w-4 h-4 text-[#16A34A] shrink-0" />
             ) : toast.tone === 'accent' ? (
-              <Sparkles className="w-4 h-4 text-[#FF4D8D] shrink-0" />
+              <Sparkles className="w-4 h-4 text-[#FF6B57] shrink-0" />
             ) : (
-              <Info className="w-4 h-4 text-[#38BDF8] shrink-0" />
+              <Info className="w-4 h-4 text-[#7C5CFC] shrink-0" />
             )}
             <span className="leading-snug">{toast.message}</span>
           </motion.div>

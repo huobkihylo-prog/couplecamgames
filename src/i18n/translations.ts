@@ -339,7 +339,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
     errInvalidCode: 'Saisis le code complet à 4 caractères du salon.',
     hubTitle: 'Choisissez votre prochain jeu',
     hubSubtitle: 'Un clic lance la partie instantanément sur vos deux écrans sans couper l’appel.',
-    gamesAvailable: '13 jeux disponibles',
+    gamesAvailable: '12 jeux disponibles',
     camReady: 'Suivi webcam MediaPipe prêt',
     camLoading: 'Chargement de MediaPipe...',
     camFallback: 'Mode clavier / tactile prêt',
@@ -353,6 +353,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
       romantique: '❤️ Romantique',
       amusant: '🎉 Amusant',
       sensuel: '🔥 Sensuel',
+      musique: '🎵 Musique',
     },
     games: {
       laugh: {
@@ -403,22 +404,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
           'Vos deux écrans forment un terrain néon partagé. Contrôlez votre raquette à la paume : plus votre frappe est rapide à l’impact, plus le palet accélère. Premier à 7 buts.',
         cta: 'Lancer Air Hockey des Mains',
       },
-      'kiss-bounce': {
-        badge: '07 · Face + HandLandmarker · Romantique',
-        title: 'Pluie de Bisous',
-        shortDesc: 'Bisous lumineux & aurore boréale',
-        description:
-          'Envoie un bisou à la caméra pour faire voler un cœur lumineux chez ton/ta partenaire. Attrapez-le à la main ou renvoyez un bisou pour illuminer l’aurore boréale au piano.',
-        cta: 'Lancer Pluie de Bisous',
-      },
-      constellations: {
-        badge: '08 · HandLandmarker (Index) · Complicité',
-        title: 'Constellations à Deux',
-        shortDesc: 'Étoiles reliées & questions intimes',
-        description:
-          'Reliez vos deux curseurs d’étoiles dans un ciel nocturne apaisant pour tracer cœur, lune et infini — et débloquer une question complice ou un souvenir à partager à l’oral.',
-        cta: 'Lancer Constellations à Deux',
-      },
+
       'whisper-secrets': {
         badge: '09 · FaceLandmarker (Zoom Lèvres) · Sensuel',
         title: 'Murmures Secrets',
@@ -451,13 +437,21 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
           'Véritable plateau de Parchisi royal à 68 cases ! Lance le dé en secouant la main, forme des barrages, profite du Rachat par Gage lors des captures et tire des cartes Karma Couple.',
         cta: 'Lancer Parchisi Duo',
       },
-      'couple-jam': {
-        badge: '13 · 4 Instruments Web Audio · Blind Test Universel',
-        title: 'Couple Jam : Devine le Son',
-        shortDesc: 'Darbouka, Guitare, Piano, Oud, Blind Test iTunes 30s & Concert Duo',
+      'music-quiz': {
+        badge: '11 · Quiz Musical iTunes · 4 Choix',
+        title: 'Quiz Éclair 4 Choix',
+        shortDesc: 'Devine la chanson parmi 4 titres en 15s chrono',
         description:
-          'Joue sur 4 instruments virtuels néon (caméra ou tactile), défie ton partenaire en Blind Test sur n’importe quelle chanson du monde ou improvisez un Concert Duo en live !',
-        cta: 'Lancer Couple Jam',
+          'Un vrai extrait musical se lance sur vos deux écrans ! Trouve le bon titre parmi 4 choix avant ton partenaire pour rafler le bonus vitesse (+3 pts + ⚡+1 pt).',
+        cta: 'Lancer Quiz Éclair',
+      },
+      'freeze-dance': {
+        badge: '12 · Musique & Caméra · Fous Rires',
+        title: '1, 2, 3… Statue Musicale',
+        shortDesc: 'Dansez face caméra et figez-vous dès que le son coupe !',
+        description:
+          'Dansez sur des tubes festifs devant la caméra : dès que la musique coupe d’un coup, FREEZE ! Jugez-vous en 1 clic et récoltez des gages rigolos si ça bouge.',
+        cta: 'Lancer Statue Musicale',
       },
     },
     pause: 'Pause',
@@ -787,7 +781,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
     errInvalidCode: 'Enter the full 4-character room code.',
     hubTitle: 'Pick your next game',
     hubSubtitle: 'One click launches the game on both screens instantly without dropping the call.',
-    gamesAvailable: '13 games available',
+    gamesAvailable: '12 games available',
     camReady: 'MediaPipe webcam tracking ready',
     camLoading: 'Loading MediaPipe...',
     camFallback: 'Keyboard / touch controls ready',
@@ -801,6 +795,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
       romantique: '❤️ Romantic',
       amusant: '🎉 Fun',
       sensuel: '🔥 Sensual',
+      musique: '🎵 Music',
     },
     games: {
       laugh: {
@@ -851,22 +846,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
           'Your two screens form one shared neon air hockey rink. Control your mallet with your palm: faster strikes launch the puck harder. First to 7 goals wins.',
         cta: 'Play Hand Air Hockey',
       },
-      'kiss-bounce': {
-        badge: '07 · Face + HandLandmarker · Romantic',
-        title: 'Kiss Bounce',
-        shortDesc: 'Glowing kisses & aurora sky',
-        description:
-          'Blow a kiss to the camera to float a glowing heart to your partner. Catch it by hand or blow a kiss back on cue to light up the northern lights with soft piano notes.',
-        cta: 'Play Kiss Bounce',
-      },
-      constellations: {
-        badge: '08 · HandLandmarker (Index) · Intimate Co-op',
-        title: 'Constellations for Two',
-        shortDesc: 'Starlight trails & sweet prompts',
-        description:
-          'Meet fingertips in a calm starry sky to trace hearts, moons, and infinity loops together — unlocking an intimate question or memory to share aloud.',
-        cta: 'Play Constellations for Two',
-      },
+
       'whisper-secrets': {
         badge: '09 · FaceLandmarker (Lip Zoom) · Sensual',
         title: 'Secret Whispers',
@@ -899,13 +879,21 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
           'Authentic 68-square royal Parchisi board! Shake your hand to roll the 3D die, build blockades, offer Couple Mercy Dares on captures, and draw Karma Couple surprise cards.',
         cta: 'Play Parchisi Duo',
       },
-      'couple-jam': {
-        badge: '13 · 4 Web Audio Instruments · Universal Blind Test',
-        title: 'Couple Jam: Guess the Sound',
-        shortDesc: 'Darbouka, Guitar, Piano, Oud, 30s iTunes Blind Test & Concert Duo',
+      'music-quiz': {
+        badge: '11 · iTunes Music Quiz · 4 Choices',
+        title: 'Lightning 4-Choice Quiz',
+        shortDesc: 'Name the real hit song in 15s flat',
         description:
-          'Play 4 glowing virtual instruments (hand tracking or multi-touch), challenge your partner with any song in the world in 30s Blind Test, or jam live together in Concert Duo!',
-        cta: 'Play Couple Jam',
+          'A real hit snippet plays in sync on both screens! Pick the right track among 4 choices faster than your partner to grab the speed bonus (+3 pts + ⚡+1 pt).',
+        cta: 'Play Lightning Quiz',
+      },
+      'freeze-dance': {
+        badge: '12 · Music & Camera · Laughs',
+        title: '1, 2, 3… Musical Statue',
+        shortDesc: 'Dance on camera and FREEZE the second the music stops!',
+        description:
+          'Dance live on camera to upbeat hits: when the music cuts abruptly, FREEZE! Judge each other in 1 tap and trigger hilarious dares whenever someone moves.',
+        cta: 'Play Musical Statue',
       },
     },
     pause: 'Pause',
@@ -1235,7 +1223,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
     errInvalidCode: 'أدخل رمز الغرفة المكوّن من 4 أحرف/أرقام.',
     hubTitle: 'اختارا لعبتكما التالية',
     hubSubtitle: 'نقرة واحدة تبدأ اللعبة فوراً على الشاشتين دون قطع مكالمة الفيديو.',
-    gamesAvailable: '13 لعبة متاحة',
+    gamesAvailable: '12 لعبة متاحة',
     camReady: 'تتبع الكاميرا MediaPipe جاهز',
     camLoading: 'جارٍ تحميل MediaPipe...',
     camFallback: 'وضع لوحة المفاتيح / اللمس جاهز',
@@ -1249,6 +1237,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
       romantique: '❤️ رومانسي',
       amusant: '🎉 ممتع',
       sensuel: '🔥 حسي',
+      musique: '🎵 موسيقى',
     },
     games: {
       laugh: {
@@ -1299,22 +1288,7 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
           'شاشتاكما تشكّلان ملعب هوكي نيون واحد. كلما تحركت يدك أسرع لحظة الضربة زادت سرعة القرص نحو شريكك. أول من يسجل 7 أهداف يفوز.',
         cta: 'ابدأ هوكي الهواء',
       },
-      'kiss-bounce': {
-        badge: '07 · تتبع القبلة + اليد · رومانسي',
-        title: 'مطر القبلات',
-        shortDesc: 'قلوب مضيئة وشفق قطبي بالبيانو',
-        description:
-          'أرسل قبلة للكاميرا ليطير قلب مضيء نحو شريكك. التقطه باليد أو أرسل قبلة في الوقت المناسب لإضاءة الشفق القطبي وعزف نغمات بيانو عذبة.',
-        cta: 'ابدأ مطر القبلات',
-      },
-      constellations: {
-        badge: '08 · تتبع السبابة · رومانسية وتقارب',
-        title: 'كوكبة النجوم معاً',
-        shortDesc: 'نجوم مضيئة وأسئلة دافئة',
-        description:
-          'اجعلا أصابعكما المضيئة تلتقي على النجوم المرقّمة لرسم قلب أو قمر أو رمز اللانهاية — وكشف سؤال عاطفي أو ذكرى جميلة تتشاركانها صوتياً.',
-        cta: 'ابدأ كوكبة النجوم',
-      },
+
       'whisper-secrets': {
         badge: '09 · تقريب الشفاه التلقائي · حسي',
         title: 'همسات سرية',
@@ -1347,13 +1321,21 @@ export const TRANSLATIONS: Record<Language, TranslationDictionary> = {
           'لوح بارتشيسي ملكي أصيل من 68 خانة! هزّ يدك لرمي النرد، ابنِ حواجز، اعرض تحدياً لإنقاذ بيدق شريكك واسحب بطاقات كارما الثنائي.',
         cta: 'ابدأ بارتشيسي ثنائي',
       },
-      'couple-jam': {
-        badge: '13 · 4 آلات موسيقية · اختبار موسيقي عالمي',
-        title: 'كوبل جام : خمّن الصوت',
-        shortDesc: 'دربوكة، غيتار، بيانو، عود شرقي، بلايند تست 30ث وحفل ثنائي مباشر',
+      'music-quiz': {
+        badge: '11 · اختبار موسيقي · 4 اختيارات',
+        title: 'اختبار البرق 4 اختيارات',
+        shortDesc: 'خمّن الأغنية الحقيقية خلال 15 ثانية فقط',
         description:
-          'اعزف على 4 آلات موسيقية نيونية باليد أو اللمس، تحدّ شريكك في تخمين أي أغنية في العالم خلال 30 ثانية أو اعزفا معاً في حفل ثنائي مباشر!',
-        cta: 'ابدأ كوبل جام',
+          'يبدأ مقطع موسيقي حقيقي معاً على الشاشتين! اختر الأغنية الصحيحة من بين 4 خيارات أسرع من شريكك لكسب نقاط السرعة.',
+        cta: 'ابدأ اختبار البرق',
+      },
+      'freeze-dance': {
+        badge: '12 · موسيقى وكاميرا · ضحك وحماس',
+        title: '1، 2، 3… تمثال موسيقي',
+        shortDesc: 'ارقصا أمام الكاميرا وتجمّدا فور توقف الموسيقى!',
+        description:
+          'ارقصا على أنغام حماسية أمام الكاميرا، وعندما تتوقف الموسيقى فجأة: تجمّد تماماً! احكما على بعضكما بنقرة واحدة مع تحديات طريفة.',
+        cta: 'ابدأ التمثال الموسيقي',
       },
     },
     pause: 'إيقاف مؤقت',

@@ -4,6 +4,7 @@ import {
   Camera,
   Check,
   Copy,
+  FlipHorizontal2,
   Link2,
   Loader2,
   Mic,
@@ -19,9 +20,9 @@ import { motion } from 'motion/react';
 import type { ConnectionStatus, FaceMetrics } from '../types/duoplay';
 import { normalizeRoomCode } from '../services/peerService';
 import { buildRoomShareUrl, copyTextToClipboard } from '../utils/clipboard';
-import { CATEGORY_THEMES } from '../theme/categoryThemes';
 import { useI18n } from '../i18n/LanguageContext';
-import { DuoLogo } from './DuoLogo';
+import { useMirror } from '../context/MirrorContext';
+import { CoupleCamLogo } from './CoupleCamLogo';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { AvatarCanvas } from './AvatarCanvas';
 
@@ -73,12 +74,12 @@ export function LobbyView({
   onNotify,
 }: LobbyViewProps) {
   const { t } = useI18n();
+  const { isMirrored, toggleMirrored } = useMirror();
   const [joinCodeInput, setJoinCodeInput] = useState(() => normalizeRoomCode(initialJoinCode));
   const [copiedMode, setCopiedMode] = useState<'none' | 'code' | 'link'>('none');
   const [formError, setFormError] = useState<string | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  const theme = CATEGORY_THEMES.all;
   const isWaitingHost = connectionStatus === 'creating' || connectionStatus === 'waiting';
   const isJoining = connectionStatus === 'connecting';
   const showLiveVideo = Boolean(localStream) && cameraEnabled;
@@ -159,38 +160,35 @@ export function LobbyView({
 
   const statusDotColor =
     connectionStatus === 'connected'
-      ? 'bg-[#34D399]'
+      ? 'bg-[#16A34A]'
       : isWaitingHost || isJoining
-        ? 'bg-[#FACC15] animate-pulse'
-        : 'bg-[#38BDF8]';
+        ? 'bg-[#F59E0B] animate-pulse'
+        : 'bg-[#FF6B57]';
 
   return (
-    <main
-      className="relative min-h-[100dvh] w-full overflow-x-hidden flex flex-col transition-all duration-500"
-      style={{ background: theme.pageBg }}
-    >
-      {/* Decorative soft pop-arcade ambient halos (radial gradients — zero GPU blur stall) */}
+    <main className="relative min-h-[100dvh] w-full overflow-x-hidden flex flex-col bg-[#FAF7F2] text-[#1F242D]">
+      {/* Subtle warm cream pastel ambiance */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
         style={{
           backgroundImage:
-            'radial-gradient(520px 520px at 8% 4%, rgba(124, 58, 237, 0.34), transparent 68%), radial-gradient(460px 460px at 94% 28%, rgba(255, 77, 141, 0.28), transparent 68%), radial-gradient(540px 380px at 48% 98%, rgba(56, 189, 248, 0.22), transparent 68%)',
+            'radial-gradient(640px 420px at 8% 0%, rgba(255, 232, 226, 0.72), transparent 68%), radial-gradient(560px 400px at 94% 12%, rgba(239, 233, 251, 0.78), transparent 68%), radial-gradient(620px 380px at 50% 100%, rgba(230, 246, 239, 0.55), transparent 68%)',
         }}
       />
 
-      {/* 1. Clean Top Navigation Bar — All controls visible on PC & Phone */}
-      <header className="relative z-20 w-full border-b border-white/15 bg-[#120E24]/55 backdrop-blur-xl">
+      {/* 1. Clean Warm Header */}
+      <header className="relative z-20 w-full border-b border-[#EAE4DC] bg-[#FAF7F2]/90 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-3.5 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5">
-            <DuoLogo size="sm" />
+            <CoupleCamLogo size="sm" />
             <span
               data-testid="lobby-status-badge"
               className={`${
                 isWaitingHost || isJoining || connectionStatus === 'connected'
                   ? 'inline-flex'
                   : 'hidden sm:inline-flex'
-              } items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-semibold text-white whitespace-nowrap`}
+              } items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-[#EAE4DC] text-xs font-semibold text-[#1F242D] shadow-xs whitespace-nowrap`}
             >
               <span className={`w-2 h-2 rounded-full ${statusDotColor}`} />
               <span>{statusBadgeLabel}</span>
@@ -200,21 +198,34 @@ export function LobbyView({
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <LanguageSwitcher />
 
-            {/* Quick audio/camera/sound controls — generous 44px mobile touch targets */}
+            <button
+              type="button"
+              onClick={toggleMirrored}
+              title={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
+              aria-label={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
+              aria-pressed={isMirrored}
+              className={`w-10 h-10 inline-flex items-center justify-center rounded-full border transition-all shadow-xs ${
+                isMirrored
+                  ? 'bg-white text-[#7C5CFC] border-[#7C5CFC]/35'
+                  : 'bg-white text-[#6B7280] border-[#EAE4DC]'
+              }`}
+            >
+              <FlipHorizontal2 className="w-4 h-4 shrink-0" />
+            </button>
+
             <button
               type="button"
               onClick={onToggleMic}
               title={micMuted ? t.micMuted : t.micActive}
               aria-label={micMuted ? t.micMuted : t.micActive}
               aria-pressed={micMuted}
-              className={`min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-1.5 px-3 rounded-full text-xs font-semibold border transition-all ${
+              className={`w-10 h-10 inline-flex items-center justify-center rounded-full border transition-all shadow-xs ${
                 micMuted
-                  ? 'bg-[#EF4444]/25 text-[#FECACA] border-[#EF4444]/50'
-                  : 'bg-white/10 text-white border-white/20 hover:bg-white/18'
+                  ? 'bg-[#FEE2E2] text-[#DC2626] border-[#FCA5A5]'
+                  : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
               }`}
             >
               {micMuted ? <MicOff className="w-4 h-4 shrink-0" /> : <Mic className="w-4 h-4 shrink-0" />}
-              <span className="hidden md:inline">{micMuted ? t.micMuted : t.micActive}</span>
             </button>
 
             <button
@@ -223,10 +234,10 @@ export function LobbyView({
               title={t.enableCamera}
               aria-label={t.enableCamera}
               aria-pressed={showLiveVideo}
-              className={`min-h-[44px] min-w-[44px] inline-flex items-center justify-center gap-1.5 px-3 rounded-full text-xs font-semibold border transition-all ${
+              className={`w-10 h-10 inline-flex items-center justify-center rounded-full border transition-all shadow-xs ${
                 showLiveVideo
-                  ? 'bg-[#34D399]/20 text-[#D1FAE5] border-[#34D399]/45'
-                  : 'bg-white/10 text-white border-white/20 hover:bg-white/18'
+                  ? 'bg-[#E6F6EF] text-[#15803D] border-[#BBF7D0]'
+                  : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
               }`}
             >
               {showLiveVideo ? <Video className="w-4 h-4 shrink-0" /> : <VideoOff className="w-4 h-4 shrink-0" />}
@@ -238,9 +249,9 @@ export function LobbyView({
               title="Audio SFX"
               aria-label="Audio SFX"
               aria-pressed={sfxMuted}
-              className="min-h-[44px] min-w-[44px] inline-flex items-center justify-center p-2.5 rounded-full bg-white/10 text-white border border-white/20 hover:bg-white/18 transition-all"
+              className="w-10 h-10 inline-flex items-center justify-center rounded-full bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] transition-all shadow-xs"
             >
-              {sfxMuted ? <VolumeX className="w-4 h-4 text-white/55" /> : <Volume2 className="w-4 h-4" />}
+              {sfxMuted ? <VolumeX className="w-4 h-4 text-[#6B7280]" /> : <Volume2 className="w-4 h-4 text-[#FF6B57]" />}
             </button>
           </div>
         </div>
@@ -249,33 +260,27 @@ export function LobbyView({
       {/* 2. Balanced Two-Column Hero (Stacked cleanly on mobile) */}
       <div className="relative z-10 flex-1 w-full max-w-6xl mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex items-center">
         <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
-          {/* LEFT COLUMN: Modern Mirror Camera Preview + Prominent Name Input */}
+          {/* LEFT COLUMN: Polaroid Camera Preview + Name Field */}
           <section className="lg:col-span-6 order-2 lg:order-1">
-            <div className="glass-panel rounded-3xl p-4 sm:p-5 space-y-4">
-              {/* Glowing Colorful Mirror Camera Frame */}
-              <div
-                className="relative rounded-[22px] p-[2.5px] shadow-xl"
-                style={{
-                  background: theme.primaryGradient,
-                  boxShadow: theme.glowShadow,
-                }}
-              >
-                <div className="relative w-full aspect-[4/3] sm:aspect-[16/11] rounded-[20px] overflow-hidden bg-[#181232]">
+            <div className="bg-white border border-[#EAE4DC] shadow-[0_4px_20px_rgba(31,36,45,0.06)] rounded-3xl p-4 sm:p-5 space-y-4">
+              {/* Soft Polaroid-inspired camera frame */}
+              <div className="relative rounded-[22px] p-1.5 bg-[#FFFDF9] border border-[#EAE4DC] shadow-sm">
+                <div className="relative w-full aspect-[4/3] sm:aspect-[16/11] rounded-[16px] overflow-hidden bg-[#FFE8E2]">
                   {showLiveVideo ? (
                     <video
                       ref={previewVideoRef}
                       autoPlay
                       playsInline
                       muted
-                      className="w-full h-full object-cover mirror-video"
+                      className={`w-full h-full object-cover ${isMirrored ? 'mirror-video' : ''}`}
                     />
                   ) : (
                     <AvatarCanvas
                       name={playerName || 'Alex'}
                       metricsRef={localMetricsRef}
-                      accentColor="#FF4D8D"
-                      bgTop="#2E1B5E"
-                      bgBottom="#131029"
+                      accentColor="#FF6B57"
+                      bgTop="#FFE8E2"
+                      bgBottom="#EFE9FB"
                       isAi={false}
                     />
                   )}
@@ -284,11 +289,11 @@ export function LobbyView({
                   <div className="absolute top-3 start-3 end-3 flex items-center justify-between gap-2">
                     <span
                       data-testid="lobby-camera-badge"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#120E24]/75 backdrop-blur-md border border-white/20 text-xs font-semibold text-white"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/88 backdrop-blur-md border border-[#EAE4DC] text-xs font-bold text-[#1F242D] shadow-xs"
                     >
                       <span
                         className={`w-2 h-2 rounded-full ${
-                          showLiveVideo ? 'bg-[#34D399]' : 'bg-[#38BDF8]'
+                          showLiveVideo ? 'bg-[#16A34A]' : 'bg-[#FF6B57]'
                         }`}
                       />
                       <span>{showLiveVideo ? t.cameraActiveBadge : t.cameraOffBadge}</span>
@@ -298,7 +303,7 @@ export function LobbyView({
                       <button
                         type="button"
                         onClick={onRequestCamera}
-                        className="min-h-[44px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs sm:text-sm font-bold bg-white text-[#161130] hover:bg-white/90 shadow-md transition-all whitespace-nowrap"
+                        className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs sm:text-sm font-bold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/25 transition-all whitespace-nowrap"
                       >
                         <Camera className="w-4 h-4 shrink-0" />
                         <span>{t.enableCamera}</span>
@@ -306,21 +311,23 @@ export function LobbyView({
                     )}
                   </div>
 
-                  {/* Subtle bottom name label */}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0E0A20]/85 to-transparent flex items-end px-4 pb-3">
-                    <p className="text-sm font-bold text-white truncate">
-                      {playerName.trim() || 'Alex'}{' '}
-                      <span className="text-xs font-medium text-white/75">{t.youTag}</span>
-                    </p>
+                  {/* Frosted white name tag */}
+                  <div className="absolute start-3 bottom-3">
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/88 backdrop-blur-md border border-[#EAE4DC] shadow-xs">
+                      <p className="text-xs sm:text-sm font-bold text-[#1F242D] truncate max-w-[180px]">
+                        {playerName.trim() || 'Alex'}{' '}
+                        <span className="text-xs font-semibold text-[#6B7280]">{t.youTag}</span>
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Prominent Name Input — 54px touch-friendly field */}
+              {/* Prominent Name Input */}
               <div className="space-y-1.5">
                 <label
                   htmlFor="couplecam-player-name"
-                  className="block text-sm font-bold text-white"
+                  className="block text-sm font-bold text-[#1F242D]"
                 >
                   {t.yourNameLabel}
                 </label>
@@ -334,43 +341,37 @@ export function LobbyView({
                     if (formError) setFormError(null);
                   }}
                   placeholder={t.yourNamePlaceholder}
-                  className="w-full min-h-[54px] px-4 py-3.5 rounded-2xl bg-[#120E24]/75 border border-white/22 text-white placeholder-white/45 text-base font-medium focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/30 focus:outline-none transition-all"
+                  className="w-full min-h-[52px] px-4 py-3 rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] text-[#1F242D] placeholder-[#6B7280] text-base font-semibold focus:bg-white focus:border-[#FF6B57] focus:ring-2 focus:ring-[#FF6B57]/20 focus:outline-none transition-all"
                 />
               </div>
 
               {cameraHint && (
-                <p className="text-xs text-white/75 leading-relaxed">{cameraHint}</p>
+                <p className="text-xs text-[#6B7280] leading-relaxed">{cameraHint}</p>
               )}
             </div>
           </section>
 
-          {/* RIGHT COLUMN: Ultra-Clear Action Panel (< 3 seconds comprehension) */}
+          {/* RIGHT COLUMN: Clean Warm Action Panel */}
           <section className="lg:col-span-6 order-1 lg:order-2 space-y-5">
-            {/* 1. Short warm headline + 1 concise subtitle */}
             <div className="space-y-2">
-              <h1 className="text-3xl sm:text-5xl font-extrabold leading-[1.08] tracking-tight text-white">
+              <h1 className="text-3xl sm:text-5xl font-extrabold leading-[1.08] tracking-tight text-[#1F242D]">
                 {t.lobbyHeadline}
               </h1>
-              <p className="text-sm sm:text-base text-white/85 leading-relaxed">
+              <p className="text-sm sm:text-base text-[#6B7280] leading-relaxed">
                 {t.lobbySubtitlePrefix}
-                <strong className="text-white font-bold">{t.lobbySubtitleStrong}</strong>
+                <strong className="text-[#1F242D] font-bold">{t.lobbySubtitleStrong}</strong>
                 {t.lobbySubtitleSuffix}
               </p>
             </div>
 
-            {/* Action Glass Panel */}
-            <div className="glass-panel rounded-3xl p-4 sm:p-6 space-y-4">
-              {/* 2. Giant Primary CTA: "Créer un salon" */}
+            <div className="bg-white border border-[#EAE4DC] shadow-[0_4px_20px_rgba(31,36,45,0.06)] rounded-3xl p-4 sm:p-6 space-y-4">
+              {/* 1. Primary CTA: "Créer un salon" */}
               {!isWaitingHost ? (
                 <button
                   type="button"
                   data-testid="lobby-create-btn"
                   onClick={handleCreateSubmit}
-                  className="btn-shine w-full min-h-[58px] inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl text-base sm:text-lg font-extrabold text-white transition-all hover:-translate-y-0.5 whitespace-nowrap"
-                  style={{
-                    background: theme.primaryGradient,
-                    boxShadow: theme.glowShadow,
-                  }}
+                  className="btn-shine w-full min-h-[56px] inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl text-base sm:text-lg font-extrabold bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-[0_8px_22px_-4px_rgba(255,107,87,0.4)] transition-all hover:-translate-y-0.5 whitespace-nowrap"
                 >
                   <Users className="w-5 h-5 shrink-0" />
                   <span>{t.createBtn}</span>
@@ -380,17 +381,17 @@ export function LobbyView({
                 <motion.div
                   initial={{ opacity: 0, scale: 0.97 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="rounded-2xl bg-[#120E24]/80 border border-[#FF4D8D]/45 p-4 space-y-3.5 shadow-lg shadow-[#7C3AED]/25"
+                  className="rounded-2xl bg-[#FFFDF9] border border-[#FF6B57]/35 p-4 space-y-3.5 shadow-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-white/70">
+                      <p className="text-xs font-bold uppercase tracking-wider text-[#6B7280]">
                         {t.shareCodeLabel}
                       </p>
                       <p
                         dir="ltr"
                         data-testid="host-room-code"
-                        className="font-mono text-4xl sm:text-5xl font-extrabold tracking-[0.22em] bg-gradient-to-r from-[#FACC15] via-[#FF4D8D] to-[#38BDF8] bg-clip-text text-transparent tabular-nums mt-0.5"
+                        className="font-mono text-4xl sm:text-5xl font-extrabold tracking-[0.22em] text-[#FF6B57] tabular-nums mt-0.5"
                       >
                         {roomCode}
                       </p>
@@ -399,12 +400,12 @@ export function LobbyView({
                       type="button"
                       data-testid="copy-room-code"
                       onClick={handleCopyCode}
-                      className="min-h-[48px] inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-white text-[#161130] hover:bg-white/90 shadow-md transition-all whitespace-nowrap shrink-0"
+                      className="min-h-[46px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-sm transition-all whitespace-nowrap shrink-0"
                     >
                       {copiedMode === 'code' ? (
-                        <Check className="w-4 h-4 text-[#10B981]" />
+                        <Check className="w-4 h-4" />
                       ) : (
-                        <Copy className="w-4 h-4 text-[#7C3AED]" />
+                        <Copy className="w-4 h-4" />
                       )}
                       <span>{copiedMode === 'code' ? t.codeCopiedBtn : t.copyCodeBtn}</span>
                     </button>
@@ -414,27 +415,27 @@ export function LobbyView({
                     type="button"
                     data-testid="copy-share-link"
                     onClick={handleCopyShareLink}
-                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-white/10 hover:bg-white/18 text-white border border-white/18 transition-all whitespace-nowrap"
+                    className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#EFE9FB] hover:bg-[#E5DCFA] text-[#1F242D] border border-[#DDD4F7] transition-all whitespace-nowrap"
                   >
                     {copiedMode === 'link' ? (
-                      <Check className="w-4 h-4 text-[#34D399]" />
+                      <Check className="w-4 h-4 text-[#16A34A]" />
                     ) : (
-                      <Link2 className="w-4 h-4 text-[#38BDF8]" />
+                      <Link2 className="w-4 h-4 text-[#7C5CFC]" />
                     )}
                     <span>
                       {copiedMode === 'link' ? t.linkCopiedBtn : `${t.copyLinkBtn} (?room=${roomCode})`}
                     </span>
                   </button>
 
-                  <div className="flex items-center justify-between gap-3 pt-1 text-xs sm:text-sm text-white/85">
-                    <span className="inline-flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 animate-spin text-[#38BDF8] shrink-0" />
+                  <div className="flex items-center justify-between gap-3 pt-1 text-xs sm:text-sm text-[#6B7280]">
+                    <span className="inline-flex items-center gap-2 font-medium">
+                      <Loader2 className="w-4 h-4 animate-spin text-[#FF6B57] shrink-0" />
                       <span>{statusMessage || t.waitingPartner}</span>
                     </span>
                     <button
                       type="button"
                       onClick={onCancelRoom}
-                      className="min-h-[44px] px-3 text-xs font-bold text-white/80 hover:text-white underline underline-offset-4 whitespace-nowrap shrink-0"
+                      className="min-h-[40px] px-3 text-xs font-bold text-[#6B7280] hover:text-[#1F242D] underline underline-offset-4 whitespace-nowrap shrink-0"
                     >
                       {t.cancelBtn}
                     </button>
@@ -442,25 +443,26 @@ export function LobbyView({
                 </motion.div>
               )}
 
-              {/* 3. Clear "OU" Divider */}
+              {/* Divider */}
               <div className="flex items-center gap-3" aria-hidden="true">
-                <div className="h-px flex-1 bg-white/15" />
-                <span className="text-xs font-extrabold uppercase tracking-widest text-white/70">
+                <div className="h-px flex-1 bg-[#EAE4DC]" />
+                <span className="text-xs font-extrabold uppercase tracking-widest text-[#6B7280]">
                   {t.orDivider}
                 </span>
-                <div className="h-px flex-1 bg-white/15" />
+                <div className="h-px flex-1 bg-[#EAE4DC]" />
               </div>
 
-              {/* Dedicated "Rejoindre un salon" Card (Extra-large 56px mobile code input & button) */}
+              {/* 2. "Rejoindre un salon" */}
               <form
                 onSubmit={handleJoinSubmit}
-                className="rounded-2xl bg-[#120E24]/60 border border-white/15 p-3.5 sm:p-4 space-y-2.5"
+                className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-3.5 sm:p-4 space-y-2.5"
               >
                 <label
                   htmlFor="couplecam-join-code"
-                  className="block text-xs sm:text-sm font-bold text-white"
+                  className="block text-xs sm:text-sm font-bold text-[#1F242D]"
                 >
-                  {t.tabJoin} <span className="hidden sm:inline font-medium text-white/75">— {t.joinCodeLabel}</span>
+                  {t.tabJoin}{' '}
+                  <span className="hidden sm:inline font-medium text-[#6B7280]">— {t.joinCodeLabel}</span>
                 </label>
                 <div className="flex items-stretch gap-2.5">
                   <input
@@ -479,13 +481,13 @@ export function LobbyView({
                       if (formError) setFormError(null);
                     }}
                     placeholder="A7K4"
-                    className="flex-1 min-w-0 min-h-[56px] px-3.5 py-3 rounded-2xl bg-white/10 border border-white/22 font-mono text-2xl font-bold tracking-[0.24em] text-center text-white placeholder-white/35 uppercase tabular-nums focus:border-[#38BDF8] focus:ring-2 focus:ring-[#38BDF8]/30 focus:outline-none disabled:opacity-60 transition-all"
+                    className="flex-1 min-w-0 min-h-[54px] px-3.5 py-3 rounded-2xl bg-white border border-[#EAE4DC] font-mono text-2xl font-bold tracking-[0.24em] text-center text-[#1F242D] placeholder-[#9CA3AF] uppercase tabular-nums focus:border-[#FF6B57] focus:ring-2 focus:ring-[#FF6B57]/20 focus:outline-none disabled:opacity-60 transition-all"
                   />
                   <button
                     type="submit"
                     data-testid="lobby-join-btn"
                     disabled={isJoining}
-                    className="min-h-[56px] px-5 sm:px-6 rounded-2xl text-sm sm:text-base font-extrabold bg-white text-[#161130] hover:bg-[#F8FAFC] disabled:opacity-60 inline-flex items-center justify-center gap-1.5 shadow-md transition-all whitespace-nowrap shrink-0"
+                    className="min-h-[54px] px-5 sm:px-6 rounded-2xl text-sm sm:text-base font-extrabold bg-[#1F242D] text-white hover:bg-[#313846] disabled:opacity-60 inline-flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap shrink-0"
                   >
                     {isJoining ? (
                       <>
@@ -502,17 +504,17 @@ export function LobbyView({
                 </div>
 
                 {isJoining && (
-                  <div className="flex items-center justify-between gap-2 pt-1 text-xs text-white/85">
+                  <div className="flex items-center justify-between gap-2 pt-1 text-xs text-[#6B7280]">
                     <span className="inline-flex items-center gap-1.5 min-w-0">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#38BDF8] shrink-0" />
-                      <span data-testid="lobby-join-step" className="truncate font-medium">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#FF6B57] shrink-0" />
+                      <span data-testid="lobby-join-step" className="truncate font-semibold text-[#1F242D]">
                         {statusMessage || '1/3 Connexion au serveur...'}
                       </span>
                     </span>
                     <button
                       type="button"
                       onClick={onCancelRoom}
-                      className="text-xs font-bold text-white/80 hover:text-white underline underline-offset-4 whitespace-nowrap shrink-0"
+                      className="text-xs font-bold text-[#6B7280] hover:text-[#1F242D] underline underline-offset-4 whitespace-nowrap shrink-0"
                     >
                       {t.cancelBtn}
                     </button>
@@ -526,7 +528,7 @@ export function LobbyView({
                 (connectionStatus === 'disconnected' && Boolean(statusMessage))) && (
                 <div
                   role="alert"
-                  className="rounded-xl bg-[#EF4444]/20 border border-[#EF4444]/45 px-3.5 py-3 text-xs sm:text-sm font-medium text-[#FECACA] space-y-2.5"
+                  className="rounded-xl bg-[#FEF2F2] border border-[#FECACA] px-3.5 py-3 text-xs sm:text-sm font-medium text-[#B91C1C] space-y-2.5"
                 >
                   <p>{formError || statusMessage}</p>
                   {!formError && connectionStatus === 'error' && (
@@ -542,7 +544,7 @@ export function LobbyView({
                             onCreateRoom();
                           }
                         }}
-                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-extrabold bg-white text-[#161130] hover:bg-white/90 transition-all whitespace-nowrap"
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] transition-all whitespace-nowrap"
                       >
                         🔄 Réessayer
                       </button>
@@ -553,7 +555,7 @@ export function LobbyView({
                           setFormError(null);
                           onCancelRoom();
                         }}
-                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold bg-white/12 text-white border border-white/20 hover:bg-white/20 transition-all whitespace-nowrap"
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FAF7F2] transition-all whitespace-nowrap"
                       >
                         ← Retour
                       </button>
@@ -562,7 +564,7 @@ export function LobbyView({
                 </div>
               )}
 
-              {/* 4. Distinct Secondary Solo Button at the bottom */}
+              {/* 3. Mode "🤖 Jouer avec IA" preserved 100% */}
               <div className="pt-1">
                 <button
                   type="button"
@@ -572,10 +574,10 @@ export function LobbyView({
                     setFormError(null);
                     onStartSoloMode();
                   }}
-                  className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-sm sm:text-base font-bold bg-white/10 hover:bg-white/16 text-white border border-white/22 transition-all whitespace-nowrap"
+                  className="w-full min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm sm:text-base font-bold bg-[#EFE9FB] hover:bg-[#E5DCFA] text-[#1F242D] border border-[#DDD4F7] transition-all whitespace-nowrap"
                 >
-                  <Sparkles className="w-4 h-4 text-[#FACC15] shrink-0" />
-                  <span>{t.soloCta}</span>
+                  <Sparkles className="w-4 h-4 text-[#7C5CFC] shrink-0" />
+                  <span>🤖 {t.soloCta}</span>
                 </button>
               </div>
             </div>

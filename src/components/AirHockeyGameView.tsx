@@ -812,8 +812,8 @@ export function AirHockeyGameView({
 
   return (
     <main className="flex-1 w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-4 space-y-2.5 sm:space-y-4">
-      {/* Main Full-Bleed Neon Rink Stage */}
-      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0C1120] shadow-2xl shadow-black/50 h-[58dvh] min-h-[390px] max-h-[530px] sm:h-[580px] sm:max-h-none select-none touch-none">
+      {/* Main Full-Bleed Rink Stage framed in Crème & Pastel Doux */}
+      <div className="relative rounded-3xl overflow-hidden border border-[#EAE4DC] bg-[#0C1120] shadow-[0_12px_36px_rgba(31,36,45,0.10)] h-[58dvh] min-h-[390px] max-h-[530px] sm:h-[580px] sm:max-h-none select-none touch-none">
         <canvas
           ref={canvasRef}
           data-testid="hockey-canvas"
@@ -826,9 +826,9 @@ export function AirHockeyGameView({
         {hud.phase !== 'ready' && (
           <div className="pointer-events-none absolute top-3 left-3 right-3 z-10 flex items-start justify-between gap-2 sm:gap-3">
             {/* Left: Goal target / Rally */}
-            <div className="hidden sm:block rounded-xl bg-[#111524]/92 border border-white/12 px-3.5 py-2 shadow-lg">
-              <p className="text-[11px] uppercase tracking-wider text-[#A9A295]">Objectif</p>
-              <p className="text-sm font-semibold text-[#F6F2E9] tabular-nums">
+            <div className="hidden sm:block rounded-2xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] px-3.5 py-2 shadow-[0_6px_20px_rgba(31,36,45,0.10)]">
+              <p className="text-[11px] uppercase tracking-wider font-semibold text-[#6B7280]">Objectif</p>
+              <p className="text-sm font-bold text-[#1F242D] tabular-nums">
                 Premier à {hud.targetGoals} buts
               </p>
             </div>
@@ -836,22 +836,22 @@ export function AirHockeyGameView({
             {/* Center Scoreboard */}
             <div
               data-testid="hockey-score"
-              className="flex items-center gap-3 sm:gap-4 rounded-xl bg-[#111524]/94 border border-white/14 px-3.5 sm:px-5 py-1.5 sm:py-2 shadow-lg"
+              className="flex items-center gap-3 sm:gap-4 rounded-2xl bg-white/95 backdrop-blur-md border border-[#EAE4DC] px-3.5 sm:px-5 py-1.5 sm:py-2 shadow-[0_6px_20px_rgba(31,36,45,0.10)]"
             >
               <div className="text-right">
-                <p className="text-[11px] text-[#E86A58] font-medium truncate max-w-[76px] sm:max-w-[96px]">
+                <p className="text-[11px] text-[#FF6B57] font-bold truncate max-w-[76px] sm:max-w-[96px]">
                   {leftPlayerName}
                 </p>
-                <p className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none">
+                <p className="text-xl sm:text-2xl font-extrabold text-[#1F242D] tabular-nums leading-none">
                   {hud.p1Score}
                 </p>
               </div>
-              <span className="text-sm font-bold text-white/30">—</span>
+              <span className="text-sm font-bold text-[#C9C1B6]">—</span>
               <div className="text-left">
-                <p className="text-[11px] text-[#E8B861] font-medium truncate max-w-[76px] sm:max-w-[96px]">
+                <p className="text-[11px] text-[#7C5CFC] font-bold truncate max-w-[76px] sm:max-w-[96px]">
                   {rightPlayerName}
                 </p>
-                <p className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none">
+                <p className="text-xl sm:text-2xl font-extrabold text-[#1F242D] tabular-nums leading-none">
                   {hud.p2Score}
                 </p>
               </div>
@@ -865,7 +865,7 @@ export function AirHockeyGameView({
                     type="button"
                     onClick={() => togglePause()}
                     aria-label={hud.phase === 'paused' ? 'Reprendre' : 'Mettre en pause'}
-                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] shadow-sm transition-colors cursor-pointer"
                   >
                     {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
                   </button>
@@ -873,7 +873,7 @@ export function AirHockeyGameView({
                     type="button"
                     onClick={() => startOrRestart()}
                     aria-label="Recommencer le match"
-                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] shadow-sm transition-colors cursor-pointer"
                   >
                     <RotateCcw className="w-4 h-4" />
                   </button>
@@ -887,10 +887,10 @@ export function AirHockeyGameView({
         {hud.phase === 'goal_pause' && hud.lastScorer && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
             <div
-              className={`rounded-2xl px-6 py-3.5 border-2 shadow-2xl bg-[#111524]/95 ${
+              className={`rounded-2xl px-6 py-3.5 border-2 shadow-[0_14px_36px_rgba(31,36,45,0.18)] bg-white/96 backdrop-blur-md ${
                 hud.lastScorer === 'p1'
-                  ? 'border-[#E86A58] text-[#F08272]'
-                  : 'border-[#E8B861] text-[#F2CB80]'
+                  ? 'border-[#FF6B57] text-[#FF6B57]'
+                  : 'border-[#7C5CFC] text-[#7C5CFC]'
               }`}
             >
               <p className="text-xl sm:text-3xl font-extrabold tracking-tight text-center">
@@ -902,27 +902,29 @@ export function AirHockeyGameView({
 
         {/* Title Overlay */}
         {hud.phase === 'ready' && (
-          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/80 p-3.5 sm:p-4 overflow-y-auto">
-            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3 sm:space-y-5 shadow-2xl">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#FAF7F2]/85 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-3xl bg-white border border-[#EAE4DC] p-5 sm:p-6 text-center space-y-3.5 sm:space-y-5 shadow-[0_18px_48px_rgba(31,36,45,0.12)]">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#FFE8E2] border border-[#F5C5B8] text-[#FF6B57] mx-auto">
                 <Zap className="w-6 h-6" />
               </div>
               <div className="space-y-1.5">
-                <h1 className="text-2xl sm:text-3xl font-bold text-[#F6F2E9] tracking-tight">
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1F242D] tracking-tight">
                   Air Hockey des Mains
                 </h1>
-                <p className="text-sm text-[#CBC4B6] leading-relaxed">
-                  Un terrain néon partagé entre vos deux écrans. Plus ta paume frappe vite à
+                <p className="text-sm text-[#6B7280] leading-relaxed">
+                  Un terrain partagé entre vos deux écrans. Plus ta paume frappe vite à
                   l’impact, plus le palet file vers le camp adverse. Premier à{' '}
-                  <span className="text-[#E8B861] font-semibold">7 buts</span> gagne !
+                  <span className="text-[#FF6B57] font-bold">7 buts</span> gagne !
                 </p>
               </div>
-              <p className="hidden sm:block text-xs text-[#A9A295]">{sensorLabel}</p>
+              <p className="hidden sm:block text-xs text-[#6B7280] bg-[#FAF7F2] border border-[#EAE4DC] rounded-xl px-3 py-2">
+                {sensorLabel}
+              </p>
               <button
                 type="button"
                 data-start="true"
                 onClick={() => startOrRestart()}
-                className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-bold text-base bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors shadow-lg shadow-[#E8B861]/25"
+                className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-bold text-base bg-[#FF6B57] hover:bg-[#F25743] text-white transition-colors shadow-md shadow-[#FF6B57]/25 cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>Engager le palet</span>
@@ -933,17 +935,17 @@ export function AirHockeyGameView({
 
         {/* Pause Overlay */}
         {hud.phase === 'paused' && (
-          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/75 p-3.5 sm:p-4 overflow-y-auto">
-            <div className="my-auto w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-4 shadow-2xl">
-              <h2 className="text-2xl font-bold text-[#F6F2E9]">Match en pause</h2>
-              <p className="text-sm text-[#CBC4B6] tabular-nums">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#FAF7F2]/82 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-sm rounded-3xl bg-white border border-[#EAE4DC] p-5 sm:p-6 text-center space-y-4 shadow-[0_18px_48px_rgba(31,36,45,0.12)]">
+              <h2 className="text-2xl font-extrabold text-[#1F242D]">Match en pause</h2>
+              <p className="text-sm font-semibold text-[#6B7280] tabular-nums">
                 {leftPlayerName} {hud.p1Score} — {hud.p2Score} {rightPlayerName}
               </p>
               <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={() => togglePause()}
-                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
+                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm bg-[#FF6B57] hover:bg-[#F25743] text-white transition-colors shadow-md shadow-[#FF6B57]/20 cursor-pointer"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>Reprendre</span>
@@ -951,7 +953,7 @@ export function AirHockeyGameView({
                 <button
                   type="button"
                   onClick={() => startOrRestart()}
-                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-sm bg-[#FAF7F2] hover:bg-[#F1ECE3] border border-[#EAE4DC] text-[#1F242D] transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Recommencer</span>
@@ -959,7 +961,7 @@ export function AirHockeyGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-transparent border border-white/12 hover:bg-white/6 text-[#CBC4B6] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-medium text-sm bg-white border border-[#EAE4DC] hover:bg-[#FAF7F2] text-[#6B7280] transition-colors cursor-pointer"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Changer de jeu</span>
@@ -971,28 +973,28 @@ export function AirHockeyGameView({
 
         {/* Match Over Overlay */}
         {hud.phase === 'gameover' && (
-          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/82 p-3.5 sm:p-4 overflow-y-auto">
-            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3.5 sm:space-y-5 shadow-2xl">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#FAF7F2]/86 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-3xl bg-white border border-[#EAE4DC] p-5 sm:p-6 text-center space-y-4 sm:space-y-5 shadow-[0_18px_48px_rgba(31,36,45,0.12)]">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#FEF6DC] border border-[#F5D782] text-[#D97706] mx-auto">
                 <Trophy className="w-6 h-6" />
               </div>
               <div className="space-y-1">
-                <h2 className="text-xl sm:text-2xl font-bold text-[#F6F2E9]">
+                <h2 className="text-xl sm:text-2xl font-extrabold text-[#1F242D]">
                   {localIsWinner ? 'Victoire !' : `${hud.winner === 'p1' ? leftPlayerName : rightPlayerName} remporte le match`}
                 </h2>
-                <p className="text-sm text-[#CBC4B6] tabular-nums">
+                <p className="text-sm font-medium text-[#6B7280] tabular-nums">
                   Score final : {leftPlayerName} {hud.p1Score} — {hud.p2Score} {rightPlayerName}
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">Frappes échangées</p>
-                  <p className="text-xl font-bold text-[#F6F2E9] tabular-nums">{hud.rallyHits}</p>
+                <div className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-3">
+                  <p className="text-[11px] font-semibold text-[#6B7280]">Frappes échangées</p>
+                  <p className="text-xl font-extrabold text-[#1F242D] tabular-nums">{hud.rallyHits}</p>
                 </div>
-                <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">Vitesse max palet</p>
-                  <p className="text-xl font-bold text-[#E8B861] tabular-nums">
+                <div className="rounded-2xl bg-[#FEF6DC] border border-[#F5D782] p-3">
+                  <p className="text-[11px] font-semibold text-[#92400E]">Vitesse max palet</p>
+                  <p className="text-xl font-extrabold text-[#D97706] tabular-nums">
                     {Math.round(hud.maxPuckSpeed * 0.12)} km/h
                   </p>
                 </div>
@@ -1003,7 +1005,7 @@ export function AirHockeyGameView({
                   type="button"
                   data-start="true"
                   onClick={() => startOrRestart()}
-                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
+                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm bg-[#FF6B57] hover:bg-[#F25743] text-white transition-colors shadow-md shadow-[#FF6B57]/20 cursor-pointer"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Revanche</span>
@@ -1011,7 +1013,7 @@ export function AirHockeyGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="flex-1 min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
+                  className="flex-1 min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-semibold text-sm bg-[#FAF7F2] hover:bg-[#F1ECE3] border border-[#EAE4DC] text-[#1F242D] transition-colors cursor-pointer"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Retour au Hub</span>

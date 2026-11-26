@@ -377,6 +377,36 @@ class DuoSoundFx {
   public parchisiEmotePop() {
     this.playTone(580, 0.075, 'triangle', 0.055, 880);
   }
+
+  // --- Shared Music Games SFX (Quiz Éclair & Statue Musicale) ---
+  public unlock() {
+    this.ensureCtx();
+  }
+
+  public quizCorrect() {
+    this.playTone(587.33, 0.11, 'triangle', 0.075, 783.99);
+    this.playTone(880, 0.18, 'sine', 0.075, 1174.66, 0.08);
+  }
+
+  public quizWrongBuzzer() {
+    this.playTone(210, 0.18, 'sawtooth', 0.05, 145);
+    this.playTone(165, 0.22, 'triangle', 0.055, 115, 0.07);
+  }
+
+  /**
+   * Crisp vinyl-scratch + referee whistle stop cue when music cuts for FREEZE!
+   */
+  public freezeRecordScratch() {
+    // Quick downward vinyl pitch-drop scratch
+    this.playTone(920, 0.14, 'sawtooth', 0.065, 140, 0);
+    this.playTone(460, 0.11, 'triangle', 0.06, 95, 0.06);
+    // Crisp high freeze whistle accent
+    this.playTone(1680, 0.16, 'sine', 0.055, 1540, 0.09);
+  }
+
+  public freezeFlashPop() {
+    this.playTone(1240, 0.07, 'triangle', 0.05, 680);
+  }
 }
 
 export const soundFx = new DuoSoundFx();

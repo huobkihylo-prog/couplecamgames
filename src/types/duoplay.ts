@@ -6,15 +6,22 @@ export type GameId =
   | 'air-hockey'
   | 'stare-duel'
   | 'miam-mania'
-  | 'kiss-bounce'
-  | 'constellations'
   | 'whisper-secrets'
   | 'slingshot-duo'
   | 'xo-neon'
   | 'parchisi-duo'
-  | 'couple-jam';
+  | 'music-quiz'
+  | 'freeze-dance';
 export type ScreenView = 'lobby' | 'hub' | GameId;
-export type HubCategory = 'all' | 'sensuel' | 'drole' | 'action' | 'aventure' | 'romantique' | 'amusant';
+export type HubCategory =
+  | 'all'
+  | 'sensuel'
+  | 'drole'
+  | 'action'
+  | 'aventure'
+  | 'romantique'
+  | 'amusant'
+  | 'musique';
 export type ConnectionMode = 'idle' | 'p2p-host' | 'p2p-guest' | 'solo';
 export type ConnectionStatus = 'disconnected' | 'creating' | 'waiting' | 'connecting' | 'connected' | 'error';
 
@@ -295,65 +302,6 @@ export interface MiamManiaState {
   flashTimerSec: number;
 }
 
-export interface KissHeart {
-  id: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  /** Target side receiving this heart: 'local' (left) or 'partner' (right) */
-  target: 'local' | 'partner';
-  /** Visual radius */
-  radius: number;
-  /** Smooth arc pulse phase */
-  pulse: number;
-  /** Color theme based on sender */
-  from: 'local' | 'partner';
-}
-
-export interface KissBounceState {
-  phase: 'ready' | 'playing' | 'paused';
-  rally: number;
-  bestRally: number;
-  totalKisses: number;
-  /** 0..1 aurora borealis sky illumination driven by successful exchanges */
-  auroraLevel: number;
-  /** Current note step on the romantic piano progression */
-  pianoStep: number;
-  elapsedSec: number;
-  localKissCooldownSec: number;
-  hearts: KissHeart[];
-  nextHeartId: number;
-  lastCatchKind: 'none' | 'hand' | 'kiss';
-  lastCatchTimerSec: number;
-}
-
-export type ConstellationShapeId = 'heart' | 'moon' | 'infinity' | 'twins';
-
-export interface ConstellationStar {
-  id: number;
-  /** Normalized 0..1 coordinates inside the night sky canvas */
-  x: number;
-  y: number;
-}
-
-export interface ConstellationPattern {
-  id: ConstellationShapeId;
-  stars: ConstellationStar[];
-  /** Pairs of star IDs connected when both are lit */
-  edges: [number, number][];
-}
-
-export interface ConstellationState {
-  phase: 'ready' | 'playing' | 'revealed';
-  constellationIndex: number;
-  activatedStarIds: number[];
-  completedCount: number;
-  activePromptIndex: number;
-  /** Progress 0..1 while both fingertips hold together on the next numbered star */
-  starHoldProgress: number;
-  elapsedSec: number;
-}
 
 export type WhisperLevel = 'doux' | 'seduction' | 'intense';
 export type WhisperRole = 'whisperer' | 'guesser';
@@ -369,6 +317,7 @@ export type PeerMessage =
   | { type: 'PONG'; ts: number }
   | { type: 'SELECT_GAME'; game: GameId }
   | { type: 'RETURN_HUB' }
+  | { type: 'HUB_REACTION'; emoji: '❤️' | '😂' | '🔥' }
   | {
       type: 'FACE_FRAME';
       smileScore: number;
@@ -380,7 +329,7 @@ export type PeerMessage =
     }
   | {
       type: 'HAND_FRAME';
-      game: 'ninja-fruits' | 'air-hockey' | 'kiss-bounce' | 'constellations';
+      game: 'ninja-fruits' | 'air-hockey';
       x: number;
       y: number;
       detected: boolean;
@@ -460,30 +409,7 @@ export type PeerMessage =
       mouthY?: number;
       phase?: MiamManiaState['phase'];
     }
-  | { type: 'KISS_START' }
-  | { type: 'KISS_RESET' }
-  | {
-      type: 'SEND_KISS';
-      heartId: number;
-      startY: number;
-      vx: number;
-      vy: number;
-      rally: number;
-      catchKind: 'hand' | 'kiss';
-    }
-  | { type: 'CONSTELLATION_START' }
-  | {
-      type: 'CONSTELLATION_STAR';
-      constellationIndex: number;
-      starId: number;
-      x: number;
-      y: number;
-    }
-  | {
-      type: 'CONSTELLATION_NEXT';
-      constellationIndex: number;
-      promptIndex: number;
-    }
+
   | {
       type: 'WHISPER_START';
       secretText: string;
@@ -578,50 +504,65 @@ export type PeerMessage =
       state: ParchisiState;
     }
   | {
-      type: 'JAM_NOTE';
-      instrument: JamInstrumentId;
-      noteId: string;
-      player: JamPlayer;
+      type: 'MUSIC_QUIZ_CONFIG';
+      category: MusicQuizCategory;
+      totalRounds: MusicQuizDuration;
     }
   | {
-      type: 'BLINDTEST_START';
-      source: JamBlindSource;
-      previewUrl?: string;
-      artworkUrl?: string;
-      trackName: string;
-      artistName: string;
-      playbackRate: JamPlaybackRate;
-      duration: number;
+      type: 'MUSIC_QUIZ_ROUND';
+      round: number;
+      totalRounds: number;
+      previewUrl: string;
+      artworkUrl: string;
+      options: MusicQuizOption[];
+      correctIndex: number;
+      startTime: number;
     }
   | {
-      type: 'JAM_STATE';
-      state: JamState;
+      type: 'MUSIC_QUIZ_ANSWER';
+      round: number;
+      optionIndex: number;
+      elapsedSec: number;
     }
   | {
-      type: 'JAM_ACTION';
-      action:
-        | 'PREP_LAUNCH_INSTRUMENT'
-        | 'PREP_LAUNCH_BLINDTEST'
-        | 'GUESS'
-        | 'BUZZER'
-        | 'HINT_ARTIST'
-        | 'HINT_UNBLUR'
-        | 'HINT_CATEGORY'
-        | 'FOUND_ORAL'
-        | 'REVEAL_NOW'
-        | 'TOGGLE_PAUSE'
-        | 'NEXT_ROUND'
-        | 'EMOTE'
-        | 'SET_INSTRUMENT';
-      text?: string;
-      emote?: JamEmoteKind;
-      instrument?: JamInstrumentId;
-      songId?: string;
-      songTitle?: string;
-      songArtist?: string;
-      songCategory?: string;
-      antiCheat?: boolean;
-      blindTrack?: JamBlindTrack;
+      type: 'MUSIC_QUIZ_REVEAL';
+      round: number;
+      hostScore: number;
+      guestScore: number;
+      hostDelta: number;
+      guestDelta: number;
+      hostAnswerIndex: number | null;
+      guestAnswerIndex: number | null;
+      fastestPlayer: MusicQuizPlayer | null;
+    }
+  | {
+      type: 'MUSIC_QUIZ_FINISH';
+      hostScore: number;
+      guestScore: number;
+    }
+  | { type: 'MUSIC_QUIZ_RESET' }
+  | {
+      type: 'FREEZE_STATE';
+      state: FreezeDanceState;
+    }
+  | {
+      type: 'FREEZE_PLAY';
+      round: number;
+      previewUrl: string;
+      artworkUrl: string;
+      title: string;
+      artist: string;
+      startTime: number;
+    }
+  | {
+      type: 'FREEZE_STOP';
+      round: number;
+      freezeDurationMs: number;
+    }
+  | {
+      type: 'FREEZE_VERDICT';
+      round: number;
+      verdict: FreezeDanceVerdict;
     };
 
 export type SlingshotMode = 'coop' | 'duel';
@@ -813,78 +754,51 @@ export interface ParchisiState {
   stateSeq: number;
 }
 
-export type JamInstrumentId = 'darbouka' | 'guitar' | 'piano' | 'oud';
-export type JamMode = 'guess-instrument' | 'blind-test' | 'concert-duo';
-export type JamFormat = 5 | 10 | 0;
-export type JamPlaybackRate = 0.8 | 1 | 1.35;
-export type JamBlindSource = 'itunes' | 'free';
-export type JamPlayer = 'host' | 'guest';
-export type JamEmoteKind = 'bravo' | 'fuego' | 'encore';
-export type JamPhase = 'LOBBY' | 'PREP' | 'PLAYING' | 'BUZZER' | 'REVEAL' | 'MATCH_OVER';
+export type MusicQuizCategory = 'all-hits' | 'pop-intl' | 'rai-chaabi' | 'rap' | 'movies-disney';
+export type MusicQuizDuration = 5 | 10 | 15;
+export type MusicQuizPlayer = 'host' | 'guest';
+export type MusicQuizPhase = 'LOBBY' | 'LOADING' | 'PLAYING' | 'REVEAL' | 'PODIUM';
 
-export interface JamBlindTrack {
-  source: JamBlindSource;
-  previewUrl?: string;
-  artworkUrl?: string;
-  trackName: string;
-  artistName: string;
-  playbackRate: JamPlaybackRate;
-  duration: number;
+export interface MusicQuizOption {
+  title: string;
+  artist: string;
 }
 
-export interface JamRoundOutcome {
-  guessed: boolean;
-  winner: JamPlayer | null;
-  pointsAwarded: number;
-  fastBonus: boolean;
-  answerText?: string;
-  dareText?: string;
-  revealTitle: string;
-  revealArtist?: string;
-  revealArtworkUrl?: string;
-}
-
-export interface JamState {
-  phase: JamPhase;
-  mode: JamMode;
-  /** 5, 10, or 0 for Free / unlimited */
-  totalRounds: JamFormat;
+export interface MusicQuizRoundPayload {
   round: number;
-  /** Who is the active Musician / DJ this round */
-  performer: JamPlayer;
-  /** Scores support .5 increments from -0.5 hint deductions */
-  scores: Record<JamPlayer, number>;
-  /** Current instrument per player (used in Mode 1 & Mode 3) */
-  instruments: Record<JamPlayer, JamInstrumentId>;
-  /** Mode 1 secret song metadata */
-  secretSongId: string | null;
-  secretTitle: string;
-  secretArtist: string;
-  secretCategory: string;
-  antiCheatMute: boolean;
-  /** Mode 2 blind test track */
-  blindTrack: JamBlindTrack | null;
-  /** Round countdown remaining (45s Mode 1, 30s Mode 2) */
-  roundDurationSec: number;
-  timeLeftSec: number;
-  /** Paused by DJ or Buzzer */
-  isPaused: boolean;
-  buzzerLeftSec: number;
-  buzzerBy: JamPlayer | null;
-  /** Hints used in current round */
-  hintCategoryUsed: boolean;
-  hintArtistUsed: boolean;
-  hintUnblurUsed: boolean;
-  hintsCount: number;
-  /** Last guess feedback */
-  lastWrongGuess: string | null;
-  /** Reveal outcome */
-  outcome: JamRoundOutcome | null;
-  /** Solo AI training flag */
-  soloAiPerformer: boolean;
-  /** Final match dare for loser */
-  finalDareText: string;
+  totalRounds: number;
+  previewUrl: string;
+  artworkUrl: string;
+  options: MusicQuizOption[];
+  correctIndex: number;
+  startTime: number;
+}
+
+export type FreezeDanceVibe = 'party-pop' | 'chaabi-rai' | 'reggaeton-latino' | 'disco-funk';
+export type FreezeDanceFormat = 'lives-3' | 'rounds-5';
+export type FreezeDancePhase = 'LOBBY' | 'LOADING' | 'DANCING' | 'FREEZE' | 'VERDICT' | 'GAME_OVER';
+export type FreezeDanceVerdict = 'moved' | 'statue';
+
+export interface FreezeDanceState {
+  phase: FreezeDancePhase;
+  vibe: FreezeDanceVibe;
+  format: FreezeDanceFormat;
+  round: number;
+  maxRounds: number;
+  hostLives: number;
+  guestLives: number;
+  hostPoints: number;
+  guestPoints: number;
+  currentTrackTitle: string;
+  currentTrackArtist: string;
+  currentPreviewUrl: string;
+  currentArtworkUrl: string;
+  danceDurationMs: number;
+  phaseStartedAt: number;
+  hostVoteOnGuest: FreezeDanceVerdict | null;
+  guestVoteOnHost: FreezeDanceVerdict | null;
+  activeDareText: string;
+  lastVerdictSummary: string;
+  winner: 'host' | 'guest' | 'draw' | null;
   stateSeq: number;
 }
-
-

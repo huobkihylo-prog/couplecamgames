@@ -1054,7 +1054,7 @@ export function NinjaFruitsGameView({
   return (
     <main className="flex-1 w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-4 space-y-2.5 sm:space-y-4">
       {/* Main Full-Bleed Canvas Stage */}
-      <div className="relative rounded-2xl overflow-hidden border border-white/12 bg-[#0B0E1A] shadow-2xl shadow-black/50 h-[58dvh] min-h-[390px] max-h-[530px] sm:h-[580px] sm:max-h-none select-none touch-none">
+      <div className="relative rounded-3xl overflow-hidden border border-[#EAE4DC] bg-[#0B0E1A] shadow-[0_10px_32px_rgba(31,36,45,0.12)] h-[58dvh] min-h-[390px] max-h-[530px] sm:h-[580px] sm:max-h-none select-none touch-none">
         <canvas
           ref={canvasRef}
           data-testid="ninja-canvas"
@@ -1068,35 +1068,35 @@ export function NinjaFruitsGameView({
         {hud.phase !== 'ready' && (
           <div className="pointer-events-none absolute top-3 left-3 right-3 z-10 flex items-start justify-between gap-2 sm:gap-3">
             {/* Left: Score & Record */}
-            <div className="rounded-xl bg-[#111524]/92 border border-white/12 px-2.5 sm:px-3.5 py-1.5 sm:py-2 shadow-lg">
-              <p className="text-[10px] sm:text-[11px] uppercase tracking-wider text-[#A9A295]">Score</p>
+            <div className="rounded-2xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] px-2.5 sm:px-3.5 py-1.5 sm:py-2 shadow-md">
+              <p className="text-[10px] sm:text-[11px] uppercase tracking-wider font-bold text-[#6B7280]">Score</p>
               <div className="flex items-baseline gap-2">
                 <span
                   data-testid="ninja-score"
-                  className="text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-none"
+                  className="text-xl sm:text-2xl font-extrabold text-[#1F242D] tabular-nums leading-none"
                 >
                   {hud.score}
                 </span>
-                <span className="hidden sm:inline text-xs text-[#E8B861] tabular-nums">Record {hud.bestScore}</span>
+                <span className="hidden sm:inline text-xs font-bold text-[#7C5CFC] tabular-nums">Record {hud.bestScore}</span>
               </div>
             </div>
 
             {/* Center: Combo Multiplier + 3 Lives */}
             <div className="flex flex-col items-center gap-1.5">
-              <div className="flex items-center gap-2 sm:gap-3 rounded-xl bg-[#111524]/92 border border-white/12 px-2.5 sm:px-4 py-1.5 sm:py-2 shadow-lg">
+              <div className="flex items-center gap-2 sm:gap-3 rounded-2xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] px-2.5 sm:px-4 py-1.5 sm:py-2 shadow-md">
                 <div className="flex items-center gap-1">
                   <Flame
-                    className={`w-4 h-4 ${hud.multiplier >= 3 ? 'text-[#E86A58]' : 'text-[#E8B861]'}`}
+                    className={`w-4 h-4 ${hud.multiplier >= 3 ? 'text-[#FF6B57]' : 'text-[#F59E0B]'}`}
                   />
-                  <span className="text-sm font-bold text-[#F6F2E9] tabular-nums">
+                  <span className="text-sm font-extrabold text-[#1F242D] tabular-nums">
                     ×{hud.multiplier}
                   </span>
                   {hud.combo >= 2 && (
-                    <span className="hidden sm:inline text-xs text-[#CBC4B6] tabular-nums">({hud.combo})</span>
+                    <span className="hidden sm:inline text-xs font-semibold text-[#6B7280] tabular-nums">({hud.combo})</span>
                   )}
                 </div>
 
-                <span className="w-px h-4 bg-white/15" aria-hidden="true" />
+                <span className="w-px h-4 bg-[#EAE4DC]" aria-hidden="true" />
 
                 <div className="flex items-center gap-1" aria-label={`${hud.lives} vies restantes`}>
                   {Array.from({ length: hud.maxLives }).map((_, idx) => (
@@ -1104,8 +1104,8 @@ export function NinjaFruitsGameView({
                       key={idx}
                       className={`w-4 h-4 transition-colors ${
                         idx < hud.lives
-                          ? 'text-[#E86A58] fill-[#E86A58]'
-                          : 'text-white/20 fill-transparent'
+                          ? 'text-[#FF6B57] fill-[#FF6B57]'
+                          : 'text-[#D1C9BE] fill-transparent'
                       }`}
                     />
                   ))}
@@ -1113,7 +1113,7 @@ export function NinjaFruitsGameView({
               </div>
 
               {hud.callout && hud.phase === 'playing' && (
-                <div className="rounded-lg bg-[#161B2E]/95 border border-[#E8B861]/40 px-3 py-1 text-xs font-semibold text-[#F6F2E9] shadow-md">
+                <div className="rounded-xl bg-[#FEF6DC]/95 border border-[#F59E0B]/45 px-3 py-1 text-xs font-extrabold text-[#92400E] shadow-md">
                   {hud.callout}
                 </div>
               )}
@@ -1127,7 +1127,7 @@ export function NinjaFruitsGameView({
                     type="button"
                     onClick={() => togglePause()}
                     aria-label={hud.phase === 'paused' ? 'Reprendre' : 'Mettre en pause'}
-                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] shadow-md transition-colors"
                   >
                     {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
                   </button>
@@ -1135,7 +1135,7 @@ export function NinjaFruitsGameView({
                     type="button"
                     onClick={() => startOrRestart()}
                     aria-label="Recommencer la partie"
-                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#111524]/92 border border-white/14 text-[#F6F2E9] hover:bg-[#1D233B] transition-colors"
+                    className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] shadow-md transition-colors"
                   >
                     <RotateCcw className="w-4 h-4" />
                   </button>
@@ -1147,26 +1147,26 @@ export function NinjaFruitsGameView({
 
         {/* Title Overlay */}
         {hud.phase === 'ready' && (
-          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/80 p-3.5 sm:p-4 overflow-y-auto">
-            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3 sm:space-y-5 shadow-2xl">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E86A58]/18 border border-[#E86A58]/35 text-[#F08272] mx-auto">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#FAF7F2]/88 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-3xl bg-white border border-[#EAE4DC] p-4 sm:p-6 text-center space-y-3 sm:space-y-5 shadow-[0_14px_40px_rgba(31,36,45,0.12)]">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#FFE8E2] border border-[#FF6B57]/30 text-[#FF6B57] mx-auto">
                 <Swords className="w-6 h-6" />
               </div>
               <div className="space-y-1.5">
-                <h1 className="text-2xl sm:text-3xl font-bold text-[#F6F2E9] tracking-tight">
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1F242D] tracking-tight">
                   Ninja Fruits en Duo
                 </h1>
-                <p className="text-sm text-[#CBC4B6] leading-relaxed">
+                <p className="text-sm text-[#6B7280] leading-relaxed font-medium">
                   Tranchez les fruits ensemble pour grimper jusqu’au combo ×5. Évitez les bombes au
-                  centre et coupez les <span className="text-[#E8B861] font-medium">Fruits Géants</span> à deux lames en même temps !
+                  centre et coupez les <span className="text-[#D97706] font-bold">Fruits Géants</span> à deux lames en même temps !
                 </p>
               </div>
-              <p className="hidden sm:block text-xs text-[#A9A295]">{sensorLabel}</p>
+              <p className="hidden sm:block text-xs text-[#6B7280] font-medium">{sensorLabel}</p>
               <button
                 type="button"
                 data-start="true"
                 onClick={() => startOrRestart()}
-                className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-bold text-base bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors shadow-lg shadow-[#E86A58]/25"
+                className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl font-extrabold text-base bg-[#FF6B57] hover:bg-[#F25743] text-white transition-colors shadow-md shadow-[#FF6B57]/25"
               >
                 <Play className="w-4 h-4 fill-current" />
                 <span>Lancer la partie</span>
@@ -1177,17 +1177,17 @@ export function NinjaFruitsGameView({
 
         {/* Pause Overlay */}
         {hud.phase === 'paused' && (
-          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/75 p-3.5 sm:p-4 overflow-y-auto">
-            <div className="my-auto w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-4 shadow-2xl">
-              <h2 className="text-2xl font-bold text-[#F6F2E9]">Partie en pause</h2>
-              <p className="text-sm text-[#CBC4B6]">
-                Score actuel : <span className="font-semibold text-[#F6F2E9] tabular-nums">{hud.score}</span>
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#FAF7F2]/82 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-sm rounded-3xl bg-white border border-[#EAE4DC] p-4 sm:p-6 text-center space-y-4 shadow-[0_14px_40px_rgba(31,36,45,0.12)]">
+              <h2 className="text-2xl font-extrabold text-[#1F242D]">Partie en pause</h2>
+              <p className="text-sm text-[#6B7280] font-medium">
+                Score actuel : <span className="font-extrabold text-[#1F242D] tabular-nums">{hud.score}</span>
               </p>
               <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={() => togglePause()}
-                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E8B861] hover:bg-[#F2C775] text-[#11131E] transition-colors"
+                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-extrabold text-sm bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-md shadow-[#FF6B57]/20 transition-colors"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>Reprendre</span>
@@ -1195,7 +1195,7 @@ export function NinjaFruitsGameView({
                 <button
                   type="button"
                   onClick={() => startOrRestart()}
-                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-bold text-sm bg-[#FAF7F2] hover:bg-[#F1ECE3] border border-[#EAE4DC] text-[#1F242D] transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Recommencer</span>
@@ -1203,7 +1203,7 @@ export function NinjaFruitsGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium text-sm bg-transparent border border-white/12 hover:bg-white/6 text-[#CBC4B6] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-sm border border-[#EAE4DC] hover:bg-[#FAF7F2] text-[#6B7280] hover:text-[#1F242D] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Changer de jeu</span>
@@ -1215,30 +1215,30 @@ export function NinjaFruitsGameView({
 
         {/* Game Over Overlay */}
         {hud.phase === 'gameover' && (
-          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/82 p-3.5 sm:p-4 overflow-y-auto">
-            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-3.5 sm:space-y-5 shadow-2xl">
-              <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#E8B861]/18 border border-[#E8B861]/35 text-[#E8B861] mx-auto">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#FAF7F2]/85 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-3xl bg-white border border-[#EAE4DC] p-4 sm:p-6 text-center space-y-3.5 sm:space-y-5 shadow-[0_14px_40px_rgba(31,36,45,0.14)]">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#FEF6DC] border border-[#F5D782] text-[#D97706] mx-auto">
                 <Sparkles className="w-6 h-6" />
               </div>
               <div className="space-y-1">
-                <h2 className="text-2xl font-bold text-[#F6F2E9]">Manche terminée</h2>
-                <p className="text-sm text-[#CBC4B6]">
+                <h2 className="text-2xl font-extrabold text-[#1F242D]">Manche terminée</h2>
+                <p className="text-sm text-[#6B7280] font-medium">
                   Toutes vos vies de couple ont sauté sur les bombes !
                 </p>
               </div>
 
               <div className="grid grid-cols-3 gap-2.5 text-center">
-                <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">Score</p>
-                  <p className="text-xl font-bold text-[#F6F2E9] tabular-nums">{hud.score}</p>
+                <div className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-3">
+                  <p className="text-[11px] font-semibold text-[#6B7280]">Score</p>
+                  <p className="text-xl font-extrabold text-[#1F242D] tabular-nums">{hud.score}</p>
                 </div>
-                <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">Max Combo</p>
-                  <p className="text-xl font-bold text-[#E8B861] tabular-nums">{hud.maxCombo}</p>
+                <div className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-3">
+                  <p className="text-[11px] font-semibold text-[#6B7280]">Max Combo</p>
+                  <p className="text-xl font-extrabold text-[#7C5CFC] tabular-nums">{hud.maxCombo}</p>
                 </div>
-                <div className="rounded-xl bg-white/5 border border-white/10 p-3">
-                  <p className="text-[11px] text-[#A9A295]">Géants Duo</p>
-                  <p className="text-xl font-bold text-[#E86A58] tabular-nums">{hud.giantSlicedCount}</p>
+                <div className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-3">
+                  <p className="text-[11px] font-semibold text-[#6B7280]">Géants Duo</p>
+                  <p className="text-xl font-extrabold text-[#FF6B57] tabular-nums">{hud.giantSlicedCount}</p>
                 </div>
               </div>
 
@@ -1247,7 +1247,7 @@ export function NinjaFruitsGameView({
                   type="button"
                   data-start="true"
                   onClick={() => startOrRestart()}
-                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-sm bg-[#E86A58] hover:bg-[#F07A68] text-[#11131E] transition-colors"
+                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-extrabold text-sm bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-md shadow-[#FF6B57]/20 transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Rejouer</span>
@@ -1255,7 +1255,7 @@ export function NinjaFruitsGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="flex-1 min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm bg-white/10 hover:bg-white/16 text-[#F6F2E9] transition-colors"
+                  className="flex-1 min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm bg-[#FAF7F2] hover:bg-[#F1ECE3] border border-[#EAE4DC] text-[#1F242D] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Retour au Hub</span>

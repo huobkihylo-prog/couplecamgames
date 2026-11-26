@@ -93,9 +93,6 @@ function readStoredBaseCams(): boolean {
   }
 }
 
-/** Subtle inline SVG damask pattern for the deep aubergine/plum backdrop */
-const DAMASK_BG_SVG = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Cg fill='none' stroke='%23E8C4A0' stroke-opacity='0.065' stroke-width='1'%3E%3Cpath d='M32 4 L60 32 L32 60 L4 32 Z'/%3E%3Ccircle cx='32' cy='32' r='10'/%3E%3Cpath d='M32 14 L42 32 L32 50 L22 32 Z'/%3E%3Ccircle cx='0' cy='0' r='6'/%3E%3Ccircle cx='64' cy='0' r='6'/%3E%3Ccircle cx='0' cy='64' r='6'/%3E%3Ccircle cx='64' cy='64' r='6'/%3E%3C/g%3E%3C/svg%3E")`;
-
 interface PlayerAvatarBadgeProps {
   color: ParchisiColor;
   name: string;
@@ -145,7 +142,7 @@ function PlayerAvatarBadge({
           cy="26"
           r={radius}
           fill="none"
-          stroke={isActiveTurn ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.12)'}
+          stroke={isActiveTurn ? 'rgba(31,36,45,0.14)' : 'rgba(31,36,45,0.08)'}
           strokeWidth={isActiveTurn ? '3.5' : '2.5'}
         />
         {isActiveTurn ? (
@@ -154,7 +151,7 @@ function PlayerAvatarBadge({
             cy="26"
             r={radius}
             fill="none"
-            stroke={urgentTimer ? '#EF4444' : '#FACC15'}
+            stroke={urgentTimer ? '#EF4444' : '#FF6B57'}
             strokeWidth="3.8"
             strokeLinecap="round"
             strokeDasharray={circumference}
@@ -169,7 +166,7 @@ function PlayerAvatarBadge({
             fill="none"
             stroke={pal.fill}
             strokeWidth="2.5"
-            opacity="0.8"
+            opacity="0.75"
           />
         )}
       </svg>
@@ -178,11 +175,11 @@ function PlayerAvatarBadge({
       <div
         style={{
           boxShadow: isActiveTurn
-            ? `0 0 16px ${pal.fill}99`
-            : '0 2px 8px rgba(0,0,0,0.45)',
+            ? `0 0 14px ${pal.fill}66`
+            : '0 2px 8px rgba(31,36,45,0.12)',
           borderColor: pal.fill,
         }}
-        className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 bg-[#1A0E1A] flex items-center justify-center"
+        className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 bg-white flex items-center justify-center"
       >
         {videoRef && (
           <video
@@ -200,8 +197,8 @@ function PlayerAvatarBadge({
             name={name}
             metricsRef={faceMetricsRef}
             accentColor={pal.fill}
-            bgTop={pal.dark}
-            bgBottom="#1A0E1A"
+            bgTop="#FFE8E2"
+            bgBottom="#EFE9FB"
             isAi={isBot}
           />
         ) : !showLiveVideo ? (
@@ -216,7 +213,7 @@ function PlayerAvatarBadge({
         {showMicMuted && (
           <span
             aria-label="Microphone muted"
-            className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#EF4444] text-white flex items-center justify-center border border-[#1E101D]"
+            className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#EF4444] text-white flex items-center justify-center border border-white"
           >
             <MicOff className="w-2.5 h-2.5" />
           </span>
@@ -227,10 +224,10 @@ function PlayerAvatarBadge({
 
   const infoEl = (
     <div className={`min-w-0 flex flex-col ${align === 'right' ? 'items-end text-right' : 'items-start text-left'}`}>
-      <span className="max-w-[82px] sm:max-w-[116px] truncate text-xs sm:text-sm font-bold text-[#FFF7ED] leading-tight">
+      <span className="max-w-[82px] sm:max-w-[116px] truncate text-xs sm:text-sm font-bold text-[#1F242D] leading-tight">
         {name}
       </span>
-      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#E8C4A0]/85 tabular-nums leading-tight">
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#6B7280] tabular-nums leading-tight">
         <span
           style={{ backgroundColor: pal.fill }}
           className="inline-block w-2 h-2 rounded-full shrink-0"
@@ -900,10 +897,11 @@ export function ParchisiDuoGameView({
     <section
       data-testid="parchisi-game-root"
       style={{
-        backgroundImage: `${DAMASK_BG_SVG}, radial-gradient(circle at 50% 42%, #3B1F37 0%, #2D182A 52%, #1E101D 100%)`,
+        backgroundImage:
+          'radial-gradient(circle at 50% 42%, #FFFDF9 0%, #FAF7F2 60%, #F4EFE6 100%)',
         WebkitTapHighlightColor: 'transparent',
       }}
-      className="relative flex-1 min-h-0 h-full w-full overflow-hidden flex flex-col items-center justify-between px-1 sm:px-4 py-1 sm:py-2 select-none touch-manipulation text-[#FFF7ED]"
+      className="relative flex-1 min-h-0 h-full w-full overflow-hidden flex flex-col items-center justify-between px-1 sm:px-4 py-1 sm:py-2 select-none touch-manipulation text-[#1F242D]"
     >
       {/* CENTERED STAGE: Top HUD + Square Wooden Board (96-100% mobile width) + Bottom HUD snugly framed together */}
       <div className="relative z-10 flex-1 min-h-0 w-full flex flex-col items-center justify-center gap-1.5 sm:gap-2 overflow-hidden">
@@ -942,18 +940,18 @@ export function ParchisiDuoGameView({
             <div className="min-w-0 flex flex-col">
               <span
                 data-testid="parchisi-turn-status"
-                className={`text-xs sm:text-sm font-bold truncate ${
+                className={`text-xs sm:text-sm font-extrabold truncate ${
                   noMovesBanner
-                    ? 'text-[#FCA5A5]'
+                    ? 'text-[#DC2626]'
                     : activeBonus !== null
-                      ? 'text-[#FDE047]'
-                      : 'text-[#FDE8D3]'
+                      ? 'text-[#D97706]'
+                      : 'text-[#1F242D]'
                 }`}
               >
                 {turnStatusLine}
               </span>
               {gameState.lastEventText && gameState.phase !== 'READY' && (
-                <span className="text-[11px] text-[#E8C4A0]/75 truncate max-w-[165px] sm:max-w-[260px]">
+                <span className="text-[11px] text-[#6B7280] font-medium truncate max-w-[165px] sm:max-w-[260px]">
                   {gameState.lastEventText}
                 </span>
               )}
@@ -1023,7 +1021,7 @@ export function ParchisiDuoGameView({
             <div
               role="status"
               data-testid="parchisi-no-moves-toast"
-              className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 rounded-full bg-[#241222]/95 border border-[#FACC15]/75 text-xs sm:text-sm font-bold text-[#FEF3C7] shadow-xl whitespace-nowrap"
+              className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 rounded-full bg-white/95 border border-[#EAE4DC] text-xs sm:text-sm font-extrabold text-[#1F242D] shadow-lg whitespace-nowrap"
             >
               No legal moves
             </div>
@@ -1031,23 +1029,19 @@ export function ParchisiDuoGameView({
 
           {/* Setup Modal Overlay (READY phase) */}
           {gameState.phase === 'READY' && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center p-3 bg-[#1E101D]/65 rounded-2xl">
+            <div className="absolute inset-0 z-30 flex items-center justify-center p-3 bg-[#1F242D]/35 backdrop-blur-xs rounded-2xl">
               <div
                 data-testid="parchisi-setup-modal"
-                style={{
-                  background: 'linear-gradient(180deg, #3A1F36 0%, #241222 100%)',
-                  boxShadow: '0 20px 50px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,232,190,0.22)',
-                }}
-                className="w-full max-w-[330px] rounded-2xl border-2 border-[#C58B58]/80 p-4 sm:p-5 text-center space-y-3.5"
+                className="w-full max-w-[336px] rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_18px_48px_rgba(31,36,45,0.18)] p-5 text-center space-y-3.5"
               >
                 <div className="flex flex-col items-center gap-1">
-                  <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-b from-[#FEF08A] to-[#D97706] text-[#2B1503] shadow-lg">
+                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-[#FEF6DC] border border-[#F3E3BE] text-[#D97706] shadow-xs">
                     <Crown className="w-5 h-5" />
                   </span>
-                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#FFF7ED]">
+                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#1F242D]">
                     Official Parcheesi
                   </h2>
-                  <p className="text-xs text-[#E8C4A0]/85">
+                  <p className="text-xs text-[#6B7280] font-medium">
                     2 Dice · Exit on 5 · Capture +20 · Home +10
                   </p>
                 </div>
@@ -1063,22 +1057,22 @@ export function ParchisiDuoGameView({
                       setSelectedMode('1v1');
                       setGameState(createInitialParchisiState('1v1'));
                     }}
-                    className={`w-full px-3.5 py-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                    className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 ${
                       selectedMode === '1v1'
-                        ? 'bg-[#C58B58]/22 border-[#FACC15] text-white shadow'
-                        : 'bg-black/25 border-white/15 text-[#E8C4A0]/80 hover:border-white/30'
+                        ? 'bg-[#FFE8E2]/65 border-[#FF6B57] text-[#1F242D] shadow-xs'
+                        : 'bg-[#FAF7F2] border-[#EAE4DC] text-[#6B7280] hover:border-[#FF6B57]/40'
                     }`}
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-bold leading-tight flex items-center gap-1.5">
-                        <Users className="w-4 h-4 text-[#FACC15] shrink-0" />
+                      <p className="text-sm font-bold text-[#1F242D] leading-tight flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-[#FF6B57] shrink-0" />
                         <span>1v1 Classic</span>
                       </p>
-                      <p className="text-[11px] text-[#E8C4A0]/80 mt-0.5">
+                      <p className="text-[11px] text-[#6B7280] mt-0.5">
                         Red vs Yellow · Opposite corners
                       </p>
                     </div>
-                    <span className="text-[11px] font-bold text-[#FDE047] shrink-0">Default</span>
+                    <span className="text-[11px] font-bold text-[#FF6B57] shrink-0">Default</span>
                   </button>
 
                   <button
@@ -1090,18 +1084,18 @@ export function ParchisiDuoGameView({
                       setSelectedMode('4p');
                       setGameState(createInitialParchisiState('4p'));
                     }}
-                    className={`w-full px-3.5 py-2.5 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                    className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 ${
                       selectedMode === '4p'
-                        ? 'bg-[#C58B58]/22 border-[#FACC15] text-white shadow'
-                        : 'bg-black/25 border-white/15 text-[#E8C4A0]/80 hover:border-white/30'
+                        ? 'bg-[#EFE9FB] border-[#7C5CFC] text-[#1F242D] shadow-xs'
+                        : 'bg-[#FAF7F2] border-[#EAE4DC] text-[#6B7280] hover:border-[#7C5CFC]/40'
                     }`}
                   >
                     <div className="min-w-0">
-                      <p className="text-sm font-bold leading-tight flex items-center gap-1.5">
-                        <Crown className="w-4 h-4 text-[#64B5F6] shrink-0" />
+                      <p className="text-sm font-bold text-[#1F242D] leading-tight flex items-center gap-1.5">
+                        <Crown className="w-4 h-4 text-[#7C5CFC] shrink-0" />
                         <span>4-Player Classic</span>
                       </p>
-                      <p className="text-[11px] text-[#E8C4A0]/80 mt-0.5">
+                      <p className="text-[11px] text-[#6B7280] mt-0.5">
                         Red, Yellow + Blue & Green AI Bots
                       </p>
                     </div>
@@ -1114,12 +1108,12 @@ export function ParchisiDuoGameView({
                     data-start="true"
                     data-testid="parchisi-start-btn"
                     onClick={() => handleStartMatch(selectedMode)}
-                    className="w-full min-h-[46px] px-5 py-2.5 rounded-xl text-sm sm:text-base font-extrabold text-[#2B1503] bg-gradient-to-b from-[#FEF08A] via-[#FACC15] to-[#D97706] hover:brightness-105 active:scale-[0.98] shadow-[0_6px_18px_rgba(250,204,21,0.4)] transition-all whitespace-nowrap"
+                    className="w-full min-h-[48px] px-5 py-2.5 rounded-2xl text-sm sm:text-base font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] active:scale-[0.98] shadow-[0_6px_18px_rgba(255,107,87,0.35)] transition-all whitespace-nowrap"
                   >
                     Start Match
                   </button>
                 ) : (
-                  <p className="text-xs font-semibold text-[#FDE047] py-1">
+                  <p className="text-xs font-bold text-[#FF6B57] py-1">
                     Waiting for {colorNames.red} to start the match…
                   </p>
                 )}
@@ -1129,49 +1123,45 @@ export function ParchisiDuoGameView({
 
           {/* Victory Modal Overlay (GAME_OVER phase) */}
           {gameState.phase === 'GAME_OVER' && gameState.winner && (
-            <div className="absolute inset-0 z-40 flex items-center justify-center p-3 bg-[#1E101D]/78 rounded-2xl">
+            <div className="absolute inset-0 z-40 flex items-center justify-center p-3 bg-[#1F242D]/40 backdrop-blur-xs rounded-2xl">
               <div
                 data-testid="parchisi-victory-modal"
-                style={{
-                  background: 'linear-gradient(180deg, #3A1F36 0%, #241222 100%)',
-                  boxShadow: '0 22px 54px rgba(0,0,0,0.75)',
-                }}
-                className="w-full max-w-[330px] rounded-2xl border-2 border-[#FACC15] p-5 text-center space-y-4"
+                className="w-full max-w-[336px] rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_20px_54px_rgba(31,36,45,0.2)] p-5 text-center space-y-4"
               >
                 <div className="flex flex-col items-center gap-1.5">
                   <span
                     style={{ backgroundColor: COLOR_PALETTE[gameState.winner].fill }}
-                    className="inline-flex items-center justify-center w-12 h-12 rounded-full border-2 border-[#FEF08A] text-white shadow-lg"
+                    className="inline-flex items-center justify-center w-12 h-12 rounded-full border-2 border-white text-white shadow-md"
                   >
                     <Crown className="w-6 h-6" />
                   </span>
-                  <h2 className="text-2xl font-extrabold text-[#FFF7ED]">
+                  <h2 className="text-2xl font-extrabold text-[#1F242D]">
                     {colorNames[gameState.winner]} Wins!
                   </h2>
-                  <p className="text-xs text-[#E8C4A0]">
+                  <p className="text-xs text-[#6B7280] font-medium">
                     All 4 tokens reached the Center Goal
                   </p>
                 </div>
 
                 {/* 3 Tabular Stats */}
-                <div className="grid grid-cols-3 gap-2 py-2 border-y border-white/12">
+                <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-[#EAE4DC]">
                   <div>
-                    <p className="text-lg font-extrabold text-[#FDE047] tabular-nums">
+                    <p className="text-lg font-extrabold text-[#FF6B57] tabular-nums">
                       {gameState.stats[gameState.winner].captures}
                     </p>
-                    <p className="text-[11px] text-[#E8C4A0]/80">Captures</p>
+                    <p className="text-[11px] text-[#6B7280] font-semibold">Captures</p>
                   </div>
                   <div>
-                    <p className="text-lg font-extrabold text-[#FDE047] tabular-nums">
+                    <p className="text-lg font-extrabold text-[#7C5CFC] tabular-nums">
                       {gameState.stats[gameState.winner].doublesRolled}
                     </p>
-                    <p className="text-[11px] text-[#E8C4A0]/80">Doubles</p>
+                    <p className="text-[11px] text-[#6B7280] font-semibold">Doubles</p>
                   </div>
                   <div>
-                    <p className="text-lg font-extrabold text-[#FDE047] tabular-nums">
+                    <p className="text-lg font-extrabold text-[#16A34A] tabular-nums">
                       {gameState.stats[gameState.winner].homeEntries}/4
                     </p>
-                    <p className="text-[11px] text-[#E8C4A0]/80">Home</p>
+                    <p className="text-[11px] text-[#6B7280] font-semibold">Home</p>
                   </div>
                 </div>
 
@@ -1182,7 +1172,7 @@ export function ParchisiDuoGameView({
                       data-start="true"
                       data-testid="parchisi-play-again-btn"
                       onClick={() => handleStartMatch(gameState.mode)}
-                      className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-sm font-extrabold text-[#2B1503] bg-gradient-to-b from-[#FEF08A] to-[#EAB308] hover:brightness-105 whitespace-nowrap"
+                      className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] shadow-sm whitespace-nowrap"
                     >
                       <RotateCcw className="w-4 h-4 shrink-0" />
                       <span>Play Again</span>
@@ -1191,7 +1181,7 @@ export function ParchisiDuoGameView({
                   <button
                     type="button"
                     onClick={onReturnToHub}
-                    className="flex-1 min-h-[44px] px-3 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white/10 hover:bg-white/18 text-[#FFF7ED] border border-white/20 whitespace-nowrap"
+                    className="flex-1 min-h-[44px] px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F1ECE3] text-[#1F242D] border border-[#EAE4DC] whitespace-nowrap"
                   >
                     Switch Game
                   </button>
@@ -1266,7 +1256,7 @@ export function ParchisiDuoGameView({
               />
             </>
           ) : (
-            <div className="text-right text-[11px] sm:text-xs font-semibold text-[#E8C4A0]/85 tabular-nums">
+            <div className="text-right text-[11px] sm:text-xs font-bold text-[#6B7280] tabular-nums">
               {gameState.phase === 'WAIT_ROLL' || gameState.phase === 'WAIT_MOVE' ? (
                 <span>
                   {Math.ceil(turnSecondsLeft)}s · {COLOR_PALETTE[gameState.turn].label}
@@ -1286,7 +1276,7 @@ export function ParchisiDuoGameView({
         {openDrawer !== 'none' && (
           <div
             data-testid={`parchisi-${openDrawer}-drawer`}
-            className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-1.5 max-w-[94vw] px-2.5 py-2 rounded-2xl bg-[#241222]/96 border border-[#C58B58]/80 shadow-[0_12px_28px_rgba(0,0,0,0.65)]"
+            className="absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 z-40 flex flex-wrap items-center justify-center gap-1.5 max-w-[94vw] px-2.5 py-2 rounded-2xl bg-white border border-[#EAE4DC] shadow-[0_12px_32px_rgba(31,36,45,0.16)]"
           >
             {openDrawer === 'emoji'
               ? QUICK_EMOJIS.map((em) => (
@@ -1295,7 +1285,7 @@ export function ParchisiDuoGameView({
                     type="button"
                     onClick={() => handleSendEmoji(em)}
                     aria-label={`Send ${em} reaction`}
-                    className="w-11 h-11 rounded-full bg-white/8 hover:bg-white/18 active:scale-90 text-xl flex items-center justify-center transition-transform"
+                    className="w-11 h-11 rounded-full bg-[#FAF7F2] hover:bg-[#FFE8E2] active:scale-90 text-xl flex items-center justify-center transition-transform"
                   >
                     {em}
                   </button>
@@ -1305,7 +1295,7 @@ export function ParchisiDuoGameView({
                     key={phrase}
                     type="button"
                     onClick={() => handleSendQuickChat(phrase)}
-                    className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-[#C58B58]/35 text-xs font-bold text-[#FFF7ED] whitespace-nowrap transition-colors"
+                    className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-[#FAF7F2] hover:bg-[#FFE8E2] border border-[#EAE4DC] text-xs font-bold text-[#1F242D] whitespace-nowrap transition-colors"
                   >
                     {phrase}
                   </button>
@@ -1318,10 +1308,10 @@ export function ParchisiDuoGameView({
           data-testid="parchisi-emoji-btn"
           aria-expanded={openDrawer === 'emoji'}
           onClick={() => setOpenDrawer((prev) => (prev === 'emoji' ? 'none' : 'emoji'))}
-          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap ${
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap shadow-xs ${
             openDrawer === 'emoji'
-              ? 'bg-[#C58B58] text-[#1E101D] border-[#FEF08A]'
-              : 'bg-[#361D33]/90 text-[#FFF7ED] border-[#C58B58]/50 hover:bg-[#472743]'
+              ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
+              : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
           }`}
         >
           <Smile className="w-3.5 h-3.5 shrink-0" />
@@ -1333,10 +1323,10 @@ export function ParchisiDuoGameView({
           data-testid="parchisi-chat-btn"
           aria-expanded={openDrawer === 'chat'}
           onClick={() => setOpenDrawer((prev) => (prev === 'chat' ? 'none' : 'chat'))}
-          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap ${
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap shadow-xs ${
             openDrawer === 'chat'
-              ? 'bg-[#C58B58] text-[#1E101D] border-[#FEF08A]'
-              : 'bg-[#361D33]/90 text-[#FFF7ED] border-[#C58B58]/50 hover:bg-[#472743]'
+              ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
+              : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
           }`}
         >
           <MessageSquare className="w-3.5 h-3.5 shrink-0" />
@@ -1350,10 +1340,10 @@ export function ParchisiDuoGameView({
           aria-pressed={baseCamsEnabled}
           onClick={handleToggleBaseCams}
           title={baseCamsEnabled ? 'Caméras dans les bases activées' : 'Tapis Classique opaque'}
-          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold border transition-colors whitespace-nowrap ${
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold border transition-colors whitespace-nowrap shadow-xs ${
             baseCamsEnabled
-              ? 'bg-[#C58B58]/30 text-[#FEF3C7] border-[#FACC15]/75 hover:bg-[#C58B58]/42'
-              : 'bg-[#361D33]/90 text-[#E8C4A0] border-[#C58B58]/50 hover:bg-[#472743]'
+              ? 'bg-[#FFE8E2] text-[#1F242D] border-[#FF6B57]/50 hover:bg-[#FFDAD0]'
+              : 'bg-white text-[#6B7280] border-[#EAE4DC] hover:text-[#1F242D]'
           }`}
         >
           {baseCamsEnabled ? (
@@ -1379,10 +1369,10 @@ export function ParchisiDuoGameView({
           }}
           title="Hand-Shake Dice Roll (MediaPipe)"
           aria-label="Hand-Shake Dice Roll"
-          className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-bold border transition-colors whitespace-nowrap shrink-0 ${
+          className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-bold border transition-colors whitespace-nowrap shrink-0 shadow-xs ${
             handDiceEnabled
-              ? 'bg-[#2E9E5B]/30 text-[#D1FAE5] border-[#4ADE80]/70'
-              : 'bg-[#361D33]/90 text-[#E8C4A0] border-[#C58B58]/40 hover:bg-[#472743]'
+              ? 'bg-[#E6F6EF] text-[#15803D] border-[#86EFAC]'
+              : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
           }`}
         >
           <Hand className="w-4 h-4 shrink-0" />
@@ -1401,9 +1391,9 @@ export function ParchisiDuoGameView({
           aria-label={sfxMutedLocal ? 'Unmute sound' : 'Mute sound'}
           aria-pressed={sfxMutedLocal}
           onClick={handleToggleSoundMute}
-          className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#361D33]/90 text-[#E8C4A0] border border-[#C58B58]/40 hover:bg-[#472743] transition-colors shrink-0"
+          className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] transition-colors shrink-0 shadow-xs"
         >
-          {sfxMutedLocal ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          {sfxMutedLocal ? <VolumeX className="w-4 h-4 text-[#6B7280]" /> : <Volume2 className="w-4 h-4 text-[#FF6B57]" />}
         </button>
 
         {!showLocalLiveVideo && (
@@ -1413,7 +1403,7 @@ export function ParchisiDuoGameView({
             onClick={onRequestCamera}
             title="Activer la caméra en direct"
             aria-label="Activer la caméra"
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#361D33]/90 text-[#FEF08A] border border-[#FACC15]/55 hover:bg-[#472743] transition-colors shrink-0"
+            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#FFE8E2] text-[#FF6B57] border border-[#FF6B57]/40 hover:bg-[#FFDAD0] transition-colors shrink-0 shadow-xs"
           >
             <Camera className="w-4 h-4" />
           </button>

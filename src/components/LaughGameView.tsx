@@ -323,32 +323,32 @@ export function LaughGameView({
   return (
     <main className="flex-1 w-full max-w-6xl mx-auto px-2.5 sm:px-6 py-2.5 sm:py-6 flex flex-col gap-3 sm:gap-5">
       {/* Top Scoreboard & Sensitivity Strip */}
-      <section className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 sm:gap-4 pb-2.5 sm:pb-4 border-b border-white/10">
+      <section className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 sm:gap-4 pb-2.5 sm:pb-4 border-b border-[#EAE4DC]">
         <div className="flex items-center justify-between gap-2 md:block">
           <div>
-            <h1 className="text-lg sm:text-3xl font-semibold text-[#F6F2E9] tracking-tight">
+            <h1 className="text-lg sm:text-3xl font-extrabold text-[#1F242D] tracking-tight">
               Tu ris, tu perds
             </h1>
-            <p className="text-[11px] sm:text-sm text-[#CBC4B6] mt-0.5 tabular-nums">
+            <p className="text-[11px] sm:text-sm text-[#6B7280] mt-0.5 tabular-nums font-medium">
               Manche {gameState.round} · Premier à {gameState.targetWins} points
               {gameState.phase === 'playing' && ` · Chrono ${meterDisplay.elapsedSec.toFixed(1)} s`}
             </p>
           </div>
           {/* Compact Score on Mobile Row 1 */}
           <div
-            className="flex md:hidden items-center gap-3 px-3 py-1.5 rounded-xl bg-[#141724] border border-white/10 shrink-0"
+            className="flex md:hidden items-center gap-3 px-3 py-1.5 rounded-xl bg-white border border-[#EAE4DC] shadow-sm shrink-0"
             aria-label="Score du duel"
           >
             <div className="text-center">
-              <p className="text-[10px] text-[#A9A295] truncate max-w-[54px]">{localName}</p>
-              <p className="font-mono text-lg font-bold text-[#E86A58] tabular-nums leading-none">
+              <p className="text-[10px] text-[#6B7280] font-semibold truncate max-w-[54px]">{localName}</p>
+              <p className="font-mono text-lg font-extrabold text-[#FF6B57] tabular-nums leading-none">
                 {gameState.localScore}
               </p>
             </div>
-            <span className="text-sm font-mono text-white/25" aria-hidden="true">—</span>
+            <span className="text-sm font-mono text-[#D1C9BE]" aria-hidden="true">—</span>
             <div className="text-center">
-              <p className="text-[10px] text-[#A9A295] truncate max-w-[54px]">{partnerName}</p>
-              <p className="font-mono text-lg font-bold text-[#E8B861] tabular-nums leading-none">
+              <p className="text-[10px] text-[#6B7280] font-semibold truncate max-w-[54px]">{partnerName}</p>
+              <p className="font-mono text-lg font-extrabold text-[#7C5CFC] tabular-nums leading-none">
                 {gameState.partnerScore}
               </p>
             </div>
@@ -357,26 +357,26 @@ export function LaughGameView({
 
         {/* Desktop Score Readout */}
         <div
-          className="hidden md:flex items-center gap-6 px-5 py-2.5 rounded-xl bg-[#141724] border border-white/10 self-start md:self-auto"
+          className="hidden md:flex items-center gap-6 px-5 py-2.5 rounded-2xl bg-white border border-[#EAE4DC] shadow-[0_4px_16px_rgba(31,36,45,0.05)] self-start md:self-auto"
           aria-label="Score du duel"
         >
           <div className="text-center min-w-[68px]">
-            <p className="text-xs text-[#A9A295] truncate max-w-[96px]">{localName}</p>
+            <p className="text-xs text-[#6B7280] font-semibold truncate max-w-[96px]">{localName}</p>
             <p
               data-testid="laugh-local-score"
-              className="font-mono text-2xl font-bold text-[#E86A58] tabular-nums leading-tight"
+              className="font-mono text-2xl font-extrabold text-[#FF6B57] tabular-nums leading-tight"
             >
               {gameState.localScore}
             </p>
           </div>
-          <span className="text-lg font-mono text-white/25" aria-hidden="true">
+          <span className="text-lg font-mono text-[#D1C9BE]" aria-hidden="true">
             —
           </span>
           <div className="text-center min-w-[68px]">
-            <p className="text-xs text-[#A9A295] truncate max-w-[96px]">{partnerName}</p>
+            <p className="text-xs text-[#6B7280] font-semibold truncate max-w-[96px]">{partnerName}</p>
             <p
               data-testid="laugh-partner-score"
-              className="font-mono text-2xl font-bold text-[#E8B861] tabular-nums leading-tight"
+              className="font-mono text-2xl font-extrabold text-[#7C5CFC] tabular-nums leading-tight"
             >
               {gameState.partnerScore}
             </p>
@@ -384,7 +384,7 @@ export function LaughGameView({
         </div>
 
         {/* Interactive Sensitivity Segmented Control */}
-        <div className="relative flex items-center gap-1 p-1 rounded-xl bg-[#141724] border border-white/10 self-start md:self-auto">
+        <div className="relative flex items-center gap-1 p-1 rounded-xl bg-white border border-[#EAE4DC] shadow-sm self-start md:self-auto">
           {(['facile', 'normal', 'implacable'] as LaughSensitivity[]).map((lvl) => {
             const active = gameState.sensitivity === lvl;
             return (
@@ -392,15 +392,15 @@ export function LaughGameView({
                 key={lvl}
                 type="button"
                 onClick={() => handleSelectSensitivity(lvl)}
-                className={`relative z-10 min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-                  active ? 'text-[#F6F2E9]' : 'text-[#A9A295] hover:text-[#F6F2E9]'
+                className={`relative z-10 min-h-[40px] sm:min-h-[34px] px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
+                  active ? 'text-white' : 'text-[#6B7280] hover:text-[#1F242D]'
                 }`}
               >
                 {active && (
                   <motion.span
                     layoutId="couplecam-laugh-sensitivity"
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-                    className="absolute inset-0 -z-10 rounded-lg bg-[#252B42] border border-white/10"
+                    className="absolute inset-0 -z-10 rounded-lg bg-[#FF6B57] shadow-sm"
                   />
                 )}
                 {SENSITIVITY_CONFIG[lvl].label}
@@ -442,27 +442,27 @@ export function LaughGameView({
           />
 
           {/* Local Smile Gauge */}
-          <div className="rounded-xl bg-[#141724] border border-white/10 p-3.5 space-y-2">
+          <div className="rounded-2xl bg-white border border-[#EAE4DC] shadow-[0_4px_16px_rgba(31,36,45,0.05)] p-3.5 space-y-2">
             <div className="flex items-center justify-between text-xs sm:text-sm">
-              <span className="font-medium text-[#F6F2E9]">
+              <span className="font-semibold text-[#1F242D]">
                 Jauge sourire ·{' '}
                 <span
                   className={
                     meterDisplay.localStatus === 'cracking'
-                      ? 'text-[#F08272]'
+                      ? 'text-[#E11D48] font-bold'
                       : meterDisplay.localStatus === 'twitch'
-                        ? 'text-[#E8B861]'
-                        : 'text-[#5CC29F]'
+                        ? 'text-[#D97706] font-bold'
+                        : 'text-[#059669] font-bold'
                   }
                 >
                   {getSmileStateLabel(meterDisplay.localStatus)}
                 </span>
               </span>
-              <span className="font-mono font-semibold text-[#F6F2E9] tabular-nums">
+              <span className="font-mono font-bold text-[#1F242D] tabular-nums">
                 {meterDisplay.localSmile} % / {threshold} %
               </span>
             </div>
-            <div className="relative h-3 rounded-full bg-[#0D0F17] overflow-hidden">
+            <div className="relative h-3 rounded-full bg-[#F3EFE8] border border-[#EAE4DC] overflow-hidden">
               <div
                 ref={localBarRef}
                 className="h-full w-full origin-left rounded-full transition-colors"
@@ -470,15 +470,15 @@ export function LaughGameView({
                   transform: 'scaleX(0.02)',
                   backgroundColor:
                     meterDisplay.localStatus === 'cracking'
-                      ? '#E86A58'
+                      ? '#FF6B57'
                       : meterDisplay.localStatus === 'twitch'
-                        ? '#E8B861'
-                        : '#5CC29F',
+                        ? '#F59E0B'
+                        : '#10B981',
                 }}
               />
               {/* Threshold marker */}
               <div
-                className="absolute top-0 bottom-0 w-0.5 bg-[#F6F2E9]/80"
+                className="absolute top-0 bottom-0 w-0.5 bg-[#1F242D]/60"
                 style={{ left: `${threshold}%` }}
                 aria-hidden="true"
               />
@@ -504,27 +504,27 @@ export function LaughGameView({
           />
 
           {/* Partner Smile Gauge */}
-          <div className="rounded-xl bg-[#141724] border border-white/10 p-3.5 space-y-2">
+          <div className="rounded-2xl bg-white border border-[#EAE4DC] shadow-[0_4px_16px_rgba(31,36,45,0.05)] p-3.5 space-y-2">
             <div className="flex items-center justify-between text-xs sm:text-sm">
-              <span className="font-medium text-[#F6F2E9]">
+              <span className="font-semibold text-[#1F242D]">
                 {partnerName} ·{' '}
                 <span
                   className={
                     meterDisplay.partnerStatus === 'cracking'
-                      ? 'text-[#F08272]'
+                      ? 'text-[#E11D48] font-bold'
                       : meterDisplay.partnerStatus === 'twitch'
-                        ? 'text-[#E8B861]'
-                        : 'text-[#5CC29F]'
+                        ? 'text-[#D97706] font-bold'
+                        : 'text-[#059669] font-bold'
                   }
                 >
                   {getSmileStateLabel(meterDisplay.partnerStatus)}
                 </span>
               </span>
-              <span className="font-mono font-semibold text-[#F6F2E9] tabular-nums">
+              <span className="font-mono font-bold text-[#1F242D] tabular-nums">
                 {meterDisplay.partnerSmile} % / {threshold} %
               </span>
             </div>
-            <div className="relative h-3 rounded-full bg-[#0D0F17] overflow-hidden">
+            <div className="relative h-3 rounded-full bg-[#F3EFE8] border border-[#EAE4DC] overflow-hidden">
               <div
                 ref={partnerBarRef}
                 className="h-full w-full origin-left rounded-full transition-colors"
@@ -532,14 +532,14 @@ export function LaughGameView({
                   transform: 'scaleX(0.02)',
                   backgroundColor:
                     meterDisplay.partnerStatus === 'cracking'
-                      ? '#E86A58'
+                      ? '#FF6B57'
                       : meterDisplay.partnerStatus === 'twitch'
-                        ? '#E8B861'
-                        : '#5CC29F',
+                        ? '#F59E0B'
+                        : '#10B981',
                 }}
               />
               <div
-                className="absolute top-0 bottom-0 w-0.5 bg-[#F6F2E9]/80"
+                className="absolute top-0 bottom-0 w-0.5 bg-[#1F242D]/60"
                 style={{ left: `${threshold}%` }}
                 aria-hidden="true"
               />
@@ -549,10 +549,10 @@ export function LaughGameView({
 
         {/* Countdown Overlay */}
         {gameState.phase === 'countdown' && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#0D0F17]/70 rounded-2xl">
-            <div className="text-center space-y-2 px-8 py-6 rounded-2xl bg-[#141724] border border-[#E8B861]/40 shadow-2xl">
-              <p className="text-sm font-medium text-[#E8B861]">Garde ton sérieux...</p>
-              <p className="font-mono text-6xl font-bold text-[#F6F2E9] tabular-nums">
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#FAF7F2]/75 backdrop-blur-sm rounded-2xl">
+            <div className="text-center space-y-2 px-8 py-6 rounded-3xl bg-white border-2 border-[#FF6B57]/35 shadow-[0_12px_36px_rgba(31,36,45,0.12)]">
+              <p className="text-sm font-bold text-[#FF6B57]">Garde ton sérieux...</p>
+              <p className="font-mono text-6xl font-extrabold text-[#1F242D] tabular-nums">
                 {meterDisplay.countdownInt}
               </p>
             </div>
@@ -561,12 +561,12 @@ export function LaughGameView({
       </section>
 
       {/* Bottom Interactive Prompt Deck & Primary Actions */}
-      <section className="rounded-2xl bg-[#141724] border border-white/12 p-3.5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-5">
+      <section className="rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_6px_24px_rgba(31,36,45,0.06)] p-3.5 sm:p-6 flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-5">
         <div className="space-y-1 max-w-2xl">
-          <p className="text-xs font-medium text-[#E8B861]">
+          <p className="text-xs font-bold text-[#7C5CFC]">
             Défi complicité · {gameState.currentPrompt.category}
           </p>
-          <p data-testid="laugh-prompt-text" className="text-sm sm:text-lg font-medium text-[#F6F2E9] leading-snug">
+          <p data-testid="laugh-prompt-text" className="text-sm sm:text-lg font-bold text-[#1F242D] leading-snug">
             « {gameState.currentPrompt.text} »
           </p>
         </div>
@@ -575,9 +575,9 @@ export function LaughGameView({
           <button
             type="button"
             onClick={handleNewPrompt}
-            className="min-h-[48px] sm:min-h-[52px] inline-flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl text-xs sm:text-sm font-semibold bg-white/10 text-[#F6F2E9] border border-white/15 hover:bg-white/16 transition-colors whitespace-nowrap"
+            className="min-h-[48px] sm:min-h-[52px] inline-flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 sm:py-3 rounded-2xl text-xs sm:text-sm font-bold bg-[#FAF7F2] text-[#1F242D] border border-[#EAE4DC] hover:bg-[#F1ECE3] transition-colors whitespace-nowrap"
           >
-            <RefreshCw className="w-4 h-4 shrink-0" />
+            <RefreshCw className="w-4 h-4 shrink-0 text-[#7C5CFC]" />
             <span>Nouveau défi</span>
           </button>
 
@@ -586,7 +586,7 @@ export function LaughGameView({
               type="button"
               data-start="true"
               onClick={handleStartRound}
-              className="flex-1 sm:flex-none min-h-[48px] sm:min-h-[54px] inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-3 rounded-2xl text-sm font-bold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
+              className="flex-1 sm:flex-none min-h-[48px] sm:min-h-[54px] inline-flex items-center justify-center gap-2 px-4 sm:px-5 py-3 rounded-2xl text-sm font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/20 transition-colors whitespace-nowrap"
             >
               <Play className="w-4 h-4 shrink-0" />
               <span>Lancer la manche</span>
@@ -620,8 +620,8 @@ export function LaughGameView({
               }}
               className={`min-h-[54px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm font-bold border transition-colors whitespace-nowrap ${
                 isHoldingSmileTest
-                  ? 'bg-[#E86A58] text-[#0D0F17] border-[#E86A58]'
-                  : 'bg-[#E86A58]/18 text-[#F08272] border-[#E86A58]/45 hover:bg-[#E86A58]/28'
+                  ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
+                  : 'bg-[#FFE8E2] text-[#C84331] border-[#FF6B57]/35 hover:bg-[#FFDAD0]'
               }`}
             >
               <Smile className="w-4 h-4 shrink-0" />
@@ -634,41 +634,41 @@ export function LaughGameView({
       {/* Round Over / Match Over Focused Modal */}
       {(gameState.phase === 'round_over' || gameState.phase === 'match_over') && (
         <div
-          className="fixed inset-0 z-40 flex justify-center bg-[#0D0F17]/80 p-4 overflow-y-auto"
+          className="fixed inset-0 z-40 flex justify-center bg-[#1F242D]/45 backdrop-blur-sm p-4 overflow-y-auto"
           role="dialog"
           aria-modal="true"
           aria-labelledby="laugh-result-heading"
         >
-          <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-5 sm:p-7 space-y-5 shadow-2xl">
+          <div className="my-auto w-full max-w-md rounded-3xl bg-white border border-[#EAE4DC] p-5 sm:p-7 space-y-5 shadow-2xl">
             <div className="space-y-1.5 text-center">
               {gameState.phase === 'match_over' && (
-                <div className="mx-auto w-12 h-12 rounded-full bg-[#E8B861]/15 flex items-center justify-center text-[#E8B861] mb-2">
+                <div className="mx-auto w-12 h-12 rounded-2xl bg-[#FEF6DC] border border-[#F5D782] flex items-center justify-center text-[#D97706] mb-2">
                   <Trophy className="w-6 h-6" />
                 </div>
               )}
-              <p className="text-xs font-medium text-[#E8B861]">
+              <p className="text-xs font-bold uppercase tracking-wider text-[#FF6B57]">
                 {gameState.phase === 'match_over' ? 'Fin de la partie' : `Fin de la manche ${gameState.round}`}
               </p>
-              <h2 id="laugh-result-heading" className="text-2xl font-semibold text-[#F6F2E9]">
+              <h2 id="laugh-result-heading" className="text-2xl font-extrabold text-[#1F242D]">
                 {gameState.lastWinner === 'local'
                   ? `Point pour ${localName} !`
                   : gameState.lastWinner === 'partner'
                     ? `Point pour ${partnerName} !`
                     : 'Double fou rire !'}
               </h2>
-              <p className="text-sm text-[#CBC4B6]">{gameState.lastCrackedReason}</p>
+              <p className="text-sm text-[#6B7280]">{gameState.lastCrackedReason}</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 rounded-xl bg-[#0D0F17] border border-white/10 p-4 text-center">
+            <div className="grid grid-cols-2 gap-3 rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-4 text-center">
               <div>
-                <p className="text-xs text-[#A9A295]">{localName}</p>
-                <p className="font-mono text-2xl font-bold text-[#E86A58] tabular-nums">
+                <p className="text-xs text-[#6B7280] font-semibold">{localName}</p>
+                <p className="font-mono text-2xl font-extrabold text-[#FF6B57] tabular-nums">
                   {gameState.localScore}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-[#A9A295]">{partnerName}</p>
-                <p className="font-mono text-2xl font-bold text-[#E8B861] tabular-nums">
+                <p className="text-xs text-[#6B7280] font-semibold">{partnerName}</p>
+                <p className="font-mono text-2xl font-extrabold text-[#7C5CFC] tabular-nums">
                   {gameState.partnerScore}
                 </p>
               </div>
@@ -679,7 +679,7 @@ export function LaughGameView({
                 type="button"
                 data-start="true"
                 onClick={gameState.phase === 'match_over' ? handleResetMatch : handleStartRound}
-                className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-[#E86A58] text-[#0D0F17] hover:bg-[#F08272] transition-colors whitespace-nowrap"
+                className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/20 transition-colors whitespace-nowrap"
               >
                 {gameState.phase === 'match_over' ? (
                   <>
@@ -696,7 +696,7 @@ export function LaughGameView({
               <button
                 type="button"
                 onClick={onReturnToHub}
-                className="min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-white/10 text-[#F6F2E9] border border-white/12 hover:bg-white/16 transition-colors whitespace-nowrap"
+                className="min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-bold bg-[#FAF7F2] text-[#1F242D] border border-[#EAE4DC] hover:bg-[#F1ECE3] transition-colors whitespace-nowrap"
               >
                 <LayoutGrid className="w-4 h-4 shrink-0" />
                 <span>Changer de jeu</span>

@@ -748,7 +748,7 @@ export function FunambulesGameView({
   return (
     <main className="flex-1 w-full max-w-6xl mx-auto px-1.5 sm:px-6 py-2 sm:py-5 flex flex-col gap-2.5 sm:gap-4">
       {/* Main Full-Bleed Canvas Stage with World-Matched Perimeter HUD */}
-      <div className="relative w-full h-[52dvh] min-h-[360px] max-h-[480px] sm:h-[580px] sm:max-h-none rounded-2xl overflow-hidden border border-white/12 bg-[#0B0E1A]">
+      <div className="relative w-full h-[52dvh] min-h-[360px] max-h-[480px] sm:h-[580px] sm:max-h-none rounded-3xl overflow-hidden border border-[#EAE4DC] bg-[#0B0E1A] shadow-[0_10px_32px_rgba(31,36,45,0.12)]">
         <canvas
           ref={canvasRef}
           data-testid="funambules-canvas"
@@ -762,21 +762,21 @@ export function FunambulesGameView({
           {/* Top Perimeter Strip */}
           <div className="flex items-start justify-between gap-2 sm:gap-3">
             {/* Distance & Harmony Cluster */}
-            <div className="rounded-xl bg-[#0D0F17]/88 border border-white/12 px-4 py-2.5 flex items-center gap-5">
+            <div className="rounded-2xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] px-4 py-2.5 flex items-center gap-5 shadow-md">
               <div>
-                <p className="text-[11px] font-medium text-[#A9A295]">TRAVERSÉE</p>
+                <p className="text-[11px] font-bold text-[#6B7280]">TRAVERSÉE</p>
                 <p
                   data-testid="funambules-distance"
-                  className="font-mono text-xl sm:text-2xl font-bold text-[#F6F2E9] tabular-nums leading-tight"
+                  className="font-mono text-xl sm:text-2xl font-extrabold text-[#1F242D] tabular-nums leading-tight"
                 >
                   {hud.distanceInt}
-                  <span className="text-sm font-normal text-[#A9A295]"> / {hud.targetDistanceM} m</span>
+                  <span className="text-sm font-semibold text-[#6B7280]"> / {hud.targetDistanceM} m</span>
                 </p>
               </div>
-              <div className="h-8 w-px bg-white/10" aria-hidden="true" />
+              <div className="h-8 w-px bg-[#EAE4DC]" aria-hidden="true" />
               <div>
-                <p className="text-[11px] font-medium text-[#A9A295]">HARMONIE</p>
-                <p className="font-mono text-xl sm:text-2xl font-bold text-[#E8B861] tabular-nums leading-tight">
+                <p className="text-[11px] font-bold text-[#6B7280]">HARMONIE</p>
+                <p className="font-mono text-xl sm:text-2xl font-extrabold text-[#FF6B57] tabular-nums leading-tight">
                   {hud.harmonyInt}
                 </p>
               </div>
@@ -785,12 +785,12 @@ export function FunambulesGameView({
             {/* Active Hazard Telegraph / Sync Readout */}
             {hud.phase === 'playing' && (hud.hazardLabel || hud.isSynced) && (
               <div
-                className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-xl border text-xs sm:text-sm font-medium ${
+                className={`hidden sm:flex items-center gap-2 px-4 py-2 rounded-2xl border text-xs sm:text-sm font-bold shadow-md ${
                   hud.hazardPhase === 'active'
-                    ? 'bg-[#2B171B]/92 border-[#E86A58]/60 text-[#F6F2E9]'
+                    ? 'bg-[#FFE8E2]/95 border-[#FF6B57]/50 text-[#B42318]'
                     : hud.hazardPhase === 'telegraph'
-                      ? 'bg-[#261E14]/92 border-[#E8B861]/60 text-[#F2CB80]'
-                      : 'bg-[#102420]/90 border-[#5CC29F]/45 text-[#8AE0C0]'
+                      ? 'bg-[#FEF6DC]/95 border-[#F59E0B]/50 text-[#92400E]'
+                      : 'bg-[#E6F6EF]/95 border-[#10B981]/45 text-[#065F46]'
                 }`}
               >
                 <Wind className="w-4 h-4 shrink-0" />
@@ -815,7 +815,7 @@ export function FunambulesGameView({
                 }}
                 disabled={hud.phase !== 'playing' && hud.phase !== 'paused'}
                 aria-label={hud.phase === 'paused' ? 'Reprendre la partie' : 'Mettre en pause'}
-                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#0D0F17]/90 border border-white/15 text-[#F6F2E9] hover:bg-[#1B2034] disabled:opacity-40 transition-colors"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] disabled:opacity-40 shadow-md transition-colors"
               >
                 {hud.phase === 'paused' ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
               </button>
@@ -827,7 +827,7 @@ export function FunambulesGameView({
                   startTraversal(true);
                 }}
                 aria-label="Recommencer la traversée"
-                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-[#0D0F17]/90 border border-white/15 text-[#F6F2E9] hover:bg-[#1B2034] transition-colors"
+                className="inline-flex items-center justify-center min-w-[44px] min-h-[44px] rounded-xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] shadow-md transition-colors"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
@@ -865,12 +865,12 @@ export function FunambulesGameView({
                     onMouseLeave={() => (buttonDirRef.current = 0)}
                     onTouchStart={() => (buttonDirRef.current = -1)}
                     onTouchEnd={() => (buttonDirRef.current = 0)}
-                    className="min-h-[48px] inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0D0F17]/90 border border-white/15 text-sm font-medium text-[#F6F2E9] hover:bg-[#1F253B] active:bg-[#E86A58] active:text-[#0D0F17] transition-colors whitespace-nowrap"
+                    className="min-h-[48px] inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-sm font-bold text-[#1F242D] hover:bg-[#FAF7F2] active:bg-[#FF6B57] active:text-white shadow-md transition-colors whitespace-nowrap"
                   >
                     <ChevronLeft className="w-4 h-4" />
                     <span>Pencher à gauche</span>
                   </button>
-                  <span className="font-mono text-xs text-[#CBC4B6] tabular-nums bg-[#0D0F17]/88 px-2.5 py-1.5 rounded-lg border border-white/10">
+                  <span className="font-mono text-xs font-bold text-[#1F242D] tabular-nums bg-white/94 backdrop-blur-md px-3 py-1.5 rounded-xl border border-[#EAE4DC] shadow-sm">
                     {hud.angleInt > 0 ? `+${hud.angleInt}°` : `${hud.angleInt}°`}
                   </span>
                   <button
@@ -881,14 +881,14 @@ export function FunambulesGameView({
                     onMouseLeave={() => (buttonDirRef.current = 0)}
                     onTouchStart={() => (buttonDirRef.current = 1)}
                     onTouchEnd={() => (buttonDirRef.current = 0)}
-                    className="min-h-[48px] inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#0D0F17]/90 border border-white/15 text-sm font-medium text-[#F6F2E9] hover:bg-[#1F253B] active:bg-[#E8B861] active:text-[#0D0F17] transition-colors whitespace-nowrap"
+                    className="min-h-[48px] inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-white/94 backdrop-blur-md border border-[#EAE4DC] text-sm font-bold text-[#1F242D] hover:bg-[#FAF7F2] active:bg-[#7C5CFC] active:text-white shadow-md transition-colors whitespace-nowrap"
                   >
                     <span>Pencher à droite</span>
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
               )}
-              <p className="text-xs text-[#CBC4B6] bg-[#0D0F17]/80 px-3 py-1 rounded-lg">
+              <p className="text-xs font-medium text-[#1F242D] bg-white/90 backdrop-blur-sm border border-[#EAE4DC] px-3 py-1 rounded-xl shadow-xs">
                 {trackerStatus === 'ready'
                   ? 'Incline la tête à gauche / droite (ou ← / →) · P Pause · R Recommencer'
                   : 'Utilise ← / → (ou A / D) ou les boutons · P Pause · R Recommencer'}
@@ -911,12 +911,12 @@ export function FunambulesGameView({
 
         {/* Ready / Title Overlay */}
         {hud.phase === 'ready' && (
-          <div className="absolute inset-0 z-20 flex justify-center bg-[#0B0E1A]/78 p-3.5 sm:p-4 overflow-y-auto">
-            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-[#E8B861]/35 p-4 sm:p-7 text-center space-y-3 sm:space-y-5 shadow-2xl">
+          <div className="absolute inset-0 z-20 flex justify-center bg-[#FAF7F2]/88 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto">
+            <div className="my-auto w-full max-w-md rounded-3xl bg-white border border-[#EAE4DC] p-4 sm:p-7 text-center space-y-3 sm:space-y-5 shadow-[0_14px_40px_rgba(31,36,45,0.12)]">
               <div className="space-y-1.5 sm:space-y-2">
-                <p className="text-xs font-medium text-[#E8B861]">Coopération sur fil · 100 mètres</p>
-                <h1 className="text-2xl sm:text-3xl font-semibold text-[#F6F2E9]">Les Funambules</h1>
-                <p className="text-xs sm:text-sm text-[#CBC4B6] leading-relaxed">
+                <p className="text-xs font-extrabold uppercase tracking-wider text-[#7C5CFC]">Coopération sur fil · 100 mètres</p>
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-[#1F242D]">Les Funambules</h1>
+                <p className="text-xs sm:text-sm text-[#6B7280] leading-relaxed font-medium">
                   Penchez la tête ensemble pour garder votre balancier droit face aux rafales, aux
                   pigeons curieux et aux tourbillons au-dessus des toits de Paris.
                 </p>
@@ -928,9 +928,9 @@ export function FunambulesGameView({
                   e.currentTarget.blur();
                   startTraversal(true);
                 }}
-                className="w-full min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-base font-bold bg-[#E8B861] text-[#0D0F17] hover:bg-[#F2CB80] transition-colors whitespace-nowrap shadow-lg shadow-[#E8B861]/25"
+                className="w-full min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-base font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] transition-colors whitespace-nowrap shadow-md shadow-[#FF6B57]/25"
               >
-                <Play className="w-4 h-4 shrink-0" />
+                <Play className="w-4 h-4 shrink-0 fill-current" />
                 <span>Commencer la traversée</span>
               </button>
             </div>
@@ -940,17 +940,17 @@ export function FunambulesGameView({
         {/* Pause Modal */}
         {hud.phase === 'paused' && (
           <div
-            className="absolute inset-0 z-30 flex justify-center bg-[#0B0E1A]/78 p-3.5 sm:p-4 overflow-y-auto"
+            className="absolute inset-0 z-30 flex justify-center bg-[#FAF7F2]/82 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
             role="dialog"
             aria-modal="true"
             aria-labelledby="funambules-pause-title"
           >
-            <div className="my-auto w-full max-w-sm rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-6 text-center space-y-4 sm:space-y-5 shadow-2xl">
+            <div className="my-auto w-full max-w-sm rounded-3xl bg-white border border-[#EAE4DC] p-4 sm:p-6 text-center space-y-4 sm:space-y-5 shadow-[0_14px_40px_rgba(31,36,45,0.12)]">
               <div>
-                <h2 id="funambules-pause-title" className="text-2xl font-semibold text-[#F6F2E9]">
+                <h2 id="funambules-pause-title" className="text-2xl font-extrabold text-[#1F242D]">
                   Partie en pause
                 </h2>
-                <p className="text-sm text-[#CBC4B6] mt-1 tabular-nums">
+                <p className="text-sm text-[#6B7280] font-medium mt-1 tabular-nums">
                   Distance actuelle : {hud.distanceInt} / {hud.targetDistanceM} m
                 </p>
               </div>
@@ -958,15 +958,15 @@ export function FunambulesGameView({
                 <button
                   type="button"
                   onClick={() => togglePause(true)}
-                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-[#E8B861] text-[#0D0F17] hover:bg-[#F2CB80] transition-colors"
+                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/20 transition-colors"
                 >
-                  <Play className="w-4 h-4" />
+                  <Play className="w-4 h-4 fill-current" />
                   <span>Reprendre</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => startTraversal(true)}
-                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-white/10 text-[#F6F2E9] hover:bg-white/16 transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold bg-[#FAF7F2] text-[#1F242D] border border-[#EAE4DC] hover:bg-[#F1ECE3] transition-colors"
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>Recommencer</span>
@@ -974,7 +974,7 @@ export function FunambulesGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border border-white/12 text-[#CBC4B6] hover:text-[#F6F2E9] transition-colors"
+                  className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-semibold border border-[#EAE4DC] text-[#6B7280] hover:text-[#1F242D] transition-colors"
                 >
                   <LayoutGrid className="w-4 h-4" />
                   <span>Changer de jeu</span>
@@ -987,44 +987,44 @@ export function FunambulesGameView({
         {/* Victory / Game Over Modal */}
         {(hud.phase === 'gameover' || hud.phase === 'victory') && (
           <div
-            className="absolute inset-0 z-30 flex justify-center bg-[#0B0E1A]/82 p-3.5 sm:p-4 overflow-y-auto"
+            className="absolute inset-0 z-30 flex justify-center bg-[#FAF7F2]/85 backdrop-blur-sm p-3.5 sm:p-4 overflow-y-auto"
             role="dialog"
             aria-modal="true"
             aria-labelledby="funambules-end-title"
           >
-            <div className="my-auto w-full max-w-md rounded-2xl bg-[#141724] border border-white/15 p-4 sm:p-7 space-y-3.5 sm:space-y-5 shadow-2xl text-center">
+            <div className="my-auto w-full max-w-md rounded-3xl bg-white border border-[#EAE4DC] p-4 sm:p-7 space-y-3.5 sm:space-y-5 shadow-[0_14px_40px_rgba(31,36,45,0.14)] text-center">
               <div className="space-y-1.5">
                 {hud.phase === 'victory' && (
-                  <div className="mx-auto w-12 h-12 rounded-full bg-[#5CC29F]/15 text-[#5CC29F] flex items-center justify-center mb-2">
+                  <div className="mx-auto w-12 h-12 rounded-2xl bg-[#E6F6EF] border border-[#10B981]/30 text-[#059669] flex items-center justify-center mb-2">
                     <Trophy className="w-6 h-6" />
                   </div>
                 )}
-                <p className="text-xs font-medium text-[#E8B861]">
+                <p className="text-xs font-extrabold uppercase tracking-wider text-[#FF6B57]">
                   {hud.phase === 'victory' ? 'Traversée réussie !' : 'Chute dans le filet !'}
                 </p>
-                <h2 id="funambules-end-title" className="text-2xl sm:text-3xl font-semibold text-[#F6F2E9]">
+                <h2 id="funambules-end-title" className="text-2xl sm:text-3xl font-extrabold text-[#1F242D]">
                   {hud.phase === 'victory'
                     ? `${localName} & ${partnerName} au sommet !`
                     : 'Le balancier a basculé'}
                 </h2>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 rounded-xl bg-[#0D0F17] border border-white/10 p-4">
+              <div className="grid grid-cols-3 gap-3 rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-4">
                 <div>
-                  <p className="text-[11px] text-[#A9A295]">Distance</p>
-                  <p className="font-mono text-lg font-bold text-[#F6F2E9] tabular-nums">
+                  <p className="text-[11px] font-semibold text-[#6B7280]">Distance</p>
+                  <p className="font-mono text-lg font-extrabold text-[#1F242D] tabular-nums">
                     {hud.distanceInt} m
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-[#A9A295]">Record</p>
-                  <p className="font-mono text-lg font-bold text-[#E8B861] tabular-nums">
+                  <p className="text-[11px] font-semibold text-[#6B7280]">Record</p>
+                  <p className="font-mono text-lg font-extrabold text-[#FF6B57] tabular-nums">
                     {hud.bestDistanceM} m
                   </p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-[#A9A295]">Harmonie</p>
-                  <p className="font-mono text-lg font-bold text-[#5CC29F] tabular-nums">
+                  <p className="text-[11px] font-semibold text-[#6B7280]">Harmonie</p>
+                  <p className="font-mono text-lg font-extrabold text-[#059669] tabular-nums">
                     {hud.harmonyInt}
                   </p>
                 </div>
@@ -1035,7 +1035,7 @@ export function FunambulesGameView({
                   type="button"
                   data-start="true"
                   onClick={() => startTraversal(true)}
-                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-bold bg-[#E8B861] text-[#0D0F17] hover:bg-[#F2CB80] transition-colors whitespace-nowrap"
+                  className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/20 transition-colors whitespace-nowrap"
                 >
                   <RotateCcw className="w-4 h-4 shrink-0" />
                   <span>{hud.phase === 'victory' ? 'Rejouer' : 'Réessayer'}</span>
@@ -1043,7 +1043,7 @@ export function FunambulesGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold bg-white/10 text-[#F6F2E9] border border-white/12 hover:bg-white/16 transition-colors whitespace-nowrap"
+                  className="min-h-[50px] inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-bold bg-[#FAF7F2] text-[#1F242D] border border-[#EAE4DC] hover:bg-[#F1ECE3] transition-colors whitespace-nowrap"
                 >
                   <LayoutGrid className="w-4 h-4 shrink-0" />
                   <span>Changer de jeu</span>
@@ -1064,7 +1064,7 @@ export function FunambulesGameView({
             onPointerUp={() => (buttonDirRef.current = 0)}
             onPointerCancel={() => (buttonDirRef.current = 0)}
             onPointerLeave={() => (buttonDirRef.current = 0)}
-            className="min-h-[56px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-[#141724] border border-white/18 text-sm font-bold text-[#F6F2E9] active:bg-[#E86A58] active:text-[#0D0F17] shadow-lg transition-colors select-none touch-none"
+            className="min-h-[56px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-white border border-[#EAE4DC] text-sm font-extrabold text-[#1F242D] active:bg-[#FF6B57] active:text-white shadow-sm transition-colors select-none touch-none"
           >
             <ChevronLeft className="w-5 h-5 shrink-0" />
             <span>Gauche</span>
@@ -1076,7 +1076,7 @@ export function FunambulesGameView({
             onPointerUp={() => (buttonDirRef.current = 0)}
             onPointerCancel={() => (buttonDirRef.current = 0)}
             onPointerLeave={() => (buttonDirRef.current = 0)}
-            className="min-h-[56px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-[#141724] border border-white/18 text-sm font-bold text-[#F6F2E9] active:bg-[#E8B861] active:text-[#0D0F17] shadow-lg transition-colors select-none touch-none"
+            className="min-h-[56px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-white border border-[#EAE4DC] text-sm font-extrabold text-[#1F242D] active:bg-[#7C5CFC] active:text-white shadow-sm transition-colors select-none touch-none"
           >
             <span>Droite</span>
             <ChevronRight className="w-5 h-5 shrink-0" />

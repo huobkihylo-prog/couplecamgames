@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { Camera, MicOff } from 'lucide-react';
 import type { FaceMetrics, TrackerStatus } from '../types/duoplay';
 import { useI18n } from '../i18n/LanguageContext';
+import { useMirror } from '../context/MirrorContext';
 import { AvatarCanvas } from './AvatarCanvas';
 
 interface CameraFeedTileProps {
@@ -18,6 +19,7 @@ interface CameraFeedTileProps {
   onVideoRef?: (el: HTMLVideoElement | null) => void;
   onRequestCamera?: () => void;
   compact?: boolean;
+  frameClassName?: string;
   highlightState?: 'neutral' | 'warning' | 'danger' | 'winner';
   footerOverlay?: React.ReactNode;
 }
@@ -36,10 +38,12 @@ export function CameraFeedTile({
   onVideoRef,
   onRequestCamera,
   compact = false,
+  frameClassName,
   highlightState = 'neutral',
   footerOverlay,
 }: CameraFeedTileProps) {
   const { t } = useI18n();
+  const { isMirrored } = useMirror();
   const internalVideoRef = useRef<HTMLVideoElement | null>(null);
   const [liveTrack, setLiveTrack] = useState({
     faceDetected: false,
@@ -90,16 +94,16 @@ export function CameraFeedTile({
 
   const borderClass =
     highlightState === 'danger'
-      ? 'border-[#EF4444] ring-2 ring-[#EF4444]/45'
+      ? 'border-[#EF4444] ring-2 ring-[#EF4444]/35'
       : highlightState === 'warning'
-        ? 'border-[#FACC15] ring-2 ring-[#FACC15]/35'
+        ? 'border-[#F59E0B] ring-2 ring-[#F59E0B]/30'
         : highlightState === 'winner'
-          ? 'border-[#34D399] ring-2 ring-[#34D399]/45'
+          ? 'border-[#16A34A] ring-2 ring-[#16A34A]/35'
           : isLocal
-            ? 'border-[#FF4D8D]/40 ring-1 ring-white/10'
-            : 'border-[#38BDF8]/40 ring-1 ring-white/10';
+            ? 'border-[#FF6B57]/35'
+            : 'border-[#7C5CFC]/30';
 
-  const aspectClass = compact ? 'aspect-[16/10]' : 'aspect-[4/3]';
+  const sizeClass = frameClassName ?? (compact ? 'aspect-[16/10]' : 'aspect-[4/3]');
 
   let liveLabel: string | null = null;
   if (showTrackingReadout && isLocal && showLiveVideo) {
@@ -122,7 +126,7 @@ export function CameraFeedTile({
 
   return (
     <div
-      className={`relative w-full ${aspectClass} rounded-3xl overflow-hidden bg-[#1A1533] border shadow-lg shadow-black/30 transition-all duration-300 ${borderClass}`}
+      className={`relative w-full ${sizeClass} rounded-2xl overflow-hidden bg-white border shadow-[0_4px_20px_rgba(31,36,45,0.06)] transition-all duration-300 ${borderClass}`}
     >
       {showLiveVideo ? (
         <video
@@ -133,35 +137,30 @@ export function CameraFeedTile({
           autoPlay
           playsInline
           muted={isLocal}
-          className={`w-full h-full object-cover ${isLocal ? 'mirror-video' : ''}`}
+          className={`w-full h-full object-cover ${isLocal && isMirrored ? 'mirror-video' : ''}`}
         />
       ) : (
         <AvatarCanvas
           name={name}
           metricsRef={metricsRef}
-          accentColor={isLocal ? '#FF4D8D' : '#38BDF8'}
-          bgTop={isLocal ? '#2C1E59' : '#1E2C59'}
-          bgBottom={isLocal ? '#15102B' : '#111833'}
+          accentColor={isLocal ? '#FF6B57' : '#7C5CFC'}
+          bgTop={isLocal ? '#FFE8E2' : '#EFE9FB'}
+          bgBottom={isLocal ? '#FDF1EC' : '#E6F3FC'}
           isAi={isAi}
         />
       )}
 
-      {/* Measured contrast scrim for crisp legibility over any video luminance */}
-      <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#0D0A1E]/92 via-[#0D0A1E]/50 to-transparent"
-        aria-hidden="true"
-      />
-
-      <div className="absolute inset-x-2.5 sm:inset-x-3.5 bottom-2 sm:bottom-2.5 flex items-end justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs sm:text-sm font-bold text-white truncate">
-            {name}
-            {isLocal && <span className="text-[11px] font-medium text-white/75 ms-1">{t.youTag}</span>}
+      {/* Subtle frosted white label tag (bg-white/85) */}
+      <div className="absolute inset-x-2 sm:inset-x-2.5 bottom-2 flex items-end justify-between gap-1.5">
+        <div className="min-w-0 max-w-[78%] inline-flex flex-col px-2.5 py-1 rounded-xl bg-white/88 backdrop-blur-md border border-[#EAE4DC]/80 shadow-sm">
+          <p className="text-[11px] sm:text-xs font-bold text-[#1F242D] truncate leading-tight">
+            {isAi ? `🤖 ${name}` : name}
+            {isLocal && <span className="text-[10px] font-semibold text-[#6B7280] ms-1">{t.youTag}</span>}
           </p>
           {(liveLabel || subtitle) && (
             <p
-              className={`text-[11px] sm:text-xs truncate tabular-nums ${
-                liveLabel && liveTrack.faceDetected ? 'text-[#34D399]' : 'text-white/75'
+              className={`text-[10px] truncate tabular-nums leading-tight ${
+                liveLabel && liveTrack.faceDetected ? 'text-[#16A34A] font-semibold' : 'text-[#6B7280]'
               }`}
             >
               {liveLabel || subtitle}
@@ -169,10 +168,10 @@ export function CameraFeedTile({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {micMuted && isLocal && (
             <span
-              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#EF4444]/85 text-white"
+              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#EF4444] text-white shadow-sm"
               title={t.micMuted}
             >
               <MicOff className="w-3.5 h-3.5" />
@@ -184,9 +183,9 @@ export function CameraFeedTile({
               onClick={onRequestCamera}
               title={t.enableCamera}
               aria-label={t.enableCamera}
-              className="min-h-[32px] inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] sm:text-xs font-semibold bg-white/15 backdrop-blur-md text-white border border-white/25 hover:bg-white/25 transition-colors whitespace-nowrap"
+              className="min-h-[30px] inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-white/92 backdrop-blur-md text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FAF7F2] shadow-sm transition-colors whitespace-nowrap"
             >
-              <Camera className="w-3.5 h-3.5 shrink-0" />
+              <Camera className="w-3.5 h-3.5 text-[#FF6B57] shrink-0" />
               <span className="hidden sm:inline">{t.enableCamera}</span>
             </button>
           )}

@@ -756,22 +756,22 @@ export function WhisperSecretsGameView({
       data-stage={stage}
       data-role={role}
       data-panic={panicMode ? 'true' : 'false'}
-      className="relative flex-1 w-full overflow-x-hidden pb-28 lg:pb-8"
+      className="relative flex-1 w-full overflow-x-hidden pb-28 lg:pb-8 bg-[#FAF7F2]"
       style={{
         background:
-          'radial-gradient(1100px 620px at 18% 8%, rgba(190, 18, 60, 0.34), transparent 62%), radial-gradient(820px 560px at 85% 15%, rgba(245, 158, 11, 0.16), transparent 60%), linear-gradient(155deg, #2A0410 0%, #4C0519 42%, #1B0914 100%)',
+          'radial-gradient(960px 540px at 15% 6%, rgba(252, 234, 240, 0.92), transparent 62%), radial-gradient(840px 520px at 88% 12%, rgba(255, 232, 226, 0.72), transparent 60%), #FAF7F2',
       }}
     >
-      {/* Subtle warm candlelight ambient glow */}
+      {/* Subtle warm pastel glow */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
       >
         <div
-          className="absolute -top-24 left-1/2 -translate-x-1/2 w-[540px] h-[260px] rounded-full blur-3xl opacity-35 animate-pulse"
+          className="absolute -top-24 left-1/2 -translate-x-1/2 w-[540px] h-[260px] rounded-full blur-3xl opacity-50 animate-pulse"
           style={{
             background:
-              'radial-gradient(circle, rgba(245, 158, 11, 0.55) 0%, rgba(190, 18, 60, 0.35) 55%, transparent 80%)',
+              'radial-gradient(circle, rgba(255, 107, 87, 0.16) 0%, rgba(124, 92, 252, 0.12) 55%, transparent 80%)',
             animationDuration: '4.8s',
           }}
         />
@@ -801,11 +801,11 @@ export function WhisperSecretsGameView({
                   ease: 'easeIn',
                 }}
                 style={{ left: `${h.leftPct}%` }}
-                className="absolute top-0 text-[#FB7185] drop-shadow-[0_0_12px_rgba(245,158,11,0.6)]"
+                className="absolute top-0 text-[#FF6B57] drop-shadow-[0_4px_12px_rgba(255,107,87,0.35)]"
               >
                 <Heart
                   style={{ width: h.sizePx, height: h.sizePx }}
-                  className="fill-[#BE123C] text-[#F59E0B]"
+                  className="fill-[#FF6B57] text-[#E11D48]"
                 />
               </motion.div>
             ))}
@@ -815,53 +815,53 @@ export function WhisperSecretsGameView({
 
       <div className="relative z-10 max-w-6xl mx-auto px-2.5 sm:px-6 pt-2 sm:pt-5 space-y-2.5 sm:space-y-5">
         {/* Top Game Header: Compact single-row on mobile, full bar on desktop */}
-        <div className="flex items-center justify-between gap-2 sm:gap-3 rounded-2xl bg-[#1C0711]/78 border border-[#F59E0B]/22 px-3 sm:px-4 py-2 sm:py-3 shadow-lg shadow-black/30">
+        <div className="flex items-center justify-between gap-2 sm:gap-3 rounded-2xl bg-white/95 backdrop-blur-md border border-[#EAE4DC] px-3 sm:px-4 py-2 sm:py-3 shadow-[0_6px_24px_rgba(31,36,45,0.06)]">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <h1 className="text-sm sm:text-2xl font-bold sm:font-semibold text-[#FFF7ED] tracking-tight truncate">
+              <h1 className="text-sm sm:text-2xl font-extrabold sm:font-bold text-[#1F242D] tracking-tight truncate">
                 {t.whisperTitle}
               </h1>
-              <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-[#F59E0B] tabular-nums whitespace-nowrap">
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-[#FF6B57] tabular-nums whitespace-nowrap">
                 {t.roundLabel} {round} ·{' '}
                 {role === 'whisperer' ? t.whisperRoleWhisperer : t.whisperRoleGuesser}
               </span>
             </div>
-            <p className="hidden sm:block text-xs sm:text-sm text-[#FDE6D8]/75 mt-0.5 truncate">
+            <p className="hidden sm:block text-xs sm:text-sm text-[#6B7280] mt-0.5 truncate">
               {t.whisperSubtitle}
             </p>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Compact score + complicity heat indicator */}
-            <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-black/30 border border-white/10">
+            <div className="flex items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-[#FAF7F2] border border-[#EAE4DC]">
               <div className="text-end">
-                <p className="text-[9px] sm:text-[10px] uppercase tracking-wider text-[#FDE6D8]/65">
+                <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-wider text-[#6B7280]">
                   {t.whisperScoreLabel}
                 </p>
                 <p
                   data-testid="whisper-score"
-                  className="text-xs sm:text-base font-bold text-[#FFF7ED] tabular-nums leading-tight"
+                  className="text-xs sm:text-base font-extrabold text-[#1F242D] tabular-nums leading-tight"
                 >
                   {coupleScore} pts
                 </p>
               </div>
-              <div className="h-6 sm:h-7 w-px bg-white/10" aria-hidden="true" />
+              <div className="h-6 sm:h-7 w-px bg-[#EAE4DC]" aria-hidden="true" />
               <div className="min-w-[66px] sm:min-w-[104px]">
-                <div className="flex items-center justify-between gap-1 text-[9px] sm:text-[10px] uppercase tracking-wider text-[#FCD34D]">
+                <div className="flex items-center justify-between gap-1 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-[#FF6B57]">
                   <span className="inline-flex items-center gap-0.5 sm:gap-1">
-                    <Flame className="w-3 h-3 text-[#F59E0B]" />
+                    <Flame className="w-3 h-3 text-[#FF6B57]" />
                     <span className="hidden sm:inline">{t.whisperHeatLabel.split('/')[0].trim()}</span>
                   </span>
                   <span data-testid="whisper-heat" className="font-mono font-bold tabular-nums">
                     {complicityHeat}%
                   </span>
                 </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-white/12 overflow-hidden">
+                <div className="mt-1 h-1.5 w-full rounded-full bg-[#EAE4DC] overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all duration-500"
                     style={{
                       width: `${complicityHeat}%`,
-                      background: 'linear-gradient(90deg, #BE123C 0%, #F59E0B 100%)',
+                      background: 'linear-gradient(90deg, #FF6B57 0%, #E11D48 100%)',
                     }}
                   />
                 </div>
@@ -875,10 +875,10 @@ export function WhisperSecretsGameView({
               onClick={togglePanicMode}
               aria-pressed={panicMode}
               title={t.whisperPanicHint}
-              className={`hidden lg:inline-flex min-h-[44px] items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold border transition-all whitespace-nowrap ${
+              className={`hidden lg:inline-flex min-h-[44px] items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-bold border transition-all whitespace-nowrap cursor-pointer ${
                 panicMode
-                  ? 'bg-[#F59E0B] text-[#1C0711] border-[#FCD34D] shadow-lg shadow-[#F59E0B]/30'
-                  : 'bg-[#4C0519]/85 text-[#FFF7ED] border-[#FB7185]/35 hover:bg-[#BE123C]/50 hover:border-[#F59E0B]/50'
+                  ? 'bg-[#FF6B57] text-white border-[#FF6B57] shadow-md shadow-[#FF6B57]/25'
+                  : 'bg-[#FCEAF0] text-[#BE123C] border-[#F4C2D4] hover:bg-[#FADBE6]'
               }`}
             >
               {panicMode ? (
@@ -901,13 +901,13 @@ export function WhisperSecretsGameView({
           <div
             role="status"
             data-testid="whisper-panic-banner"
-            className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#1C0711]/95 border border-[#F59E0B]/45 px-4 py-2.5 text-xs sm:text-sm text-[#FDE6D8]"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-[#FEF6DC] border border-[#F5D782] px-4 py-2.5 text-xs sm:text-sm text-[#92400E] shadow-sm"
           >
-            <span className="inline-flex items-center gap-2 font-medium">
-              <ShieldAlert className="w-4 h-4 text-[#F59E0B] shrink-0" />
+            <span className="inline-flex items-center gap-2 font-semibold">
+              <ShieldAlert className="w-4 h-4 text-[#D97706] shrink-0" />
               <span>{t.whisperPanicBanner}</span>
             </span>
-            <span className="hidden sm:inline text-[#FCD34D] font-mono text-xs">{t.whisperPanicHint}</span>
+            <span className="hidden sm:inline text-[#B45309] font-mono text-xs font-semibold">{t.whisperPanicHint}</span>
           </div>
         )}
 
@@ -915,7 +915,7 @@ export function WhisperSecretsGameView({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 sm:gap-5 items-start">
           {/* LEFT / CENTER STAGE: Main Video Feed with Luminous Countdown Ring & Lip Zoom */}
           <section className="lg:col-span-7 space-y-2.5 sm:space-y-3">
-            <div className="relative rounded-2xl p-[3px] bg-gradient-to-br from-[#BE123C]/65 via-[#4C0519] to-[#F59E0B]/55 shadow-2xl shadow-black/50">
+            <div className="relative rounded-3xl p-[3px] bg-gradient-to-br from-[#FF6B57]/55 via-[#FCEAF0] to-[#7C5CFC]/45 shadow-[0_14px_40px_rgba(31,36,45,0.10)]">
               {/* Progressive Luminous SVG Countdown Ring around video */}
               {stage === 'whispering' && (
                 <svg
@@ -926,9 +926,9 @@ export function WhisperSecretsGameView({
                 >
                   <defs>
                     <linearGradient id="whisper-ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor={isFinalFive ? '#F59E0B' : '#FB7185'} />
-                      <stop offset="55%" stopColor="#F59E0B" />
-                      <stop offset="100%" stopColor="#BE123C" />
+                      <stop offset="0%" stopColor={isFinalFive ? '#E11D48' : '#FF6B57'} />
+                      <stop offset="55%" stopColor="#FF6B57" />
+                      <stop offset="100%" stopColor="#7C5CFC" />
                     </linearGradient>
                   </defs>
                   <rect
@@ -939,7 +939,7 @@ export function WhisperSecretsGameView({
                     rx="4"
                     ry="4"
                     fill="none"
-                    stroke="rgba(255,255,255,0.12)"
+                    stroke="rgba(31,36,45,0.12)"
                     strokeWidth="1.2"
                   />
                   <rect
@@ -962,7 +962,7 @@ export function WhisperSecretsGameView({
               )}
 
               <div
-                className={`relative w-full rounded-[14px] overflow-hidden bg-[#14070E] ${
+                className={`relative w-full rounded-[21px] overflow-hidden bg-[#241B29] ${
                   stage === 'writing'
                     ? 'h-[138px] sm:h-auto sm:aspect-[16/10]'
                     : 'h-[235px] sm:h-auto sm:aspect-[16/10]'
@@ -996,37 +996,37 @@ export function WhisperSecretsGameView({
                     <AvatarCanvas
                       name={mainName}
                       metricsRef={mainMetrics}
-                      accentColor="#F59E0B"
-                      bgTop="#3C0A1E"
-                      bgBottom="#16060F"
+                      accentColor="#FF6B57"
+                      bgTop="#3A283A"
+                      bgBottom="#231A26"
                       isAi={mainIsAi}
                     />
                   )}
                 </div>
 
-                {/* Soft romantic vignette */}
+                {/* Soft vignette for nameplate legibility */}
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#14050C]/90 via-transparent to-[#14050C]/40"
+                  className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#1F242D]/80 via-transparent to-[#1F242D]/25"
                 />
 
                 {/* Stage 1 Guesser Veil: "Ton partenaire écrit un murmure secret..." */}
                 {stage === 'writing' && role === 'guesser' && !panicMode && (
-                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center px-6 bg-[#2A0410]/65 backdrop-blur-[3px]">
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center px-6 bg-[#FAF7F2]/88 backdrop-blur-sm">
                     <motion.div
-                      animate={{ scale: [1, 1.07, 1], opacity: [0.82, 1, 0.82] }}
+                      animate={{ scale: [1, 1.07, 1], opacity: [0.85, 1, 0.85] }}
                       transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-                      className="w-12 h-12 rounded-full bg-[#BE123C]/40 border border-[#F59E0B]/45 flex items-center justify-center mb-3 shadow-lg shadow-[#F59E0B]/20"
+                      className="w-12 h-12 rounded-2xl bg-[#FCEAF0] border border-[#F4C2D4] flex items-center justify-center mb-3 shadow-sm"
                     >
-                      <Sparkles className="w-6 h-6 text-[#FCD34D]" />
+                      <Sparkles className="w-6 h-6 text-[#FF6B57]" />
                     </motion.div>
                     <p
                       data-testid="whisper-partner-writing-msg"
-                      className="text-lg sm:text-xl font-semibold text-[#FFF7ED]"
+                      className="text-lg sm:text-xl font-extrabold text-[#1F242D]"
                     >
                       {isSolo ? t.whisperSoloAiPreparing : t.whisperPartnerWriting}
                     </p>
-                    <p className="text-xs sm:text-sm text-[#FDE6D8]/80 mt-1.5 max-w-sm">
+                    <p className="text-xs sm:text-sm text-[#6B7280] mt-1.5 max-w-sm">
                       {t.whisperPartnerWritingSub}
                     </p>
                   </div>
@@ -1038,7 +1038,7 @@ export function WhisperSecretsGameView({
                     {stage === 'whispering' && role === 'whisperer' && whisperMicLocked && (
                       <div
                         data-testid="whisper-muted-badge"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#4C0519]/92 border border-[#F59E0B]/55 text-xs sm:text-sm font-semibold text-[#FFF7ED] shadow-md"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#F5C5B8] text-xs sm:text-sm font-bold text-[#FF6B57] shadow-md"
                       >
                         <span>
                           {localStream ? t.whisperMicMutedBadge : t.whisperMicVirtualBadge}
@@ -1047,7 +1047,7 @@ export function WhisperSecretsGameView({
                     )}
 
                     {stage === 'whispering' && role === 'guesser' && (
-                      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1C0711]/88 border border-[#5CC29F]/40 text-xs font-medium text-[#D1FAE5]">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/95 backdrop-blur-md border border-[#B5E5CF] text-xs font-semibold text-[#059669] shadow-md">
                         <span className="truncate max-w-[230px] sm:max-w-none">
                           {t.whisperMicOpenPartner}
                         </span>
@@ -1063,16 +1063,16 @@ export function WhisperSecretsGameView({
                           type="button"
                           data-testid="whisper-zoom-toggle"
                           onClick={() => setZoomEnabled((z) => !z)}
-                          className="hidden lg:inline-flex min-h-[40px] items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#1C0711]/88 text-[#FFF7ED] border border-[#F59E0B]/40 hover:bg-[#4C0519] transition-colors whitespace-nowrap"
+                          className="hidden lg:inline-flex min-h-[40px] items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white/95 backdrop-blur-md text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FAF7F2] shadow-sm transition-colors whitespace-nowrap cursor-pointer"
                         >
                           {zoomEnabled ? (
                             <>
-                              <Minimize2 className="w-3.5 h-3.5 text-[#F59E0B]" />
+                              <Minimize2 className="w-3.5 h-3.5 text-[#FF6B57]" />
                               <span>{t.whisperZoomFullFace}</span>
                             </>
                           ) : (
                             <>
-                              <Maximize2 className="w-3.5 h-3.5 text-[#F59E0B]" />
+                              <Maximize2 className="w-3.5 h-3.5 text-[#FF6B57]" />
                               <span>{t.whisperZoomLips}</span>
                             </>
                           )}
@@ -1082,10 +1082,10 @@ export function WhisperSecretsGameView({
                     {stage === 'whispering' && (
                       <div
                         data-testid="whisper-countdown"
-                        className={`px-3 py-1.5 rounded-lg font-mono text-base sm:text-lg font-bold tabular-nums border shadow-md ${
+                        className={`px-3 py-1.5 rounded-xl font-mono text-base sm:text-lg font-extrabold tabular-nums border shadow-md ${
                           isFinalFive
-                            ? 'bg-[#BE123C] text-[#FFF7ED] border-[#FCD34D] animate-pulse'
-                            : 'bg-[#1C0711]/90 text-[#FCD34D] border-[#F59E0B]/40'
+                            ? 'bg-[#E11D48] text-white border-[#FDA4AF] animate-pulse'
+                            : 'bg-white/95 backdrop-blur-md text-[#FF6B57] border-[#EAE4DC]'
                         }`}
                       >
                         {Math.ceil(timeLeftSec)}s
@@ -1097,15 +1097,15 @@ export function WhisperSecretsGameView({
                 {/* Bottom Video Overlay: Nameplate + Secondary PiP Feed */}
                 <div className="absolute inset-x-3 bottom-3 z-10 flex items-end justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#FFF7ED] truncate">
+                    <p className="text-sm font-bold text-white drop-shadow-sm truncate">
                       {mainName}
                       {mainShowsLocal && (
-                        <span className="text-xs font-normal text-[#FDE6D8]/70 ms-1.5">
+                        <span className="text-xs font-normal text-white/80 ms-1.5">
                           {t.youTag}
                         </span>
                       )}
                     </p>
-                    <p className="text-xs text-[#FDE6D8]/75 truncate">
+                    <p className="text-xs text-white/80 truncate">
                       {stage === 'whispering' && isSolo && role === 'whisperer'
                         ? t.whisperSoloPreviewHint
                         : trackerStatus === 'ready'
@@ -1115,7 +1115,7 @@ export function WhisperSecretsGameView({
                   </div>
 
                   {/* Compact PiP Secondary Camera Tile */}
-                  <div className="relative w-24 sm:w-32 aspect-[4/3] rounded-xl overflow-hidden border border-[#F59E0B]/35 bg-[#1A0812] shadow-lg shrink-0">
+                  <div className="relative w-24 sm:w-32 aspect-[4/3] rounded-2xl overflow-hidden border-2 border-white/85 bg-[#2A2233] shadow-lg shrink-0">
                     <div className={`w-full h-full ${panicMode ? 'blur-3xl scale-110' : ''}`}>
                       {pipIsLiveVideo ? (
                         <video
@@ -1129,15 +1129,15 @@ export function WhisperSecretsGameView({
                         <AvatarCanvas
                           name={pipName}
                           metricsRef={pipMetrics}
-                          accentColor="#BE123C"
-                          bgTop="#2E0818"
-                          bgBottom="#13050C"
+                          accentColor="#7C5CFC"
+                          bgTop="#322845"
+                          bgBottom="#1F1A2C"
                           isAi={pipIsAi}
                         />
                       )}
                     </div>
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-2 py-1">
-                      <p className="text-[10px] font-medium text-[#FFF7ED] truncate">{pipName}</p>
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1">
+                      <p className="text-[10px] font-semibold text-white truncate">{pipName}</p>
                     </div>
                   </div>
                 </div>
@@ -1146,12 +1146,12 @@ export function WhisperSecretsGameView({
 
             {/* Optional Enable Camera prompt — hidden on mobile to keep controls immediately visible without scroll */}
             {!localStream && (
-              <div className="hidden sm:flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#1C0711]/70 border border-white/10 px-3.5 py-2.5 text-xs text-[#FDE6D8]/80">
-                <span>{t.camFallback}</span>
+              <div className="hidden sm:flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-white border border-[#EAE4DC] px-4 py-2.5 text-xs text-[#6B7280] shadow-sm">
+                <span className="font-medium">{t.camFallback}</span>
                 <button
                   type="button"
                   onClick={onRequestCamera}
-                  className="min-h-[40px] px-3.5 py-1.5 rounded-lg bg-[#BE123C]/40 hover:bg-[#BE123C]/65 text-[#FFF7ED] font-semibold border border-[#F59E0B]/35 transition-colors whitespace-nowrap"
+                  className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#FFE8E2] hover:bg-[#FFDAD0] text-[#FF6B57] font-bold border border-[#F5C5B8] transition-colors whitespace-nowrap cursor-pointer"
                 >
                   {t.enableCamera}
                 </button>
@@ -1161,23 +1161,23 @@ export function WhisperSecretsGameView({
 
           {/* RIGHT PANEL: 4-Stage Interactive Parlor Controls */}
           <section className="lg:col-span-5">
-            <div className="rounded-2xl bg-[#1C0711]/85 border border-[#F59E0B]/25 ring-1 ring-inset ring-white/5 p-3 sm:p-6 shadow-2xl shadow-black/45 backdrop-blur-md">
+            <div className="rounded-3xl bg-white/95 border border-[#EAE4DC] p-3.5 sm:p-6 shadow-[0_10px_32px_rgba(31,36,45,0.07)] backdrop-blur-md">
               {panicMode ? (
                 /* Privacy Mode Veil over control panel so no secret phrase/dare is visible */
                 <div className="py-10 text-center space-y-4">
-                  <div className="w-14 h-14 mx-auto rounded-full bg-[#4C0519] border border-[#F59E0B]/40 flex items-center justify-center">
-                    <EyeOff className="w-7 h-7 text-[#F59E0B]" />
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-[#FCEAF0] border border-[#F4C2D4] flex items-center justify-center">
+                    <EyeOff className="w-7 h-7 text-[#BE123C]" />
                   </div>
                   <div className="space-y-1">
-                    <h2 className="text-xl font-semibold text-[#FFF7ED]">
+                    <h2 className="text-xl font-extrabold text-[#1F242D]">
                       {t.whisperPanicBtn}
                     </h2>
-                    <p className="text-sm text-[#FDE6D8]/75">{t.whisperPanicBanner}</p>
+                    <p className="text-sm text-[#6B7280]">{t.whisperPanicBanner}</p>
                   </div>
                   <button
                     type="button"
                     onClick={togglePanicMode}
-                    className="hidden lg:inline-flex min-h-[48px] items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold bg-[#F59E0B] text-[#1C0711] hover:bg-[#FBBF24] transition-colors"
+                    className="hidden lg:inline-flex min-h-[48px] items-center justify-center gap-2 px-6 py-3 rounded-2xl text-sm font-bold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/20 transition-colors cursor-pointer"
                   >
                     <Eye className="w-4 h-4" />
                     <span>{t.whisperPanicRestoreBtn}</span>
@@ -1198,7 +1198,7 @@ export function WhisperSecretsGameView({
                       className="space-y-2.5 sm:space-y-4"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-[#F59E0B]">
+                        <span className="text-xs font-bold uppercase tracking-wider text-[#FF6B57]">
                           {role === 'whisperer'
                             ? `1 · ${t.whisperRoleWhisperer}`
                             : `1 · ${t.whisperRoleGuesser}`}
@@ -1208,9 +1208,9 @@ export function WhisperSecretsGameView({
                             type="button"
                             data-testid="whisper-solo-switch-role"
                             onClick={handleSoloSwitchRole}
-                            className="min-h-[36px] sm:min-h-[44px] inline-flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold bg-white/10 hover:bg-white/16 text-[#FDE6D8] border border-white/15 transition-colors whitespace-nowrap"
+                            className="min-h-[36px] sm:min-h-[44px] inline-flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-xs sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F1ECE3] text-[#1F242D] border border-[#EAE4DC] transition-colors whitespace-nowrap cursor-pointer"
                           >
-                            <ArrowLeftRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#F59E0B]" />
+                            <ArrowLeftRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#FF6B57]" />
                             <span>{t.whisperSoloSwitchRole}</span>
                           </button>
                         )}
@@ -1228,10 +1228,10 @@ export function WhisperSecretsGameView({
                                   type="button"
                                   data-level={item.id}
                                   onClick={() => setLevel(item.id)}
-                                  className={`min-h-[44px] sm:min-h-[50px] px-2 sm:px-2.5 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold border transition-all whitespace-nowrap ${
+                                  className={`min-h-[44px] sm:min-h-[50px] px-2 sm:px-2.5 py-2 sm:py-2.5 rounded-xl sm:rounded-2xl text-xs sm:text-sm font-bold border transition-all whitespace-nowrap cursor-pointer ${
                                     selected
-                                      ? 'bg-gradient-to-r from-[#BE123C] to-[#E11D48] text-[#FFF7ED] border-[#F59E0B]/75 shadow-md shadow-[#BE123C]/40'
-                                      : 'bg-black/35 text-[#FDE6D8]/85 border-white/14 hover:bg-white/10 hover:text-[#FFF7ED]'
+                                      ? 'bg-[#FF6B57] text-white border-[#FF6B57] shadow-md shadow-[#FF6B57]/25'
+                                      : 'bg-[#FAF7F2] text-[#6B7280] border-[#EAE4DC] hover:bg-[#FCEAF0] hover:text-[#1F242D]'
                                   }`}
                                 >
                                   {item.label}
@@ -1245,11 +1245,11 @@ export function WhisperSecretsGameView({
                             <div className="flex items-center justify-between gap-2">
                               <label
                                 htmlFor="whisper-secret-input"
-                                className="text-xs sm:text-sm font-semibold text-[#FFF7ED] truncate"
+                                className="text-xs sm:text-sm font-bold text-[#1F242D] truncate"
                               >
                                 {t.whisperInputLabel}
                               </label>
-                              <span className="text-xs font-mono text-[#FCD34D] tabular-nums shrink-0">
+                              <span className="text-xs font-mono font-semibold text-[#6B7280] tabular-nums shrink-0">
                                 {secretInput.length}/{WHISPER_MAX_LENGTH}
                               </span>
                             </div>
@@ -1264,7 +1264,7 @@ export function WhisperSecretsGameView({
                                 onChange={(e) => setSecretInput(e.target.value)}
                                 placeholder={t.whisperInputPlaceholder}
                                 autoComplete="off"
-                                className="flex-1 min-w-0 min-h-[48px] sm:min-h-[54px] px-3 sm:px-4 py-2.5 sm:py-3.5 rounded-2xl bg-black/45 border border-[#F59E0B]/35 text-[#FFF7ED] placeholder-[#FDE6D8]/45 text-base focus:border-[#F59E0B] focus:outline-none transition-colors"
+                                className="flex-1 min-w-0 min-h-[48px] sm:min-h-[54px] px-3 sm:px-4 py-2.5 sm:py-3.5 rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] text-[#1F242D] placeholder-[#9CA3AF] text-base focus:bg-white focus:border-[#FF6B57] focus:outline-none transition-colors"
                               />
                               <button
                                 type="button"
@@ -1274,7 +1274,7 @@ export function WhisperSecretsGameView({
                                   setSecretInput(idea);
                                   soundFx.click();
                                 }}
-                                className="min-h-[48px] sm:min-h-[54px] inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-5 py-2.5 sm:py-3 rounded-2xl text-sm sm:text-base font-bold bg-[#4C0519] hover:bg-[#7F1D1D]/70 text-[#FCD34D] border border-[#F59E0B]/45 transition-colors whitespace-nowrap shrink-0"
+                                className="min-h-[48px] sm:min-h-[54px] inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-5 py-2.5 sm:py-3 rounded-2xl text-sm sm:text-base font-bold bg-[#FCEAF0] hover:bg-[#FADCE7] text-[#BE123C] border border-[#F4C2D4] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                               >
                                 <span>{t.whisperIdeaBtn}</span>
                               </button>
@@ -1282,9 +1282,9 @@ export function WhisperSecretsGameView({
                           </div>
 
                           {/* Toggleable Word Length Hint Option */}
-                          <div className="rounded-xl sm:rounded-2xl bg-black/30 border border-white/10 px-3 py-2 sm:p-3.5 space-y-1.5">
+                          <div className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] px-3 py-2 sm:p-3.5 space-y-1.5">
                             <div className="flex items-center justify-between gap-3 min-h-[32px]">
-                              <span className="text-xs sm:text-sm font-medium text-[#FDE6D8]">
+                              <span className="text-xs sm:text-sm font-semibold text-[#1F242D]">
                                 {t.whisperHintToggle}
                               </span>
                               <button
@@ -1293,14 +1293,14 @@ export function WhisperSecretsGameView({
                                 aria-checked={showHintOption}
                                 data-testid="whisper-hint-toggle"
                                 onClick={() => setShowHintOption((v) => !v)}
-                                className={`relative inline-flex h-7 w-12 sm:h-8 sm:w-14 shrink-0 items-center rounded-full border transition-colors ${
+                                className={`relative inline-flex h-7 w-12 sm:h-8 sm:w-14 shrink-0 items-center rounded-full border transition-colors cursor-pointer ${
                                   showHintOption
-                                    ? 'bg-[#BE123C] border-[#F59E0B]/70'
-                                    : 'bg-white/12 border-white/15'
+                                    ? 'bg-[#FF6B57] border-[#FF6B57]'
+                                    : 'bg-[#E5DFD5] border-[#D6CEC2]'
                                 }`}
                               >
                                 <span
-                                  className={`inline-block h-5 w-5 sm:h-6 sm:w-6 rounded-full bg-[#FFF7ED] shadow transition-transform ${
+                                  className={`inline-block h-5 w-5 sm:h-6 sm:w-6 rounded-full bg-white shadow transition-transform ${
                                     showHintOption ? 'translate-x-6 sm:translate-x-7 rtl:-translate-x-6 sm:rtl:-translate-x-7' : 'translate-x-1 rtl:-translate-x-1'
                                   }`}
                                 />
@@ -1309,7 +1309,7 @@ export function WhisperSecretsGameView({
                             {showHintOption && (
                               <p
                                 dir="ltr"
-                                className="font-mono text-xs text-[#FCD34D]/85 tracking-wider break-words"
+                                className="font-mono text-xs font-semibold text-[#7C5CFC] tracking-wider break-words"
                               >
                                 {previewWordHint}
                               </p>
@@ -1321,10 +1321,7 @@ export function WhisperSecretsGameView({
                             type="submit"
                             data-testid="whisper-launch-btn"
                             disabled={!secretInput.trim()}
-                            className="min-h-[56px] w-full inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-extrabold text-[#1C0711] disabled:opacity-45 disabled:cursor-not-allowed transition-all shadow-lg shadow-[#F59E0B]/25"
-                            style={{
-                              background: 'linear-gradient(135deg, #F59E0B 0%, #FB7185 100%)',
-                            }}
+                            className="min-h-[56px] w-full inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] disabled:opacity-45 disabled:cursor-not-allowed transition-all shadow-md shadow-[#FF6B57]/25 cursor-pointer"
                           >
                             <Flame className="w-5 h-5 shrink-0" />
                             <span>{t.whisperLaunchBtn}</span>
@@ -1333,10 +1330,10 @@ export function WhisperSecretsGameView({
                       ) : (
                         /* Guesser waiting panel in Stage 1 */
                         <div className="py-6 text-center space-y-3">
-                          <p className="text-base font-semibold text-[#FFF7ED]">
+                          <p className="text-base font-extrabold text-[#1F242D]">
                             {isSolo ? t.whisperSoloAiPreparing : t.whisperPartnerWriting}
                           </p>
-                          <p className="text-xs sm:text-sm text-[#FDE6D8]/75">
+                          <p className="text-xs sm:text-sm text-[#6B7280]">
                             {t.whisperPartnerWritingSub}
                           </p>
                           {/* Temperature selector still interactive in Solo mode before AI picks */}
@@ -1347,10 +1344,10 @@ export function WhisperSecretsGameView({
                                   key={item.id}
                                   type="button"
                                   onClick={() => setLevel(item.id)}
-                                  className={`min-h-[40px] px-2 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
+                                  className={`min-h-[40px] px-2 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
                                     level === item.id
-                                      ? 'bg-[#BE123C] text-[#FFF7ED] border-[#F59E0B]/60'
-                                      : 'bg-black/30 text-[#FDE6D8]/75 border-white/10'
+                                      ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
+                                      : 'bg-[#FAF7F2] text-[#6B7280] border-[#EAE4DC]'
                                   }`}
                                 >
                                   {item.label}
@@ -1376,10 +1373,10 @@ export function WhisperSecretsGameView({
                       className="space-y-4"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold uppercase tracking-wider text-[#F59E0B]">
+                        <span className="text-xs font-bold uppercase tracking-wider text-[#FF6B57]">
                           2 · {activeLevelLabel}
                         </span>
-                        <span className="font-mono text-sm font-bold text-[#FCD34D] tabular-nums">
+                        <span className="font-mono text-sm font-extrabold text-[#1F242D] tabular-nums">
                           {Math.ceil(timeLeftSec)}s / {WHISPER_DURATION_SEC}s
                         </span>
                       </div>
@@ -1388,13 +1385,13 @@ export function WhisperSecretsGameView({
                         /* Whisperer View during Stage 2 */
                         <div className="space-y-4">
                           {/* Private reminder of the phrase they are silently mouthing */}
-                          <div className="rounded-xl bg-black/40 border border-[#F59E0B]/35 p-4 text-center space-y-1.5">
-                            <p className="text-[11px] uppercase tracking-wider text-[#FDE6D8]/65">
+                          <div className="rounded-2xl bg-[#FCEAF0] border border-[#F4C2D4] p-4 text-center space-y-1.5">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-[#BE123C]">
                               {t.whisperRoleWhisperer}
                             </p>
                             <p
                               data-testid="whisper-whisperer-phrase"
-                              className="text-xl sm:text-2xl font-semibold text-[#FFF7ED] leading-snug"
+                              className="text-xl sm:text-2xl font-extrabold text-[#1F242D] leading-snug"
                             >
                               {`«\u00A0${activeSecret}\u00A0»`}
                             </p>
@@ -1405,27 +1402,27 @@ export function WhisperSecretsGameView({
                             type="button"
                             data-testid="whisper-found-btn"
                             onClick={() => handleWhispererEarlyValidate('button')}
-                            className="min-h-[56px] w-full inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-extrabold text-[#FFF7ED] bg-gradient-to-r from-[#BE123C] to-[#E11D48] hover:brightness-110 border border-[#F59E0B]/65 shadow-lg shadow-[#BE123C]/40 transition-all"
+                            className="min-h-[56px] w-full inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/25 transition-all cursor-pointer"
                           >
                             <span>{t.whisperFoundBtn}</span>
                           </button>
 
                           {/* Automatic Kiss Validation Indicator (mouthPucker > 0.65 for 350ms) */}
-                          <div className="rounded-xl bg-black/30 border border-white/10 p-3 space-y-2">
-                            <p className="text-xs text-[#FDE6D8]/85 leading-relaxed">
+                          <div className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-3.5 space-y-2">
+                            <p className="text-xs font-medium text-[#6B7280] leading-relaxed">
                               💋 {t.whisperKissHint}
                             </p>
-                            <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden">
+                            <div className="h-2 w-full rounded-full bg-[#EAE4DC] overflow-hidden">
                               <div
                                 className="h-full rounded-full transition-all duration-75"
                                 style={{
                                   width: `${Math.round(kissHoldRatio * 100)}%`,
-                                  background: 'linear-gradient(90deg, #FB7185 0%, #F59E0B 100%)',
+                                  background: 'linear-gradient(90deg, #FF6B57 0%, #E11D48 100%)',
                                 }}
                               />
                             </div>
                             {kissHoldRatio > 0.08 && (
-                              <p className="text-xs font-semibold text-[#FCD34D]">
+                              <p className="text-xs font-bold text-[#FF6B57]">
                                 {t.whisperKissProgress} {Math.round(kissHoldRatio * 100)}%
                               </p>
                             )}
@@ -1435,14 +1432,14 @@ export function WhisperSecretsGameView({
                         /* Guesser View during Stage 2 — NEVER shows activeSecret! */
                         <div className="space-y-4">
                           {activeShowHint && wordHintText && (
-                            <div className="rounded-2xl bg-black/40 border border-[#F59E0B]/30 p-4 text-center space-y-1.5">
-                              <p className="text-[11px] uppercase tracking-wider text-[#FCD34D]/80">
+                            <div className="rounded-2xl bg-[#EFE9FB] border border-[#D9CCF8] p-4 text-center space-y-1.5">
+                              <p className="text-[11px] font-bold uppercase tracking-wider text-[#7C5CFC]">
                                 {t.whisperWordHintLabel}
                               </p>
                               <p
                                 data-testid="whisper-word-hint"
                                 dir="ltr"
-                                className="font-mono text-base sm:text-lg font-semibold text-[#FFF7ED] tracking-wider leading-relaxed break-words"
+                                className="font-mono text-base sm:text-lg font-extrabold text-[#1F242D] tracking-wider leading-relaxed break-words"
                               >
                                 {wordHintText}
                               </p>
@@ -1463,18 +1460,18 @@ export function WhisperSecretsGameView({
                                 onChange={(e) => setQuickGuess(e.target.value)}
                                 placeholder={t.whisperQuickGuessPlaceholder}
                                 autoComplete="off"
-                                className="flex-1 min-w-0 min-h-[54px] px-4 py-3.5 rounded-2xl bg-black/45 border border-[#F59E0B]/35 text-[#FFF7ED] placeholder-[#FDE6D8]/45 text-base focus:border-[#F59E0B] focus:outline-none"
+                                className="flex-1 min-w-0 min-h-[54px] px-4 py-3.5 rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] text-[#1F242D] placeholder-[#9CA3AF] text-base focus:bg-white focus:border-[#FF6B57] focus:outline-none"
                               />
                               <button
                                 type="submit"
                                 data-testid="whisper-quick-guess-submit"
-                                className="min-h-[54px] inline-flex items-center justify-center gap-1.5 px-5 py-3 rounded-2xl text-sm sm:text-base font-bold bg-[#F59E0B] text-[#1C0711] hover:bg-[#FBBF24] transition-colors whitespace-nowrap shrink-0"
+                                className="min-h-[54px] inline-flex items-center justify-center gap-1.5 px-5 py-3 rounded-2xl text-sm sm:text-base font-bold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/20 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                               >
                                 <Send className="w-4 h-4" />
                                 <span>{t.whisperQuickGuessBtn}</span>
                               </button>
                             </div>
-                            <p className="hidden sm:block text-xs text-[#FDE6D8]/75">
+                            <p className="hidden sm:block text-xs text-[#6B7280]">
                               {t.whisperMicOpenPartner}
                             </p>
                           </form>
@@ -1496,8 +1493,8 @@ export function WhisperSecretsGameView({
                       className="space-y-4"
                     >
                       {/* Automatic Secret Reveal Card */}
-                      <div className="rounded-2xl bg-gradient-to-br from-[#4C0519]/90 via-[#2E0715] to-[#1A0610] border border-[#F59E0B]/45 p-5 text-center space-y-2.5 shadow-inner">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-[#FCD34D]">
+                      <div className="rounded-2xl bg-gradient-to-br from-[#FCEAF0] via-[#FFF6F3] to-[#EFE9FB] border border-[#F4C2D4] p-5 text-center space-y-2.5 shadow-sm">
+                        <p className="text-xs font-bold uppercase tracking-widest text-[#BE123C]">
                           {t.whisperRevealHeading}
                         </p>
                         <motion.p
@@ -1505,7 +1502,7 @@ export function WhisperSecretsGameView({
                           initial={{ opacity: 0, y: 6 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ duration: 0.35 }}
-                          className="text-2xl sm:text-3xl font-semibold text-[#FFF7ED] leading-tight"
+                          className="text-2xl sm:text-3xl font-extrabold text-[#1F242D] leading-tight"
                           style={{ fontFamily: 'var(--font-display)' }}
                         >
                           {`«\u00A0${activeSecret}\u00A0»`}
@@ -1514,7 +1511,7 @@ export function WhisperSecretsGameView({
                         {validationReason !== 'none' && (
                           <p
                             data-testid="whisper-bonus-badge"
-                            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-[#FCD34D] pt-1"
+                            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#FF6B57] pt-1"
                           >
                             {validationReason === 'kiss'
                               ? t.whisperBonusKissBadge
@@ -1533,7 +1530,7 @@ export function WhisperSecretsGameView({
                               type="button"
                               data-testid="whisper-verdict-guessed"
                               onClick={() => handleVerdict(true)}
-                              className="min-h-[54px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm sm:text-base font-bold bg-[#10B981]/22 hover:bg-[#10B981]/32 text-[#D1FAE5] border border-[#5CC29F]/50 transition-colors"
+                              className="min-h-[54px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm sm:text-base font-bold bg-[#E6F6EF] hover:bg-[#D5F0E4] text-[#059669] border border-[#B5E5CF] transition-colors cursor-pointer"
                             >
                               <Check className="w-5 h-5 shrink-0" />
                               <span>{t.whisperVerdictGuessedBtn}</span>
@@ -1542,14 +1539,14 @@ export function WhisperSecretsGameView({
                               type="button"
                               data-testid="whisper-verdict-missed"
                               onClick={() => handleVerdict(false)}
-                              className="min-h-[54px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm sm:text-base font-bold bg-[#BE123C]/40 hover:bg-[#BE123C]/60 text-[#FFF7ED] border border-[#FB7185]/50 transition-colors"
+                              className="min-h-[54px] inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl text-sm sm:text-base font-bold bg-[#FFE8E2] hover:bg-[#FFD9CF] text-[#C2410C] border border-[#F5C5B8] transition-colors cursor-pointer"
                             >
-                              <Flame className="w-5 h-5 text-[#F59E0B] shrink-0" />
+                              <Flame className="w-5 h-5 text-[#FF6B57] shrink-0" />
                               <span>{t.whisperVerdictMissedBtn}</span>
                             </button>
                           </div>
                         ) : (
-                          <p className="text-center text-sm text-[#FDE6D8]/80 py-2">
+                          <p className="text-center text-sm font-medium text-[#6B7280] py-2">
                             {t.whisperWaitingVerdict}
                           </p>
                         )
@@ -1561,38 +1558,38 @@ export function WhisperSecretsGameView({
                               data-testid="whisper-dare-card"
                               initial={{ opacity: 0, y: 8 }}
                               animate={{ opacity: 1, y: 0 }}
-                              className="rounded-2xl bg-[#4C0519]/85 border border-[#F59E0B]/55 p-4 space-y-1.5 shadow-lg shadow-[#BE123C]/25"
+                              className="rounded-2xl bg-[#FFE8E2] border border-[#F5C5B8] p-4 space-y-1.5 shadow-sm"
                             >
-                              <p className="text-xs font-semibold uppercase tracking-wider text-[#F59E0B] inline-flex items-center gap-1.5">
+                              <p className="text-xs font-bold uppercase tracking-wider text-[#FF6B57] inline-flex items-center gap-1.5">
                                 <Flame className="w-3.5 h-3.5" />
                                 <span>
                                   {t.whisperDareTitle} · {activeLevelLabel}
                                 </span>
                               </p>
-                              <p className="text-sm sm:text-base font-medium text-[#FFF7ED] leading-relaxed">
+                              <p className="text-sm sm:text-base font-semibold text-[#1F242D] leading-relaxed">
                                 {activeDare}
                               </p>
                             </motion.div>
                           )}
 
                           {/* Complicity / Heat Progress Gauge */}
-                          <div className="rounded-2xl bg-black/35 border border-white/10 p-3.5 space-y-2">
+                          <div className="rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC] p-3.5 space-y-2">
                             <div className="flex items-center justify-between text-xs sm:text-sm">
-                              <span className="font-medium text-[#FDE6D8] inline-flex items-center gap-1.5">
-                                <Flame className="w-4 h-4 text-[#F59E0B]" />
+                              <span className="font-semibold text-[#1F242D] inline-flex items-center gap-1.5">
+                                <Flame className="w-4 h-4 text-[#FF6B57]" />
                                 {t.whisperHeatLabel}
                               </span>
-                              <span className="font-mono font-bold text-[#FCD34D] tabular-nums">
+                              <span className="font-mono font-extrabold text-[#FF6B57] tabular-nums">
                                 {complicityHeat}%
                               </span>
                             </div>
-                            <div className="h-2.5 w-full rounded-full bg-white/10 overflow-hidden">
+                            <div className="h-2.5 w-full rounded-full bg-[#EAE4DC] overflow-hidden">
                               <div
                                 className="h-full rounded-full transition-all duration-500"
                                 style={{
                                   width: `${complicityHeat}%`,
                                   background:
-                                    'linear-gradient(90deg, #9F1239 0%, #BE123C 45%, #F59E0B 100%)',
+                                    'linear-gradient(90deg, #FF6B57 0%, #E11D48 60%, #7C5CFC 100%)',
                                 }}
                               />
                             </div>
@@ -1603,10 +1600,7 @@ export function WhisperSecretsGameView({
                             type="button"
                             data-testid="whisper-next-round-btn"
                             onClick={handleNextRound}
-                            className="min-h-[56px] w-full inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-extrabold text-[#1C0711] shadow-lg shadow-[#F59E0B]/25 hover:brightness-105 transition-all"
-                            style={{
-                              background: 'linear-gradient(135deg, #F59E0B 0%, #FB7185 100%)',
-                            }}
+                            className="min-h-[56px] w-full inline-flex items-center justify-center gap-2 px-5 py-4 rounded-2xl text-base font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/25 transition-all cursor-pointer"
                           >
                             <ArrowLeftRight className="w-5 h-5 shrink-0" />
                             <span>{t.whisperNextRoundBtn}</span>
@@ -1635,16 +1629,16 @@ export function WhisperSecretsGameView({
             data-testid="whisper-mobile-zoom-btn"
             onClick={() => setZoomEnabled((z) => !z)}
             aria-pressed={zoomEnabled}
-            className="pointer-events-auto min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold bg-[#16050D]/92 text-[#FFF7ED] border border-[#F59E0B]/45 shadow-xl shadow-black/65 active:scale-95 transition-all whitespace-nowrap shrink-0"
+            className="pointer-events-auto min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold bg-white/95 backdrop-blur-md text-[#1F242D] border border-[#EAE4DC] shadow-[0_6px_20px_rgba(31,36,45,0.14)] active:scale-95 transition-all whitespace-nowrap shrink-0 cursor-pointer"
           >
             {zoomEnabled ? (
               <>
-                <Minimize2 className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                <Minimize2 className="w-4 h-4 text-[#FF6B57] shrink-0" />
                 <span>{t.whisperZoomFullFace}</span>
               </>
             ) : (
               <>
-                <Maximize2 className="w-4 h-4 text-[#F59E0B] shrink-0" />
+                <Maximize2 className="w-4 h-4 text-[#FF6B57] shrink-0" />
                 <span>{t.whisperZoomLips}</span>
               </>
             )}
@@ -1658,10 +1652,10 @@ export function WhisperSecretsGameView({
           data-testid="whisper-mobile-panic-btn"
           onClick={togglePanicMode}
           aria-pressed={panicMode}
-          className={`pointer-events-auto min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-extrabold border shadow-2xl shadow-black/75 active:scale-95 transition-all whitespace-nowrap shrink-0 ${
+          className={`pointer-events-auto min-h-[44px] inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-extrabold border shadow-[0_6px_20px_rgba(31,36,45,0.16)] active:scale-95 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             panicMode
-              ? 'bg-[#F59E0B] text-[#1C0711] border-[#FCD34D] shadow-[#F59E0B]/35'
-              : 'bg-[#4C0519]/95 text-[#FFF7ED] border-[#F59E0B]/55 active:bg-[#BE123C]'
+              ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
+              : 'bg-white/96 backdrop-blur-md text-[#BE123C] border-[#F4C2D4]'
           }`}
         >
           {panicMode ? (
@@ -1671,7 +1665,7 @@ export function WhisperSecretsGameView({
             </>
           ) : (
             <>
-              <EyeOff className="w-4 h-4 shrink-0 text-[#F59E0B]" />
+              <EyeOff className="w-4 h-4 shrink-0 text-[#BE123C]" />
               <span>{t.whisperPanicBtn}</span>
             </>
           )}

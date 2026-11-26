@@ -1297,7 +1297,7 @@ export function SlingshotDuoGameView({
 
       <section
         data-testid="slingshot-stage"
-        className="relative rounded-2xl sm:rounded-3xl overflow-hidden bg-[#09071A] border border-white/15 shadow-2xl"
+        className="relative rounded-3xl overflow-hidden bg-[#09071A] border border-[#EAE4DC] shadow-[0_12px_36px_rgba(31,36,45,0.10)]"
       >
         <canvas
           ref={canvasRef}
@@ -1319,15 +1319,15 @@ export function SlingshotDuoGameView({
         {hud.phase === 'playing' && (
           <div className="pointer-events-none absolute inset-x-3 top-2.5 sm:top-3 z-10 flex items-start justify-between gap-2">
             {/* Score cluster */}
-            <div className="px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl bg-[#0D0B1F]/88 border border-white/15 flex items-center gap-3">
+            <div className="px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-2xl bg-white/95 backdrop-blur-md border border-[#EAE4DC] shadow-[0_6px_20px_rgba(31,36,45,0.10)] flex items-center gap-3">
               {hud.mode === 'coop' ? (
                 <div>
-                  <p className="text-[10px] sm:text-[11px] font-bold text-[#FACC15] uppercase tracking-wider">
+                  <p className="text-[10px] sm:text-[11px] font-bold text-[#D97706] uppercase tracking-wider">
                     {t.slingTeamScoreLabel}
                   </p>
                   <p
                     data-testid="slingshot-score"
-                    className="font-mono text-lg sm:text-2xl font-extrabold text-white tabular-nums leading-none mt-0.5"
+                    className="font-mono text-lg sm:text-2xl font-extrabold text-[#1F242D] tabular-nums leading-none mt-0.5"
                   >
                     {hud.coopScore}
                   </p>
@@ -1335,24 +1335,24 @@ export function SlingshotDuoGameView({
               ) : (
                 <div className="flex items-center gap-3">
                   <div>
-                    <p className="text-[10px] font-bold text-[#FF4D8D] truncate max-w-[74px]">
+                    <p className="text-[10px] font-bold text-[#FF6B57] truncate max-w-[74px]">
                       {hostDisplayName}
                     </p>
                     <p
                       data-testid="slingshot-host-score"
-                      className="font-mono text-lg sm:text-xl font-extrabold text-white tabular-nums leading-none"
+                      className="font-mono text-lg sm:text-xl font-extrabold text-[#1F242D] tabular-nums leading-none"
                     >
                       {hud.hostScore}
                     </p>
                   </div>
-                  <span className="text-white/30 font-bold">vs</span>
+                  <span className="text-[#C9C1B6] font-bold text-xs">vs</span>
                   <div>
-                    <p className="text-[10px] font-bold text-[#22D3EE] truncate max-w-[74px]">
+                    <p className="text-[10px] font-bold text-[#7C5CFC] truncate max-w-[74px]">
                       {guestDisplayName}
                     </p>
                     <p
                       data-testid="slingshot-guest-score"
-                      className="font-mono text-lg sm:text-xl font-extrabold text-white tabular-nums leading-none"
+                      className="font-mono text-lg sm:text-xl font-extrabold text-[#1F242D] tabular-nums leading-none"
                     >
                       {hud.guestScore}
                     </p>
@@ -1360,16 +1360,16 @@ export function SlingshotDuoGameView({
                 </div>
               )}
 
-              <div className="h-7 w-px bg-white/15" />
+              <div className="h-7 w-px bg-[#EAE4DC]" />
 
               <div>
-                <p className="text-[10px] sm:text-[11px] font-bold text-white/65 uppercase tracking-wider">
+                <p className="text-[10px] sm:text-[11px] font-bold text-[#6B7280] uppercase tracking-wider">
                   {t.slingTimeLabel}
                 </p>
                 <p
                   data-testid="slingshot-timer"
                   className={`font-mono text-lg sm:text-2xl font-extrabold tabular-nums leading-none mt-0.5 ${
-                    hud.timeLeftSec <= 10 ? 'text-[#FB7185]' : 'text-[#38BDF8]'
+                    hud.timeLeftSec <= 10 ? 'text-[#E11D48]' : 'text-[#7C5CFC]'
                   }`}
                 >
                   {Math.ceil(hud.timeLeftSec)}s
@@ -1379,7 +1379,7 @@ export function SlingshotDuoGameView({
 
             {/* Center live callout */}
             {hud.lastCallout && (
-              <div className="hidden md:flex items-center px-3.5 py-1.5 rounded-full bg-[#181236]/92 border border-[#FACC15]/45 text-xs font-extrabold text-[#FEF08A] shadow-lg">
+              <div className="hidden md:flex items-center px-3.5 py-1.5 rounded-full bg-[#FEF6DC] border border-[#F5D782] text-xs font-extrabold text-[#92400E] shadow-md">
                 {hud.lastCallout}
               </div>
             )}
@@ -1394,7 +1394,7 @@ export function SlingshotDuoGameView({
                   e.currentTarget.blur();
                   togglePause(true);
                 }}
-                className="min-w-[44px] min-h-[44px] rounded-xl bg-[#0D0B1F]/88 border border-white/20 text-white hover:bg-white/15 flex items-center justify-center transition-colors"
+                className="min-w-[44px] min-h-[44px] rounded-xl bg-white/95 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] shadow-sm flex items-center justify-center transition-colors cursor-pointer"
               >
                 <Pause className="w-4 h-4" />
               </button>
@@ -1407,7 +1407,7 @@ export function SlingshotDuoGameView({
                     e.currentTarget.blur();
                     startMatch(hud.mode, true);
                   }}
-                  className="min-w-[44px] min-h-[44px] rounded-xl bg-[#0D0B1F]/88 border border-white/20 text-white hover:bg-white/15 flex items-center justify-center transition-colors"
+                  className="min-w-[44px] min-h-[44px] rounded-xl bg-white/95 backdrop-blur-md border border-[#EAE4DC] text-[#1F242D] hover:bg-[#FAF7F2] shadow-sm flex items-center justify-center transition-colors cursor-pointer"
                 >
                   <RotateCcw className="w-4 h-4" />
                 </button>
@@ -1418,29 +1418,29 @@ export function SlingshotDuoGameView({
 
         {/* READY / TITLE OVERLAY — Normal flow on mobile so zero clipping ever occurs */}
         {hud.phase === 'ready' && (
-          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#09071A]/78 p-3.5 sm:p-5 sm:overflow-y-auto">
-            <div className="my-auto max-w-md w-full rounded-3xl bg-[#15112E] border border-white/18 p-4 sm:p-6 text-center space-y-3 sm:space-y-4 shadow-2xl">
-              <div className="mx-auto w-12 h-12 rounded-2xl bg-[#FF4D8D]/20 border border-[#FF4D8D]/40 flex items-center justify-center text-[#FF4D8D]">
+          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#FAF7F2]/85 backdrop-blur-sm p-3.5 sm:p-5 sm:overflow-y-auto">
+            <div className="my-auto max-w-md w-full rounded-3xl bg-white border border-[#EAE4DC] p-5 sm:p-6 text-center space-y-3.5 sm:space-y-4 shadow-[0_18px_48px_rgba(31,36,45,0.12)]">
+              <div className="mx-auto w-12 h-12 rounded-2xl bg-[#FFE8E2] border border-[#F5C5B8] flex items-center justify-center text-[#FF6B57]">
                 <Crosshair className="w-6 h-6" />
               </div>
 
               <div className="space-y-1.5">
-                <h1 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight">
+                <h1 className="text-xl sm:text-2xl font-extrabold text-[#1F242D] tracking-tight">
                   {t.slingTitle}
                 </h1>
-                <p className="text-xs sm:text-sm text-white/80 leading-relaxed">{t.slingDesc}</p>
+                <p className="text-xs sm:text-sm text-[#6B7280] leading-relaxed">{t.slingDesc}</p>
               </div>
 
               {/* Mode Picker (Coop vs Duel) */}
               {isHost ? (
-                <div className="grid grid-cols-2 gap-1.5 sm:gap-2 p-1.5 rounded-2xl bg-black/35 border border-white/10">
+                <div className="grid grid-cols-2 gap-1.5 sm:gap-2 p-1.5 rounded-2xl bg-[#FAF7F2] border border-[#EAE4DC]">
                   <button
                     type="button"
                     onClick={() => setSelectedMode('coop')}
-                    className={`min-h-[44px] px-1.5 sm:px-3 py-2 rounded-xl text-[11px] sm:text-sm font-bold inline-flex items-center justify-center whitespace-nowrap transition-all ${
+                    className={`min-h-[44px] px-1.5 sm:px-3 py-2 rounded-xl text-[11px] sm:text-sm font-bold inline-flex items-center justify-center whitespace-nowrap transition-all cursor-pointer ${
                       selectedMode === 'coop'
-                        ? 'bg-[#FF4D8D] text-white shadow-lg shadow-[#FF4D8D]/30'
-                        : 'text-white/75 hover:text-white'
+                        ? 'bg-[#FF6B57] text-white shadow-sm shadow-[#FF6B57]/25'
+                        : 'text-[#6B7280] hover:text-[#1F242D]'
                     }`}
                   >
                     <span>{t.slingModeCoop}</span>
@@ -1448,17 +1448,19 @@ export function SlingshotDuoGameView({
                   <button
                     type="button"
                     onClick={() => setSelectedMode('duel')}
-                    className={`min-h-[44px] px-1.5 sm:px-3 py-2 rounded-xl text-[11px] sm:text-sm font-bold inline-flex items-center justify-center whitespace-nowrap transition-all ${
+                    className={`min-h-[44px] px-1.5 sm:px-3 py-2 rounded-xl text-[11px] sm:text-sm font-bold inline-flex items-center justify-center whitespace-nowrap transition-all cursor-pointer ${
                       selectedMode === 'duel'
-                        ? 'bg-[#22D3EE] text-[#09071A] shadow-lg shadow-[#22D3EE]/30'
-                        : 'text-white/75 hover:text-white'
+                        ? 'bg-[#7C5CFC] text-white shadow-sm shadow-[#7C5CFC]/25'
+                        : 'text-[#6B7280] hover:text-[#1F242D]'
                     }`}
                   >
                     <span>{t.slingModeDuel}</span>
                   </button>
                 </div>
               ) : (
-                <p className="text-xs font-semibold text-[#22D3EE]">{t.slingWaitingHost}</p>
+                <p className="text-xs font-semibold text-[#7C5CFC] bg-[#EFE9FB] border border-[#D9CCF8] rounded-xl px-3 py-2">
+                  {t.slingWaitingHost}
+                </p>
               )}
 
               {isHost && (
@@ -1466,14 +1468,14 @@ export function SlingshotDuoGameView({
                   type="button"
                   data-start="true"
                   onClick={() => startMatch(selectedMode, true)}
-                  className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-base font-extrabold bg-gradient-to-r from-[#FF4D8D] via-[#F97316] to-[#FACC15] text-[#11081F] hover:brightness-110 transition-all shadow-lg shadow-[#FF4D8D]/30 whitespace-nowrap"
+                  className="w-full min-h-[54px] inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl text-base font-extrabold bg-[#FF6B57] hover:bg-[#F25743] text-white transition-all shadow-md shadow-[#FF6B57]/25 whitespace-nowrap cursor-pointer"
                 >
                   <Play className="w-5 h-5 shrink-0 fill-current" />
                   <span>{t.slingStartBtn}</span>
                 </button>
               )}
 
-              <p className="text-xs text-white/65">
+              <p className="text-xs text-[#6B7280]">
                 {hasHandSensor ? t.slingSensorReady : t.slingSensorFallback}
               </p>
             </div>
@@ -1482,14 +1484,14 @@ export function SlingshotDuoGameView({
 
         {/* PAUSED OVERLAY */}
         {hud.phase === 'paused' && (
-          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#09071A]/84 p-3.5 sm:p-6 sm:overflow-y-auto">
-            <div className="my-auto max-w-sm w-full rounded-3xl bg-[#15112E] border border-white/18 p-4 sm:p-6 text-center space-y-4 shadow-2xl">
-              <h2 className="text-2xl font-extrabold text-white">{t.pausedTitle}</h2>
+          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#FAF7F2]/84 backdrop-blur-sm p-3.5 sm:p-6 sm:overflow-y-auto">
+            <div className="my-auto max-w-sm w-full rounded-3xl bg-white border border-[#EAE4DC] p-5 sm:p-6 text-center space-y-4 shadow-[0_18px_48px_rgba(31,36,45,0.12)]">
+              <h2 className="text-2xl font-extrabold text-[#1F242D]">{t.pausedTitle}</h2>
               <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={() => togglePause(true)}
-                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-base font-extrabold bg-[#FF4D8D] text-white hover:brightness-110 transition-all"
+                  className="w-full min-h-[50px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-base font-extrabold bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-md shadow-[#FF6B57]/20 transition-all cursor-pointer"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>{t.resume}</span>
@@ -1498,7 +1500,7 @@ export function SlingshotDuoGameView({
                   <button
                     type="button"
                     onClick={() => startMatch(hud.mode, true)}
-                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold bg-white/12 text-white border border-white/15 hover:bg-white/20 transition-all"
+                    className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold bg-[#FAF7F2] text-[#1F242D] border border-[#EAE4DC] hover:bg-[#F1ECE3] transition-all cursor-pointer"
                   >
                     <RotateCcw className="w-4 h-4" />
                     <span>{t.restart}</span>
@@ -1507,7 +1509,7 @@ export function SlingshotDuoGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="w-full min-h-[48px] px-5 py-3 rounded-2xl text-sm font-bold text-white/80 hover:text-white bg-white/5 hover:bg-white/12 transition-all"
+                  className="w-full min-h-[48px] px-5 py-3 rounded-2xl text-sm font-bold text-[#6B7280] hover:text-[#1F242D] bg-white border border-[#EAE4DC] hover:bg-[#FAF7F2] transition-all cursor-pointer"
                 >
                   {t.backToHub}
                 </button>
@@ -1518,14 +1520,14 @@ export function SlingshotDuoGameView({
 
         {/* GAME OVER / RESULTS OVERLAY */}
         {hud.phase === 'gameover' && (
-          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#09071A]/88 p-3.5 sm:p-6 sm:overflow-y-auto">
-            <div className="my-auto max-w-md w-full rounded-3xl bg-[#15112E] border border-[#FACC15]/35 p-4 sm:p-6 text-center space-y-3.5 sm:space-y-4 shadow-2xl">
-              <div className="mx-auto w-12 h-12 rounded-2xl bg-[#FACC15]/20 border border-[#FACC15]/40 flex items-center justify-center text-[#FACC15]">
+          <div className="relative z-20 sm:absolute sm:inset-0 flex justify-center bg-[#FAF7F2]/88 backdrop-blur-sm p-3.5 sm:p-6 sm:overflow-y-auto">
+            <div className="my-auto max-w-md w-full rounded-3xl bg-white border border-[#EAE4DC] p-5 sm:p-6 text-center space-y-4 shadow-[0_18px_48px_rgba(31,36,45,0.12)]">
+              <div className="mx-auto w-12 h-12 rounded-2xl bg-[#FEF6DC] border border-[#F5D782] flex items-center justify-center text-[#D97706]">
                 <Trophy className="w-6 h-6" />
               </div>
 
               <div className="space-y-1">
-                <h2 className="text-2xl font-extrabold text-white">
+                <h2 className="text-2xl font-extrabold text-[#1F242D]">
                   {hud.mode === 'coop'
                     ? `${t.slingTeamScoreLabel} : ${hud.coopScore}`
                     : hud.hostScore === hud.guestScore
@@ -1535,28 +1537,28 @@ export function SlingshotDuoGameView({
                         : `${guestDisplayName} 🏆`}
                 </h2>
                 {hud.mode === 'duel' && (
-                  <p className="font-mono text-sm text-white/80 tabular-nums">
+                  <p className="font-mono text-sm font-semibold text-[#6B7280] tabular-nums">
                     {hostDisplayName} {hud.hostScore} — {hud.guestScore} {guestDisplayName}
                   </p>
                 )}
               </div>
 
               <div className="grid grid-cols-3 gap-2.5">
-                <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
-                  <p className="text-[11px] text-white/65">{t.recordLabel}</p>
-                  <p className="font-mono text-lg font-extrabold text-[#FACC15] tabular-nums">
+                <div className="p-3 rounded-2xl bg-[#FEF6DC] border border-[#F5D782]">
+                  <p className="text-[11px] font-semibold text-[#92400E]">{t.recordLabel}</p>
+                  <p className="font-mono text-lg font-extrabold text-[#D97706] tabular-nums">
                     {hud.bestScore}
                   </p>
                 </div>
-                <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
-                  <p className="text-[11px] text-white/65">{t.slingTrickShotsLabel}</p>
-                  <p className="font-mono text-lg font-extrabold text-[#38BDF8] tabular-nums">
+                <div className="p-3 rounded-2xl bg-[#EFE9FB] border border-[#D9CCF8]">
+                  <p className="text-[11px] font-semibold text-[#5B21B6]">{t.slingTrickShotsLabel}</p>
+                  <p className="font-mono text-lg font-extrabold text-[#7C5CFC] tabular-nums">
                     {hud.trickShots}
                   </p>
                 </div>
-                <div className="p-3 rounded-2xl bg-white/5 border border-white/10">
-                  <p className="text-[11px] text-white/65">{t.slingFusionsLabel}</p>
-                  <p className="font-mono text-lg font-extrabold text-[#FF4D8D] tabular-nums">
+                <div className="p-3 rounded-2xl bg-[#FFE8E2] border border-[#F5C5B8]">
+                  <p className="text-[11px] font-semibold text-[#C2410C]">{t.slingFusionsLabel}</p>
+                  <p className="font-mono text-lg font-extrabold text-[#FF6B57] tabular-nums">
                     {hud.fusionCount}
                   </p>
                 </div>
@@ -1568,7 +1570,7 @@ export function SlingshotDuoGameView({
                     type="button"
                     data-start="true"
                     onClick={() => startMatch(hud.mode, true)}
-                    className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-base font-extrabold bg-gradient-to-r from-[#FF4D8D] to-[#FACC15] text-[#11081F] hover:brightness-110 transition-all"
+                    className="flex-1 min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-base font-extrabold bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-md shadow-[#FF6B57]/20 transition-all cursor-pointer"
                   >
                     <Sparkles className="w-4 h-4" />
                     <span>{t.playAgain}</span>
@@ -1577,7 +1579,7 @@ export function SlingshotDuoGameView({
                 <button
                   type="button"
                   onClick={onReturnToHub}
-                  className="flex-1 min-h-[52px] px-5 py-3 rounded-2xl text-sm font-bold bg-white/10 text-white border border-white/15 hover:bg-white/20 transition-all"
+                  className="flex-1 min-h-[52px] px-5 py-3 rounded-2xl text-sm font-bold bg-[#FAF7F2] text-[#1F242D] border border-[#EAE4DC] hover:bg-[#F1ECE3] transition-all cursor-pointer"
                 >
                   {t.backToHub}
                 </button>
@@ -1589,7 +1591,7 @@ export function SlingshotDuoGameView({
 
       {/* Mobile callout / subtle gesture hint */}
       {hud.phase === 'playing' && (
-        <div className="flex items-center justify-center gap-2 text-xs text-white/80">
+        <div className="flex items-center justify-center gap-2 text-xs text-[#6B7280]">
           <span className="truncate font-semibold">
             {hud.lastCallout || (hasHandSensor ? t.slingPinchHint : t.slingSensorFallback)}
           </span>

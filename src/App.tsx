@@ -28,28 +28,30 @@ import { extractRoomCodeFromSearch } from './utils/clipboard';
 import { CATEGORY_THEMES } from './theme/categoryThemes';
 import { LobbyView } from './components/LobbyView';
 import { SessionToolbar } from './components/SessionToolbar';
-import { HubView } from './components/HubView';
+import { HubView, type HubFloatingReaction } from './components/HubView';
 import { LaughGameView } from './components/LaughGameView';
 import { FunambulesGameView } from './components/FunambulesGameView';
 import { NinjaFruitsGameView } from './components/NinjaFruitsGameView';
 import { AirHockeyGameView } from './components/AirHockeyGameView';
 import { StareDuelGameView } from './components/StareDuelGameView';
 import { MiamManiaGameView } from './components/MiamManiaGameView';
-import { KissBounceGameView } from './components/KissBounceGameView';
-import { ConstellationsGameView } from './components/ConstellationsGameView';
 import { WhisperSecretsGameView } from './components/WhisperSecretsGameView';
 import { SlingshotDuoGameView } from './components/SlingshotDuoGameView';
 import { XoNeonGameView } from './components/XoNeonGameView';
 import { ParchisiDuoGameView } from './components/ParchisiDuoGameView';
-import { CoupleJamGameView } from './components/CoupleJamGameView';
+import { MusicQuizGameView } from './components/MusicQuizGameView';
+import { FreezeDanceGameView } from './components/FreezeDanceGameView';
 import { ToastStack, type AppToast } from './components/ToastStack';
 import { MediaPipeLoadingOverlay } from './components/MediaPipeLoadingOverlay';
 import { LanguageProvider, useI18n } from './i18n/LanguageContext';
+import { MirrorProvider } from './context/MirrorContext';
 
 export default function App() {
   return (
     <LanguageProvider>
-      <CoupleCamApp />
+      <MirrorProvider>
+        <CoupleCamApp />
+      </MirrorProvider>
     </LanguageProvider>
   );
 }
@@ -59,6 +61,7 @@ function CoupleCamApp() {
   const [screen, setScreen] = useState<ScreenView>('lobby');
   const [activeHubCategory, setActiveHubCategory] = useState<HubCategory>('all');
   const [toasts, setToasts] = useState<AppToast[]>([]);
+  const [hubReactions, setHubReactions] = useState<HubFloatingReaction[]>([]);
   const [playerName, setPlayerName] = useState<string>('Alex');
   const [partnerName, setPartnerName] = useState<string>('Camille IA');
   const [connectionMode, setConnectionMode] = useState<ConnectionMode>('idle');
@@ -86,6 +89,14 @@ function CoupleCamApp() {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 2800);
   }, []);
+  const spawnHubReaction = useCallback((emoji: '❤️' | '😂' | '🔥') => {
+    const id = Date.now() + Math.floor(Math.random() * 10000);
+    const offsetX = Math.round((Math.random() - 0.5) * 140);
+    setHubReactions((prev) => [...prev.slice(-8), { id, emoji, offsetX }]);
+    window.setTimeout(() => {
+      setHubReactions((prev) => prev.filter((item) => item.id !== id));
+    }, 1250);
+  }, []);
   const toastConnectedTextRef = useRef(t.toastPartnerConnected);
   toastConnectedTextRef.current = t.toastPartnerConnected;
 
@@ -96,13 +107,12 @@ function CoupleCamApp() {
   const [funambulesBestM, setFunambulesBestM] = useState(0);
   const [ninjaBestScore, setNinjaBestScore] = useState(0);
   const [airHockeyWins, setAirHockeyWins] = useState(0);
-  const [kissBestRally, setKissBestRally] = useState(0);
-  const [constellationsCompleted, setConstellationsCompleted] = useState(0);
   const [whisperBestHeat, setWhisperBestHeat] = useState(16);
   const [slingshotBestScore, setSlingshotBestScore] = useState(0);
   const [xoNeonWins, setXoNeonWins] = useState(0);
   const [parchisiWins, setParchisiWins] = useState(0);
-  const [coupleJamBestScore, setCoupleJamBestScore] = useState(0);
+  const [musicQuizBestScore, setMusicQuizBestScore] = useState(0);
+  const [freezeDanceWins, setFreezeDanceWins] = useState(0);
   const [parchisiHandDiceEnabled, setParchisiHandDiceEnabled] = useState(false);
   const parchisiHandDiceEnabledRef = useRef(false);
   parchisiHandDiceEnabledRef.current = parchisiHandDiceEnabled;
@@ -232,17 +242,17 @@ function CoupleCamApp() {
     }
   }, [localStream]);
 
-  // Lazy-load MediaPipe FaceLandmarker when on Hub or face-tracked games (including Kiss Bounce)
+  // Lazy-load MediaPipe FaceLandmarker when on Hub or face-tracked games
   useEffect(() => {
     if (
       screen === 'lobby' ||
       screen === 'ninja-fruits' ||
       screen === 'air-hockey' ||
-      screen === 'constellations' ||
       screen === 'slingshot-duo' ||
       screen === 'xo-neon' ||
       screen === 'parchisi-duo' ||
-      screen === 'couple-jam'
+      screen === 'music-quiz' ||
+      screen === 'freeze-dance'
     ) {
       return;
     }
@@ -277,8 +287,6 @@ function CoupleCamApp() {
     const isHandGame =
       screen === 'ninja-fruits' ||
       screen === 'air-hockey' ||
-      screen === 'kiss-bounce' ||
-      screen === 'constellations' ||
       screen === 'slingshot-duo' ||
       screen === 'xo-neon' ||
       (screen === 'parchisi-duo' && parchisiHandDiceEnabled);
@@ -364,19 +372,17 @@ function CoupleCamApp() {
       const needsHand =
         activeScreen === 'ninja-fruits' ||
         activeScreen === 'air-hockey' ||
-        activeScreen === 'kiss-bounce' ||
-        activeScreen === 'constellations' ||
         activeScreen === 'slingshot-duo' ||
         activeScreen === 'xo-neon' ||
         (activeScreen === 'parchisi-duo' && parchisiHandDiceEnabledRef.current);
       const needsFace =
         activeScreen !== 'ninja-fruits' &&
         activeScreen !== 'air-hockey' &&
-        activeScreen !== 'constellations' &&
         activeScreen !== 'slingshot-duo' &&
         activeScreen !== 'xo-neon' &&
         activeScreen !== 'parchisi-duo' &&
-        activeScreen !== 'couple-jam';
+        activeScreen !== 'music-quiz' &&
+        activeScreen !== 'freeze-dance';
 
       if (needsHand) {
         const handTracker = handTrackerRef.current;
@@ -416,13 +422,9 @@ function CoupleCamApp() {
         ) {
           const hm = localHandMetricsRef.current;
           const ptr = localPointerHandRef.current;
-          const activeGame = activeScreen as
-            | 'ninja-fruits'
-            | 'air-hockey'
-            | 'kiss-bounce'
-            | 'constellations';
+          const activeGame = activeScreen as 'ninja-fruits' | 'air-hockey';
           const useCam = hm.handDetected;
-          const useIndex = activeGame === 'ninja-fruits' || activeGame === 'constellations';
+          const useIndex = activeGame === 'ninja-fruits';
           const tx = useCam ? (useIndex ? hm.indexX : hm.palmX) : ptr.normX;
           const ty = useCam ? (useIndex ? hm.indexY : hm.palmY) : ptr.normY;
           peerServiceRef.current?.sendRealtime({
@@ -595,6 +597,8 @@ function CoupleCamApp() {
             soundFx.click();
             pendingGameMessagesRef.current = [];
             setScreen('hub');
+          } else if (msg.type === 'HUB_REACTION') {
+            spawnHubReaction(msg.emoji);
           } else if (msg.type === 'FACE_FRAME') {
             partnerMetricsRef.current = {
               ...EMPTY_FACE_METRICS,
@@ -608,8 +612,8 @@ function CoupleCamApp() {
             };
           } else if (msg.type === 'HAND_FRAME') {
             const prev = partnerHandMetricsRef.current;
-            const isIndexGame = msg.game === 'ninja-fruits' || msg.game === 'constellations';
-            const isPalmGame = msg.game === 'air-hockey' || msg.game === 'kiss-bounce';
+            const isIndexGame = msg.game === 'ninja-fruits';
+            const isPalmGame = msg.game === 'air-hockey';
             partnerHandMetricsRef.current = {
               ...prev,
               indexX: isIndexGame ? msg.x : prev.indexX,
@@ -699,7 +703,7 @@ function CoupleCamApp() {
     [playerName, pushToast, requestLocalMedia, t.toastSoloStarted],
   );
 
-  // Support ?autostart=1|hub|laugh|stare-duel|miam-mania|funambules|ninja-fruits|air-hockey|kiss-bounce|constellations|whisper-secrets|slingshot-duo|xo-neon
+  // Support ?autostart=1|hub|laugh|stare-duel|miam-mania|funambules|ninja-fruits|air-hockey|whisper-secrets|slingshot-duo|xo-neon|parchisi-duo|music-quiz|freeze-dance
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const auto = params.get('autostart');
@@ -712,13 +716,12 @@ function CoupleCamApp() {
       auto === 'funambules' ||
       auto === 'ninja-fruits' ||
       auto === 'air-hockey' ||
-      auto === 'kiss-bounce' ||
-      auto === 'constellations' ||
       auto === 'whisper-secrets' ||
       auto === 'slingshot-duo' ||
       auto === 'xo-neon' ||
       auto === 'parchisi-duo' ||
-      auto === 'couple-jam'
+      auto === 'music-quiz' ||
+      auto === 'freeze-dance'
     ) {
       handleStartSoloMode(auto);
     } else if (initialJoinCode.length === 4) {
@@ -741,6 +744,15 @@ function CoupleCamApp() {
     setScreen('hub');
     peerServiceRef.current?.sendEvent({ type: 'RETURN_HUB' });
   }, []);
+
+  const handleSendHubReaction = useCallback(
+    (emoji: '❤️' | '😂' | '🔥') => {
+      soundFx.click();
+      spawnHubReaction(emoji);
+      peerServiceRef.current?.sendEvent({ type: 'HUB_REACTION', emoji });
+    },
+    [spawnHubReaction],
+  );
 
   const handleLeaveRoom = useCallback(() => {
     pendingRoomAttemptRef.current += 1;
@@ -856,14 +868,6 @@ function CoupleCamApp() {
     setAirHockeyWins((w) => w + 1);
   }, []);
 
-  const handleUpdateKissBestRally = useCallback((rally: number) => {
-    setKissBestRally((prev) => Math.max(prev, rally));
-  }, []);
-
-  const handleConstellationCompleted = useCallback((count: number) => {
-    setConstellationsCompleted((prev) => Math.max(prev, count));
-  }, []);
-
   const handleUpdateWhisperBestHeat = useCallback((heat: number) => {
     setWhisperBestHeat((prev) => Math.max(prev, heat));
   }, []);
@@ -880,8 +884,12 @@ function CoupleCamApp() {
     setParchisiWins((w) => w + 1);
   }, []);
 
-  const handleRecordCoupleJamScore = useCallback((score: number) => {
-    setCoupleJamBestScore((prev) => Math.max(prev, score));
+  const handleRecordMusicQuizScore = useCallback((score: number) => {
+    setMusicQuizBestScore((prev) => Math.max(prev, score));
+  }, []);
+
+  const handleRecordFreezeDanceVictory = useCallback(() => {
+    setFreezeDanceWins((w) => w + 1);
   }, []);
 
   const handleLocalPointerHandChange = useCallback((normX: number, normY: number, active: boolean) => {
@@ -952,11 +960,14 @@ function CoupleCamApp() {
       {persistentTrackerVideo}
       <div
         className={
-          screen === 'parchisi-duo' || screen === 'couple-jam'
-            ? 'h-[100dvh] overflow-hidden flex flex-col text-white transition-all duration-500'
-            : 'min-h-[100dvh] flex flex-col text-white overflow-x-hidden transition-all duration-500'
+          screen === 'hub' ||
+          screen === 'parchisi-duo' ||
+          screen === 'music-quiz' ||
+          screen === 'freeze-dance'
+            ? 'h-[100dvh] overflow-hidden flex flex-col bg-[#FAF7F2] text-[#1F242D] transition-all duration-300'
+            : 'min-h-[100dvh] flex flex-col bg-[#FAF7F2] text-[#1F242D] overflow-x-hidden transition-all duration-300'
         }
-        style={{ background: activeTheme.pageBg }}
+        style={{ backgroundColor: activeTheme.pageBg }}
       >
         <SessionToolbar
           screen={screen}
@@ -982,7 +993,7 @@ function CoupleCamApp() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
+              className="flex-1 min-h-0 flex flex-col overflow-hidden"
             >
               <HubView
                 activeCategory={activeHubCategory}
@@ -1003,13 +1014,14 @@ function CoupleCamApp() {
                 funambulesBestM={funambulesBestM}
                 ninjaBestScore={ninjaBestScore}
                 airHockeyWins={airHockeyWins}
-                kissBestRally={kissBestRally}
-                constellationsCompleted={constellationsCompleted}
                 whisperBestHeat={whisperBestHeat}
                 slingshotBestScore={slingshotBestScore}
                 xoNeonWins={xoNeonWins}
                 parchisiWins={parchisiWins}
-                coupleJamBestScore={coupleJamBestScore}
+                musicQuizBestScore={musicQuizBestScore}
+                freezeDanceWins={freezeDanceWins}
+                floatingReactions={hubReactions}
+                onSendReaction={handleSendHubReaction}
                 onVideoRef={handleVideoRef}
                 onRequestCamera={requestLocalMedia}
                 onSelectGame={handleSelectGame}
@@ -1216,73 +1228,6 @@ function CoupleCamApp() {
             </motion.div>
           )}
 
-          {screen === 'kiss-bounce' && (
-            <motion.div
-              key="kiss-bounce-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <KissBounceGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                faceTrackerStatus={trackerStatus}
-                handTrackerStatus={handTrackerStatus}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                localHandMetricsRef={localHandMetricsRef}
-                partnerHandMetricsRef={partnerHandMetricsRef}
-                bestRally={kissBestRally}
-                onUpdateBestRally={handleUpdateKissBestRally}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                registerPeerHandler={registerPeerHandler}
-                onLocalPointerHandChange={handleLocalPointerHandChange}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-
-          {screen === 'constellations' && (
-            <motion.div
-              key="constellations-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <ConstellationsGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                handTrackerStatus={handTrackerStatus}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                localHandMetricsRef={localHandMetricsRef}
-                partnerHandMetricsRef={partnerHandMetricsRef}
-                completedConstellations={constellationsCompleted}
-                onConstellationCompleted={handleConstellationCompleted}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                registerPeerHandler={registerPeerHandler}
-                onLocalPointerHandChange={handleLocalPointerHandChange}
-              />
-            </motion.div>
-          )}
 
           {screen === 'whisper-secrets' && (
             <motion.div
@@ -1413,31 +1358,55 @@ function CoupleCamApp() {
             </motion.div>
           )}
 
-          {screen === 'couple-jam' && (
+          {screen === 'music-quiz' && (
             <motion.div
-              key="couple-jam-view"
+              key="music-quiz-view"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
               className="flex-1 min-h-0 flex flex-col overflow-hidden"
             >
-              <CoupleJamGameView
+              <MusicQuizGameView
                 localName={playerName}
                 partnerName={partnerName}
                 connectionMode={connectionMode}
                 localStream={localStream}
                 remoteStream={remoteStream}
                 cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
                 sfxMuted={sfxMuted}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                onRecordJamSession={handleRecordCoupleJamScore}
-                onVideoRef={handleVideoRef}
+                localMetricsRef={localMetricsRef}
+                partnerMetricsRef={partnerMetricsRef}
+                onRecordScore={handleRecordMusicQuizScore}
+                onSendPeerMessage={handleSendPeerMessage}
+                registerPeerHandler={registerPeerHandler}
+                onReturnToHub={handleReturnToHub}
+              />
+            </motion.div>
+          )}
+
+          {screen === 'freeze-dance' && (
+            <motion.div
+              key="freeze-dance-view"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="flex-1 min-h-0 flex flex-col overflow-hidden"
+            >
+              <FreezeDanceGameView
+                localName={playerName}
+                partnerName={partnerName}
+                connectionMode={connectionMode}
+                localStream={localStream}
+                remoteStream={remoteStream}
+                cameraEnabled={cameraEnabled}
+                sfxMuted={sfxMuted}
+                localMetricsRef={localMetricsRef}
+                partnerMetricsRef={partnerMetricsRef}
+                onRecordVictory={handleRecordFreezeDanceVictory}
                 onRequestCamera={requestLocalMedia}
                 onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
                 registerPeerHandler={registerPeerHandler}
                 onReturnToHub={handleReturnToHub}
               />

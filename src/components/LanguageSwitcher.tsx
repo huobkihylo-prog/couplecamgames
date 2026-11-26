@@ -16,9 +16,9 @@ export function LanguageSwitcher() {
       role="group"
       aria-label="Language selector"
       data-testid="language-switcher"
-      className="inline-flex items-center gap-0.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 p-1 shrink-0"
+      className="inline-flex items-center gap-0.5 rounded-full bg-white border border-[#EAE4DC] p-1 shrink-0 shadow-[0_2px_10px_rgba(31,36,45,0.04)]"
     >
-      <Globe className="w-3.5 h-3.5 text-white/75 mx-1.5 hidden sm:block shrink-0" aria-hidden="true" />
+      <Globe className="w-3.5 h-3.5 text-[#6B7280] mx-1.5 hidden sm:block shrink-0" aria-hidden="true" />
       {OPTIONS.map((opt) => {
         const active = lang === opt.code;
         return (
@@ -29,10 +29,10 @@ export function LanguageSwitcher() {
             aria-label={opt.ariaLabel}
             aria-pressed={active}
             onClick={() => setLang(opt.code)}
-            className={`min-h-[40px] sm:min-h-[34px] px-3 sm:px-2.5 py-1.5 sm:py-1 rounded-full text-xs font-bold transition-all whitespace-nowrap ${
+            className={`min-h-[36px] sm:min-h-[32px] px-2.5 py-1 rounded-full text-xs font-bold transition-all whitespace-nowrap ${
               active
-                ? 'bg-gradient-to-r from-[#7C3AED] via-[#FF4D8D] to-[#38BDF8] text-white shadow-sm shadow-[#FF4D8D]/40'
-                : 'text-white/80 hover:text-white hover:bg-white/10'
+                ? 'bg-[#FF6B57] text-white shadow-sm shadow-[#FF6B57]/30'
+                : 'text-[#6B7280] hover:text-[#1F242D] hover:bg-[#FAF7F2]'
             }`}
           >
             {opt.shortLabel}
