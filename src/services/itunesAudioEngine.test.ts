@@ -7,6 +7,7 @@ import {
   isAutoplayBlockedError,
   isValidHttpsPreviewUrl,
   ITUNES_JSONP_TIMEOUT_MS,
+  parseRawDeezerResults,
   parseRawItunesResults,
   PLAYBACK_STALL_TIMEOUT_MS,
   SharedMusicAudioPlayer,
@@ -310,4 +311,50 @@ test('parseRawItunesResults parses proxy/iTunes/Deezer normalized payloads and f
   assert.equal(tracks[0].trackName, 'Levitating');
   assert.equal(tracks[0].previewUrl.startsWith('https://'), true);
   assert.equal(tracks[1].artworkUrlHiRes.includes('400x400bb'), true);
+});
+
+test('parseRawDeezerResults parses direct Deezer JSONP payloads, keeps only HTTPS previews, and deduplicates', () => {
+  const tracks = parseRawDeezerResults({
+    data: [
+      {
+        id: 908604612,
+        title: 'Blinding Lights',
+        preview: 'https://cdnt-preview.dzcdn.net/api/1/1/blinding.mp3',
+        artist: { name: 'The Weeknd' },
+        album: {
+          title: 'After Hours',
+          cover_big: 'https://cdn-images.dzcdn.net/images/cover/abc/500x500.jpg',
+        },
+      },
+      {
+        id: 908604613,
+        title: 'Blinding Lights (Live)',
+        preview: 'https://cdnt-preview.dzcdn.net/api/1/1/blinding-live.mp3',
+        artist: { name: 'The Weeknd' },
+      },
+      {
+        id: 908604614,
+        title: 'No HTTPS Preview',
+        preview: 'http://cdnt-preview.dzcdn.net/insecure.mp3',
+        artist: { name: 'Test' },
+      },
+      {
+        id: 908604615,
+        title: 'Alors on danse',
+        preview: 'https://cdnt-preview.dzcdn.net/api/1/1/alors.mp3',
+        artist: { name: 'Stromae' },
+        album: {
+          title: 'Cheese',
+          cover_medium: 'https://cdn-images.dzcdn.net/images/cover/def/250x250.jpg',
+        },
+      },
+    ],
+  });
+
+  assert.equal(tracks.length, 2);
+  assert.equal(tracks[0].trackName, 'Blinding Lights');
+  assert.equal(tracks[0].artistName, 'The Weeknd');
+  assert.equal(tracks[0].artworkUrlHiRes, 'https://cdn-images.dzcdn.net/images/cover/abc/500x500.jpg');
+  assert.equal(tracks[1].trackName, 'Alors on danse');
+  assert.equal(tracks[1].artworkUrl, 'https://cdn-images.dzcdn.net/images/cover/def/250x250.jpg');
 });

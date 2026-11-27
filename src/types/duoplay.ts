@@ -513,7 +513,8 @@ export type PeerMessage =
       moveSeq: number;
     }
   | { type: 'XO_REMATCH' }
-  | { type: 'PARCHISI_START'; mode: ParchisiMode }
+  | { type: 'PARCHISI_CONFIG'; mode: ParchisiMode; diceCount: ParchisiDiceCount }
+  | { type: 'PARCHISI_START'; mode: ParchisiMode; diceCount?: ParchisiDiceCount }
   | {
       type: 'PARCHISI_ACTION';
       action: 'ROLL' | 'MOVE_TOKEN' | 'EMOJI' | 'QUICK_CHAT';
@@ -709,6 +710,7 @@ export interface XoNeonState {
 export type ParchisiColor = 'red' | 'green' | 'yellow' | 'blue';
 export type ParchisiPlayer = ParchisiColor;
 export type ParchisiMode = '1v1' | '4p';
+export type ParchisiDiceCount = 1 | 2;
 export type ParchisiPhase = 'READY' | 'WAIT_ROLL' | 'WAIT_MOVE' | 'GAME_OVER';
 export type ParchisiBonusAmount = 20 | 10;
 
@@ -764,12 +766,14 @@ export interface ParchisiPlayerStats {
 export interface ParchisiState {
   phase: ParchisiPhase;
   mode: ParchisiMode;
+  /** Number of dice in play: 1 (single-die Parcheesi) or 2 (classic 2-dice Parcheesi) */
+  diceCount: ParchisiDiceCount;
   activeColors: ParchisiColor[];
   turn: ParchisiColor;
-  /** Two 6-sided dice values once rolled this turn */
-  dice: [number, number] | null;
-  /** Tracks which of the 2 dice have been spent */
-  usedDice: [boolean, boolean];
+  /** Rolled 6-sided dice values: [val] in 1-die mode or [val1, val2] in 2-dice mode */
+  dice: number[] | null;
+  /** Tracks which dice have been spent this turn */
+  usedDice: boolean[];
   /** Pending +20 (capture) or +10 (center home) bonus moves to play immediately */
   pendingBonuses: ParchisiBonusAmount[];
   rollSeq: number;

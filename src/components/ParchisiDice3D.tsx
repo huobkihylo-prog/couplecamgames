@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ParchisiBonusAmount } from '../types/duoplay';
+import type { ParchisiBonusAmount, ParchisiDiceCount } from '../types/duoplay';
 import {
   computeNextDieRotation,
   computePreRollDieRotation,
@@ -10,8 +10,9 @@ import {
 export const PARCHISI_DICE_ROLL_MS = 540;
 
 interface ParchisiDiceTrayProps {
-  dice: [number, number] | null;
-  usedDice: [boolean, boolean];
+  dice: number[] | null;
+  usedDice: boolean[];
+  diceCount?: ParchisiDiceCount;
   pendingBonus: ParchisiBonusAmount | null;
   rollSeq: number;
   rolling: boolean;
@@ -241,6 +242,7 @@ function SingleDie3D({
 export function ParchisiDice3D({
   dice,
   usedDice,
+  diceCount = 2,
   pendingBonus,
   rollSeq,
   rolling,
@@ -252,9 +254,10 @@ export function ParchisiDice3D({
   onRoll,
   ariaLabel,
 }: ParchisiDiceTrayProps) {
-  const hasRealDice = dice !== null;
-  const d1 = dice ? dice[0] : 5;
-  const d2 = dice ? dice[1] : 6;
+  const hasRealDice = dice !== null && dice.length > 0;
+  const d1 = dice && dice.length > 0 ? dice[0] : 5;
+  const d2 = dice && dice.length > 1 ? dice[1] : 6;
+  const showSecondDie = diceCount === 2;
 
   const jitterX = shakeIntensity > 0.08 ? Math.sin(shakeIntensity * 42) * shakeIntensity * 5 : 0;
   const jitterRot = shakeIntensity > 0.08 ? Math.cos(shakeIntensity * 34) * shakeIntensity * 9 : 0;
@@ -300,20 +303,22 @@ export function ParchisiDice3D({
         value={d1}
         hasRealDice={hasRealDice}
         rollSeq={rollSeq}
-        used={Boolean(dice && usedDice[0])}
+        used={Boolean(hasRealDice && usedDice[0])}
         rolling={rolling}
         compact={compact}
         variant="a"
       />
-      <SingleDie3D
-        value={d2}
-        hasRealDice={hasRealDice}
-        rollSeq={rollSeq}
-        used={Boolean(dice && usedDice[1])}
-        rolling={rolling}
-        compact={compact}
-        variant="b"
-      />
+      {showSecondDie && (
+        <SingleDie3D
+          value={d2}
+          hasRealDice={hasRealDice}
+          rollSeq={rollSeq}
+          used={Boolean(hasRealDice && usedDice[1])}
+          rolling={rolling}
+          compact={compact}
+          variant="b"
+        />
+      )}
 
       {/* Glowing golden +20 / +10 bonus badge */}
       {pendingBonus !== null && (

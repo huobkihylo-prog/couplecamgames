@@ -280,4 +280,95 @@ test('4-Player Classic mode cycles counter-clockwise (red -> green -> yellow -> 
   const init1v1 = createInitialParchisiState('1v1');
   assert.equal(init1v1.tokens.green.length, 0);
   assert.equal(init1v1.tokens.blue.length, 0);
+  assert.equal(init1v1.diceCount, 2);
 });
+
+test('1-Die mode: rolling 5 exits from base OR advances an active pawn, and 1-element dice array is used', () => {
+  let st = startParchisiMatch('1v1', 1000, 1);
+  assert.equal(st.diceCount, 1);
+  assert.deepEqual(st.usedDice, [false]);
+
+  // Rolling 4 with all pawns in base -> 0 legal moves -> passes turn to Yellow
+  st = rollParchisiDice(st, [4]);
+  assert.deepEqual(st.dice, [4]);
+  assert.equal(getLegalParchisiMoves(st).length, 0);
+  st = passParchisiTurnOrBonus(st);
+  assert.equal(st.turn, 'yellow');
+  assert.equal(st.phase, 'WAIT_ROLL');
+
+  // Yellow AI rolls 5 -> exits base cleanly
+  st = rollParchisiDice(st, [5]);
+  assert.deepEqual(st.dice, [5]);
+  const aiExit = chooseAiParchisiMove(st);
+  assert.ok(aiExit !== null);
+  assert.equal(aiExit!.isExit, true);
+  st = applyParchisiMove(st, aiExit!.id);
+  assert.equal(st.tokens.yellow[0].progress, 0);
+  assert.equal(st.turn, 'red');
+
+  // Red has 1 pawn already on board (progress 2) and 3 in base -> rolling 5 allows EITHER exiting OR advancing +5!
+  st.tokens.red[0].progress = 2;
+  st = rollParchisiDice(st, [5]);
+  const moves = getLegalParchisiMoves(st);
+  assert.ok(moves.some((m) => m.tokenId === 0 && !m.isExit && m.toProgress === 7 && m.label === '+5'));
+  assert.ok(moves.some((m) => m.tokenId === 1 && m.isExit && m.toProgress === 0));
+});
+
+test('1-Die mode: rolling 6 grants bonus roll; 3 consecutive sixes pass the turn; +20 capture & +10 home bonuses work', () => {
+  let st = startParchisiMatch('1v1', 1000, 1);
+  st.tokens.red[0].progress = 1; // Tile 2
+
+  // 1st six -> advances +6 and keeps Red's turn for a bonus roll!
+  st = rollParchisiDice(st, [6]);
+  assert.equal(st.consecutiveDoubles, 1);
+  assert.equal(st.extraRollPending, true);
+  const move1 = getLegalParchisiMoves(st)[0];
+  st = applyParchisiMove(st, move1.id);
+  assert.equal(st.tokens.red[0].progress, 7);
+  assert.equal(st.turn, 'red');
+  assert.equal(st.phase, 'WAIT_ROLL');
+
+  // 2nd six -> advances +6 and keeps Red's turn!
+  st = rollParchisiDice(st, [6]);
+  assert.equal(st.consecutiveDoubles, 2);
+  const move2 = getLegalParchisiMoves(st)[0];
+  st = applyParchisiMove(st, move2.id);
+  assert.equal(st.tokens.red[0].progress, 13);
+  assert.equal(st.turn, 'red');
+  assert.equal(st.phase, 'WAIT_ROLL');
+
+  // 3rd consecutive six -> forfeits turn, 0 legal moves, passes to Yellow!
+  st = rollParchisiDice(st, [6]);
+  assert.equal(st.consecutiveDoubles, 0);
+  assert.equal(st.extraRollPending, false);
+  assert.equal(getLegalParchisiMoves(st).length, 0);
+  st = passParchisiTurnOrBonus(st);
+  assert.equal(st.turn, 'yellow');
+
+  // Capture (+20) and Center Home (+10) bonuses preserved in 1-Die mode
+  let capSt = startParchisiMatch('1v1', 1000, 1);
+  capSt.tokens.red[0].progress = 1; // Tile 2
+  capSt.tokens.yellow[0].progress = 39; // Tile 6 (non-safe)
+  capSt = rollParchisiDice(capSt, [4]);
+  const capMove = getLegalParchisiMoves(capSt)[0];
+  assert.equal(capMove.captures.length, 1);
+  capSt = applyParchisiMove(capSt, capMove.id);
+  assert.equal(capSt.tokens.yellow[0].progress, -1);
+  assert.deepEqual(capSt.pendingBonuses, [20]);
+  const b20 = getLegalParchisiMoves(capSt)[0];
+  assert.equal(b20.label, '+20');
+  capSt = applyParchisiMove(capSt, b20.id);
+  assert.equal(capSt.tokens.red[0].progress, 25);
+  assert.equal(capSt.turn, 'yellow');
+
+  // Home entry (+10) bonus in 1-Die mode
+  let homeSt = startParchisiMatch('1v1', 1000, 1);
+  homeSt.tokens.red[0].progress = 68; // Needs exact 3
+  homeSt.tokens.red[1].progress = 10;
+  homeSt = rollParchisiDice(homeSt, [3]);
+  const hMove = getLegalParchisiMoves(homeSt).find((m) => m.tokenId === 0)!;
+  homeSt = applyParchisiMove(homeSt, hMove.id);
+  assert.equal(homeSt.tokens.red[0].progress, PARCHISI_HOME_PROGRESS);
+  assert.deepEqual(homeSt.pendingBonuses, [10]);
+});
+

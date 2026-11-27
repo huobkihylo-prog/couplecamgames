@@ -1,6 +1,7 @@
 import type {
   ParchisiBonusAmount,
   ParchisiColor,
+  ParchisiDiceCount,
   ParchisiMode,
   ParchisiMoveOption,
   ParchisiPlayerStats,
@@ -58,17 +59,27 @@ function buildInitialTokens(mode: ParchisiMode): Record<ParchisiColor, ParchisiT
   };
 }
 
+function freshUsedDice(diceCount: ParchisiDiceCount): boolean[] {
+  return diceCount === 1 ? [false] : [false, false];
+}
+
+function allSpentDice(diceCount: ParchisiDiceCount): boolean[] {
+  return diceCount === 1 ? [true] : [true, true];
+}
+
 export function createInitialParchisiState(
   mode: ParchisiMode = '1v1',
   nowMs = Date.now(),
+  diceCount: ParchisiDiceCount = 2,
 ): ParchisiState {
   return {
     phase: 'READY',
     mode,
+    diceCount,
     activeColors: getActiveColorsForMode(mode),
     turn: 'red',
     dice: null,
-    usedDice: [false, false],
+    usedDice: freshUsedDice(diceCount),
     pendingBonuses: [],
     rollSeq: 0,
     consecutiveDoubles: 0,
@@ -89,12 +100,13 @@ export function createInitialParchisiState(
 export function startParchisiMatch(
   mode: ParchisiMode,
   nowMs = Date.now(),
+  diceCount: ParchisiDiceCount = 2,
 ): ParchisiState {
-  const base = createInitialParchisiState(mode, nowMs);
+  const base = createInitialParchisiState(mode, nowMs, diceCount);
   return {
     ...base,
     phase: 'WAIT_ROLL',
-    lastEventText: 'Red starts! Roll both dice.',
+    lastEventText: diceCount === 1 ? 'Red starts! Roll the die.' : 'Red starts! Roll both dice.',
     stateSeq: 1,
   };
 }
@@ -411,15 +423,75 @@ export function getLegalParchisiMoves(state: ParchisiState): ParchisiMoveOption[
     return rawMoves;
   }
 
-  // 2. Regular 2-dice phase
-  if (!state.dice) return [];
-  const [d1, d2] = state.dice;
-  const [u1, u2] = state.usedDice;
-  if (u1 && u2) return [];
+  // 2. Single-die mode (diceCount === 1)
+  if (!state.dice || state.dice.length === 0) return [];
 
   const startSq = COLOR_START_SQUARE[color];
   const startOccupancy = getTokensAtOuterSquare(state.tokens, startSq).length;
   const canExitStart = startOccupancy < 2;
+
+  if (state.diceCount === 1 || state.dice.length === 1) {
+    const d1 = state.dice[0];
+    const u1 = Boolean(state.usedDice[0]);
+    if (u1) return [];
+
+    for (const token of myTokens) {
+      if (token.progress >= PARCHISI_HOME_PROGRESS) continue;
+
+      // Rolling 5 allows exiting a pawn from base onto Start square
+      if (token.progress === -1) {
+        if (d1 === 5 && canExitStart) {
+          rawMoves.push({
+            id: `t${token.id}:exit-d0`,
+            tokenId: token.id,
+            color,
+            fromProgress: -1,
+            toProgress: 0,
+            steps: 5,
+            diceUsed: [0],
+            bonusUsed: null,
+            label: 'Exit (5)',
+            path: [0],
+            isExit: true,
+            captures: [],
+            reachesHome: false,
+            landsOnSafe: true,
+            breaksBlockade: false,
+          });
+        }
+        continue;
+      }
+
+      // Advance an active token on the board by d1 (including advancing by 5!)
+      const m1 = evaluateBoardAdvance(state.tokens, token, d1);
+      if (m1) {
+        rawMoves.push({
+          id: `t${token.id}:d0`,
+          tokenId: token.id,
+          color,
+          fromProgress: token.progress,
+          toProgress: m1.toProgress,
+          steps: d1,
+          diceUsed: [0],
+          bonusUsed: null,
+          label: `+${d1}`,
+          path: m1.path,
+          isExit: false,
+          captures: m1.capture ? [m1.capture] : [],
+          reachesHome: m1.reachesHome,
+          landsOnSafe: m1.landsOnSafe,
+          breaksBlockade: isTokenInOwnBlockade(state.tokens, token),
+        });
+      }
+    }
+
+    return rawMoves;
+  }
+
+  // 3. Regular 2-dice phase (100% preserved)
+  const [d1, d2] = state.dice;
+  const [u1, u2] = state.usedDice;
+  if (u1 && u2) return [];
 
   for (const token of myTokens) {
     if (token.progress >= PARCHISI_HOME_PROGRESS) continue;
@@ -581,30 +653,88 @@ export function getLegalParchisiMoves(state: ParchisiState): ParchisiMoveOption[
  */
 export function rollParchisiDice(
   state: ParchisiState,
-  forcedDice?: [number, number],
+  forcedDice?: number[],
   rng: () => number = Math.random,
   nowMs = Date.now(),
 ): ParchisiState {
   if (state.phase !== 'WAIT_ROLL') return state;
 
-  const d1 = forcedDice
-    ? Math.max(1, Math.min(6, Math.round(forcedDice[0])))
-    : Math.floor(rng() * 6) + 1;
-  const d2 = forcedDice
-    ? Math.max(1, Math.min(6, Math.round(forcedDice[1])))
-    : Math.floor(rng() * 6) + 1;
-
   const color = state.turn;
   const colorLabel = COLOR_PALETTE[color].label;
-  const isDoubles = d1 === d2;
-  const nextConsecutiveDoubles = isDoubles ? state.consecutiveDoubles + 1 : 0;
-
   const nextStats: Record<ParchisiColor, ParchisiPlayerStats> = {
     red: { ...state.stats.red },
     green: { ...state.stats.green },
     yellow: { ...state.stats.yellow },
     blue: { ...state.stats.blue },
   };
+
+  // --- 1-Die Mode ---
+  if (state.diceCount === 1) {
+    const d1 =
+      forcedDice && forcedDice.length > 0
+        ? Math.max(1, Math.min(6, Math.round(forcedDice[0])))
+        : Math.floor(rng() * 6) + 1;
+    const isSix = d1 === 6;
+    const nextConsecutiveSixes = isSix ? state.consecutiveDoubles + 1 : 0;
+
+    if (isSix) {
+      nextStats[color].doublesRolled += 1;
+    }
+
+    // 3 consecutive sixes forfeit the 3rd roll and pass the turn
+    if (nextConsecutiveSixes >= 3) {
+      return {
+        ...state,
+        phase: 'WAIT_MOVE',
+        dice: [d1],
+        usedDice: [true],
+        pendingBonuses: [],
+        rollSeq: state.rollSeq + 1,
+        consecutiveDoubles: 0,
+        extraRollPending: false,
+        mustBreakBlockade: false,
+        stats: nextStats,
+        lastMoveAnim: null,
+        lastEventText: `3 sixes in a row! ${colorLabel}'s turn forfeited.`,
+        lastEventTone: 'warning',
+        turnStartedAt: nowMs,
+        stateSeq: state.stateSeq + 1,
+      };
+    }
+
+    return {
+      ...state,
+      phase: 'WAIT_MOVE',
+      dice: [d1],
+      usedDice: [false],
+      pendingBonuses: [],
+      rollSeq: state.rollSeq + 1,
+      consecutiveDoubles: nextConsecutiveSixes,
+      extraRollPending: isSix,
+      mustBreakBlockade: false,
+      stats: nextStats,
+      lastMoveAnim: null,
+      lastEventText: isSix
+        ? `${colorLabel} rolled 6! Bonus roll earned.`
+        : `${colorLabel} rolled ${d1}.`,
+      lastEventTone: isSix ? 'bonus' : 'neutral',
+      turnStartedAt: nowMs,
+      stateSeq: state.stateSeq + 1,
+    };
+  }
+
+  // --- Classic 2-Dice Mode (100% preserved) ---
+  const d1 =
+    forcedDice && forcedDice.length > 0
+      ? Math.max(1, Math.min(6, Math.round(forcedDice[0])))
+      : Math.floor(rng() * 6) + 1;
+  const d2 =
+    forcedDice && forcedDice.length > 1
+      ? Math.max(1, Math.min(6, Math.round(forcedDice[1])))
+      : Math.floor(rng() * 6) + 1;
+
+  const isDoubles = d1 === d2;
+  const nextConsecutiveDoubles = isDoubles ? state.consecutiveDoubles + 1 : 0;
   if (isDoubles) {
     nextStats[color].doublesRolled += 1;
   }
@@ -724,9 +854,9 @@ export function applyParchisiMove(
     nextBonuses.unshift(10);
   }
 
-  const nextUsedDice: [boolean, boolean] = [...state.usedDice];
+  const nextUsedDice: boolean[] = [...state.usedDice];
   for (const idx of move.diceUsed) {
-    if (idx === 0 || idx === 1) {
+    if (idx >= 0 && idx < nextUsedDice.length) {
       nextUsedDice[idx] = true;
     }
   }
@@ -755,7 +885,7 @@ export function applyParchisiMove(
       ...state,
       phase: 'GAME_OVER',
       tokens: nextTokens,
-      usedDice: [true, true],
+      usedDice: allSpentDice(state.diceCount),
       pendingBonuses: [],
       mustBreakBlockade: false,
       lastMovedTokenId: nextLastMoved,
@@ -808,7 +938,7 @@ export function applyParchisiMove(
   }
 
   // 2. If a die is still unused, stay in WAIT_MOVE
-  if (!nextUsedDice[0] || !nextUsedDice[1]) {
+  if (nextUsedDice.some((used) => !used)) {
     return {
       ...state,
       phase: 'WAIT_MOVE',
@@ -826,20 +956,23 @@ export function applyParchisiMove(
     };
   }
 
-  // 3. Both dice spent and no bonuses remain -> Extra roll on doubles, or advance turn
+  // 3. All dice spent and no bonuses remain -> Extra roll (on 6 in 1-die mode, or doubles in 2-dice mode), or advance turn
   if (state.extraRollPending) {
     return {
       ...state,
       phase: 'WAIT_ROLL',
       dice: null,
-      usedDice: [false, false],
+      usedDice: freshUsedDice(state.diceCount),
       pendingBonuses: [],
       extraRollPending: false,
       mustBreakBlockade: false,
       tokens: nextTokens,
       lastMovedTokenId: nextLastMoved,
       lastMoveAnim,
-      lastEventText: `${colorLabel} gets an extra roll for doubles!`,
+      lastEventText:
+        state.diceCount === 1
+          ? `${colorLabel} gets a bonus roll for 6!`
+          : `${colorLabel} gets an extra roll for doubles!`,
       lastEventTone: 'bonus',
       stats: nextStats,
       turnStartedAt: nowMs,
@@ -853,7 +986,7 @@ export function applyParchisiMove(
     phase: 'WAIT_ROLL',
     turn: nextTurn,
     dice: null,
-    usedDice: [false, false],
+    usedDice: freshUsedDice(state.diceCount),
     pendingBonuses: [],
     consecutiveDoubles: 0,
     extraRollPending: false,
@@ -883,7 +1016,7 @@ export function passParchisiTurnOrBonus(
   if (state.pendingBonuses.length > 0) {
     const dropped = state.pendingBonuses[0];
     const remainingBonuses = state.pendingBonuses.slice(1);
-    const hasRemainingDice = !state.usedDice[0] || !state.usedDice[1];
+    const hasRemainingDice = state.usedDice.some((used) => !used);
 
     if (remainingBonuses.length > 0 || hasRemainingDice) {
       return {
@@ -903,11 +1036,14 @@ export function passParchisiTurnOrBonus(
         ...state,
         phase: 'WAIT_ROLL',
         dice: null,
-        usedDice: [false, false],
+        usedDice: freshUsedDice(state.diceCount),
         pendingBonuses: [],
         extraRollPending: false,
         mustBreakBlockade: false,
-        lastEventText: `No legal move for +${dropped} bonus — roll doubles bonus!`,
+        lastEventText:
+          state.diceCount === 1
+            ? `No legal move for +${dropped} bonus — bonus roll for 6!`
+            : `No legal move for +${dropped} bonus — roll doubles bonus!`,
         lastEventTone: 'bonus',
         turnStartedAt: nowMs,
         stateSeq: state.stateSeq + 1,
@@ -920,7 +1056,7 @@ export function passParchisiTurnOrBonus(
       phase: 'WAIT_ROLL',
       turn: nextTurn,
       dice: null,
-      usedDice: [false, false],
+      usedDice: freshUsedDice(state.diceCount),
       pendingBonuses: [],
       consecutiveDoubles: 0,
       extraRollPending: false,
@@ -932,13 +1068,13 @@ export function passParchisiTurnOrBonus(
     };
   }
 
-  // Normal dice had 0 legal moves (or 3rd consecutive double forfeited)
-  if (state.extraRollPending) {
+  // In 1-Die mode, if no pawn can play the rolled die value (or 3 consecutive sixes forfeited), advance to next player
+  if (state.diceCount === 2 && state.extraRollPending) {
     return {
       ...state,
       phase: 'WAIT_ROLL',
       dice: null,
-      usedDice: [false, false],
+      usedDice: freshUsedDice(state.diceCount),
       pendingBonuses: [],
       extraRollPending: false,
       mustBreakBlockade: false,
@@ -955,7 +1091,7 @@ export function passParchisiTurnOrBonus(
     phase: 'WAIT_ROLL',
     turn: nextTurn,
     dice: null,
-    usedDice: [false, false],
+    usedDice: freshUsedDice(state.diceCount),
     pendingBonuses: [],
     consecutiveDoubles: 0,
     extraRollPending: false,

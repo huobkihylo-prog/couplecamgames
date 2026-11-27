@@ -37,8 +37,9 @@ async function startServer() {
     res.json({ ok: true, rooms: registry.getRoomCount() });
   });
 
-  // Server-side music search proxy (`/api/itunes/search`) with 15-minute TTL cache
-  // and automatic Deezer public API fallback. Eliminates iOS Safari / 5G JSONP blocks & rate limits.
+  // Server-side music search proxy (`/api/itunes/search`) with 15-minute TTL cache,
+  // iTunes rate-limit circuit breaker, and automatic Deezer public API fallback.
+  // Eliminates iOS Safari / 5G JSONP blocks & Apple IP throttling.
   interface CachedMusicPayload {
     expiresAt: number;
     source: 'itunes' | 'deezer';
@@ -53,9 +54,11 @@ async function startServer() {
     }>;
   }
   const MUSIC_CACHE_TTL_MS = 15 * 60 * 1000;
+  const ITUNES_COOLDOWN_MS = 60 * 1000;
   const musicSearchCache = new Map<string, CachedMusicPayload>();
+  let itunesBlockedUntil = 0;
 
-  const fetchWithTimeout = async (url: string, timeoutMs = 5500): Promise<globalThis.Response> => {
+  const fetchWithTimeout = async (url: string, timeoutMs = 3000): Promise<globalThis.Response> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -70,6 +73,34 @@ async function startServer() {
       clearTimeout(timer);
     }
   };
+
+  const normalizeDeezerList = (
+    items: Array<{
+      id?: number;
+      title?: string;
+      preview?: string;
+      artist?: { name?: string };
+      album?: { title?: string; cover_medium?: string; cover_big?: string };
+    }>,
+  ): CachedMusicPayload['results'] =>
+    items
+      .filter(
+        (item) =>
+          typeof item?.title === 'string' &&
+          item.title.trim().length > 0 &&
+          typeof item?.artist?.name === 'string' &&
+          item.artist.name.trim().length > 0 &&
+          typeof item?.preview === 'string' &&
+          item.preview.trim().startsWith('https://'),
+      )
+      .map((item, idx) => ({
+        trackId: typeof item.id === 'number' ? item.id : Date.now() + 100000 + idx,
+        trackName: item.title!.trim(),
+        artistName: item.artist!.name!.trim(),
+        collectionName: (item.album?.title ?? '').trim(),
+        previewUrl: item.preview!.trim(),
+        artworkUrl100: (item.album?.cover_big || item.album?.cover_medium || '').trim(),
+      }));
 
   app.get('/api/itunes/search', async (req, res) => {
     const rawTerm = typeof req.query.term === 'string' ? req.query.term.trim() : '';
@@ -92,53 +123,57 @@ async function startServer() {
     let normalized: CachedMusicPayload['results'] = [];
     let source: 'itunes' | 'deezer' = 'itunes';
 
-    // 1. Primary upstream: Apple iTunes Search API
-    try {
-      const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(rawTerm)}&media=music&entity=song&limit=${limit}`;
-      const upstream = await fetchWithTimeout(itunesUrl, 5500);
-      if (upstream.ok) {
-        const json = (await upstream.json()) as {
-          results?: Array<{
-            trackId?: number;
-            trackName?: string;
-            artistName?: string;
-            collectionName?: string;
-            previewUrl?: string;
-            artworkUrl100?: string;
-            artworkUrl60?: string;
-            primaryGenreName?: string;
-          }>;
-        };
-        const items = Array.isArray(json?.results) ? json.results : [];
-        normalized = items
-          .filter(
-            (item) =>
-              typeof item?.trackName === 'string' &&
-              item.trackName.trim().length > 0 &&
-              typeof item?.artistName === 'string' &&
-              item.artistName.trim().length > 0 &&
-              typeof item?.previewUrl === 'string' &&
-              item.previewUrl.trim().startsWith('https://'),
-          )
-          .map((item, idx) => ({
-            trackId: typeof item.trackId === 'number' ? item.trackId : Date.now() + idx,
-            trackName: item.trackName!.trim(),
-            artistName: item.artistName!.trim(),
-            collectionName: (item.collectionName ?? '').trim(),
-            previewUrl: item.previewUrl!.trim(),
-            artworkUrl100: (item.artworkUrl100 || item.artworkUrl60 || '').trim(),
-            primaryGenreName: item.primaryGenreName,
-          }));
+    // 1. Primary upstream: Apple iTunes Search API (skipped briefly if Apple 403/429 rate-limited us)
+    if (now >= itunesBlockedUntil) {
+      try {
+        const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(rawTerm)}&media=music&entity=song&limit=${limit}`;
+        const upstream = await fetchWithTimeout(itunesUrl, 3000);
+        if (upstream.status === 403 || upstream.status === 429) {
+          itunesBlockedUntil = Date.now() + ITUNES_COOLDOWN_MS;
+        } else if (upstream.ok) {
+          const json = (await upstream.json()) as {
+            results?: Array<{
+              trackId?: number;
+              trackName?: string;
+              artistName?: string;
+              collectionName?: string;
+              previewUrl?: string;
+              artworkUrl100?: string;
+              artworkUrl60?: string;
+              primaryGenreName?: string;
+            }>;
+          };
+          const items = Array.isArray(json?.results) ? json.results : [];
+          normalized = items
+            .filter(
+              (item) =>
+                typeof item?.trackName === 'string' &&
+                item.trackName.trim().length > 0 &&
+                typeof item?.artistName === 'string' &&
+                item.artistName.trim().length > 0 &&
+                typeof item?.previewUrl === 'string' &&
+                item.previewUrl.trim().startsWith('https://'),
+            )
+            .map((item, idx) => ({
+              trackId: typeof item.trackId === 'number' ? item.trackId : Date.now() + idx,
+              trackName: item.trackName!.trim(),
+              artistName: item.artistName!.trim(),
+              collectionName: (item.collectionName ?? '').trim(),
+              previewUrl: item.previewUrl!.trim(),
+              artworkUrl100: (item.artworkUrl100 || item.artworkUrl60 || '').trim(),
+              primaryGenreName: item.primaryGenreName,
+            }));
+        }
+      } catch {
+        // Fall through immediately to Deezer public search fallback
       }
-    } catch {
-      // Fall through to Deezer public search fallback
     }
 
-    // 2. Automatic fallback: Deezer Public Search API (30s HTTPS previews) if iTunes throttled/empty
+    // 2. Automatic fallback: Deezer Public Search API (30s HTTPS previews) if iTunes throttled/slow/empty
     if (normalized.length < 4) {
       try {
         const deezerUrl = `https://api.deezer.com/search?q=${encodeURIComponent(rawTerm)}&limit=${limit}`;
-        const upstream = await fetchWithTimeout(deezerUrl, 5500);
+        const upstream = await fetchWithTimeout(deezerUrl, 3000);
         if (upstream.ok) {
           const json = (await upstream.json()) as {
             data?: Array<{
@@ -150,24 +185,7 @@ async function startServer() {
             }>;
           };
           const items = Array.isArray(json?.data) ? json.data : [];
-          const deezerTracks = items
-            .filter(
-              (item) =>
-                typeof item?.title === 'string' &&
-                item.title.trim().length > 0 &&
-                typeof item?.artist?.name === 'string' &&
-                item.artist.name.trim().length > 0 &&
-                typeof item?.preview === 'string' &&
-                item.preview.trim().startsWith('https://'),
-            )
-            .map((item, idx) => ({
-              trackId: typeof item.id === 'number' ? item.id : Date.now() + 100000 + idx,
-              trackName: item.title!.trim(),
-              artistName: item.artist!.name!.trim(),
-              collectionName: (item.album?.title ?? '').trim(),
-              previewUrl: item.preview!.trim(),
-              artworkUrl100: (item.album?.cover_big || item.album?.cover_medium || '').trim(),
-            }));
+          const deezerTracks = normalizeDeezerList(items);
 
           if (deezerTracks.length > normalized.length) {
             normalized = deezerTracks;
@@ -193,6 +211,48 @@ async function startServer() {
 
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.json({ resultCount: normalized.length, results: normalized, source });
+  });
+
+  // Safety-net chart endpoint (`/api/itunes/chart`) returning live top global tracks (30s HTTPS previews)
+  app.get('/api/itunes/chart', async (_req, res) => {
+    const cacheKey = '__chart__::50';
+    const now = Date.now();
+    const cached = musicSearchCache.get(cacheKey);
+    if (cached && cached.expiresAt > now && cached.results.length > 0) {
+      res.setHeader('Cache-Control', 'public, max-age=600');
+      res.json({ resultCount: cached.results.length, results: cached.results, source: cached.source });
+      return;
+    }
+
+    let normalized: CachedMusicPayload['results'] = [];
+    try {
+      const upstream = await fetchWithTimeout('https://api.deezer.com/chart/0/tracks?limit=50', 3500);
+      if (upstream.ok) {
+        const json = (await upstream.json()) as {
+          data?: Array<{
+            id?: number;
+            title?: string;
+            preview?: string;
+            artist?: { name?: string };
+            album?: { title?: string; cover_medium?: string; cover_big?: string };
+          }>;
+        };
+        normalized = normalizeDeezerList(Array.isArray(json?.data) ? json.data : []);
+      }
+    } catch {
+      // Return empty array on network error
+    }
+
+    if (normalized.length > 0) {
+      musicSearchCache.set(cacheKey, {
+        expiresAt: now + MUSIC_CACHE_TTL_MS,
+        source: 'deezer',
+        results: normalized,
+      });
+    }
+
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json({ resultCount: normalized.length, results: normalized, source: 'deezer' });
   });
 
   // Fallback Transport 2: Server-Sent Events stream (`/api/room/stream`) for networks/proxies

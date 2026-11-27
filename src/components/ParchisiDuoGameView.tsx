@@ -23,6 +23,7 @@ import type {
   FaceMetrics,
   HandMetrics,
   ParchisiColor,
+  ParchisiDiceCount,
   ParchisiMode,
   ParchisiMoveOption,
   ParchisiState,
@@ -297,8 +298,9 @@ export function ParchisiDuoGameView({
   );
 
   const [selectedMode, setSelectedMode] = useState<ParchisiMode>('1v1');
+  const [selectedDiceCount, setSelectedDiceCount] = useState<ParchisiDiceCount>(2);
   const [gameState, setGameState] = useState<ParchisiState>(() =>
-    createInitialParchisiState('1v1'),
+    createInitialParchisiState('1v1', Date.now(), 2),
   );
   const stateRef = useRef<ParchisiState>(gameState);
   stateRef.current = gameState;
@@ -510,9 +512,24 @@ export function ParchisiDuoGameView({
     }
   }, [gameState.phase, gameState.winner, localColor, onRecordVictory]);
 
+  // Host real-time pre-game config sync (Mode + 1 Dé / 2 Dés) to Guest over PeerJS
+  const handleSelectSetupConfig = useCallback(
+    (mode: ParchisiMode, diceCount: ParchisiDiceCount) => {
+      if (!isHost) return;
+      soundFx.click();
+      setSelectedMode(mode);
+      setSelectedDiceCount(diceCount);
+      setGameState(createInitialParchisiState(mode, Date.now(), diceCount));
+      if (connectionMode === 'p2p-host') {
+        onSendPeerMessage({ type: 'PARCHISI_CONFIG', mode, diceCount });
+      }
+    },
+    [isHost, connectionMode, onSendPeerMessage],
+  );
+
   // Start or Restart match
   const handleStartMatch = useCallback(
-    (mode: ParchisiMode = selectedMode) => {
+    (mode: ParchisiMode = selectedMode, diceCount: ParchisiDiceCount = selectedDiceCount) => {
       if (!isHost) return;
       soundFx.click();
       setOpenDrawer('none');
@@ -520,13 +537,13 @@ export function ParchisiDuoGameView({
       lastRollSeqRef.current = 0;
       setCompletedAnimSeq(0);
       setIsRollingAnim(false);
-      const fresh = startParchisiMatch(mode, Date.now());
+      const fresh = startParchisiMatch(mode, Date.now(), diceCount);
       commitHostState(fresh);
       if (connectionMode === 'p2p-host') {
-        onSendPeerMessage({ type: 'PARCHISI_START', mode });
+        onSendPeerMessage({ type: 'PARCHISI_START', mode, diceCount });
       }
     },
-    [isHost, selectedMode, commitHostState, connectionMode, onSendPeerMessage],
+    [isHost, selectedMode, selectedDiceCount, commitHostState, connectionMode, onSendPeerMessage],
   );
 
   // Bind Enter / Space while in READY title card to start match immediately
@@ -535,12 +552,12 @@ export function ParchisiDuoGameView({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        handleStartMatch(selectedMode);
+        handleStartMatch(selectedMode, selectedDiceCount);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [gameState.phase, isHost, handleStartMatch, selectedMode]);
+  }, [gameState.phase, isHost, handleStartMatch, selectedMode, selectedDiceCount]);
 
   // Roll both dice (Host executes directly; Guest sends PeerJS action)
   const handleRollDice = useCallback(() => {
@@ -622,16 +639,33 @@ export function ParchisiDuoGameView({
   // PeerJS incoming message handler
   useEffect(() => {
     registerPeerHandler((msg) => {
+      if (msg.type === 'PARCHISI_CONFIG' && !isHost) {
+        setSelectedMode(msg.mode);
+        setSelectedDiceCount(msg.diceCount);
+        if (stateRef.current.phase === 'READY') {
+          const preview = createInitialParchisiState(msg.mode, Date.now(), msg.diceCount);
+          stateRef.current = preview;
+          setGameState(preview);
+        }
+        return;
+      }
+
       if (msg.type === 'PARCHISI_STATE' && !isHost) {
-        if (msg.state.lastMoveAnim === null) {
+        const normalizedState: ParchisiState = {
+          ...msg.state,
+          diceCount: msg.state.diceCount ?? 2,
+        };
+        setSelectedMode(normalizedState.mode);
+        setSelectedDiceCount(normalizedState.diceCount);
+        if (normalizedState.lastMoveAnim === null) {
           setCompletedAnimSeq(0);
         }
-        if (msg.state.rollSeq === 0) {
+        if (normalizedState.rollSeq === 0) {
           lastRollSeqRef.current = 0;
           setIsRollingAnim(false);
         }
-        stateRef.current = msg.state;
-        setGameState(msg.state);
+        stateRef.current = normalizedState;
+        setGameState(normalizedState);
         setSelectedTokenId(null);
         setHoveredTokenId(null);
         setHoveredOption(null);
@@ -665,7 +699,7 @@ export function ParchisiDuoGameView({
     return () => registerPeerHandler(null);
   }, [registerPeerHandler, isHost, commitHostState, spawnReaction]);
 
-  // Host Auto-Skip: if active player has 0 legal moves during WAIT_MOVE, show "No legal moves" for 1.1s & advance
+  // Host Auto-Skip: if active player has 0 legal moves during WAIT_MOVE, advance automatically (0.8s in 1-Die mode, 1.0s in 2-Dice mode)
   useEffect(() => {
     if (gameState.phase !== 'WAIT_MOVE' || isRollingAnim || isMoveAnimating) {
       setNoMovesBanner(false);
@@ -679,13 +713,14 @@ export function ParchisiDuoGameView({
     setNoMovesBanner(true);
     if (!isHost) return;
 
+    const skipDelayMs = gameState.diceCount === 1 ? 800 : 1000;
     const timer = window.setTimeout(() => {
       setNoMovesBanner(false);
       commitHostState(passParchisiTurnOrBonus(stateRef.current));
-    }, 1000);
+    }, skipDelayMs);
 
     return () => window.clearTimeout(timer);
-  }, [gameState.phase, gameState.stateSeq, legalMoves.length, isRollingAnim, isMoveAnimating, isHost, commitHostState]);
+  }, [gameState.phase, gameState.stateSeq, gameState.diceCount, legalMoves.length, isRollingAnim, isMoveAnimating, isHost, commitHostState]);
 
   // Host Smart AI Loop (~700ms natural pacing for Yellow AI in Solo & Blue/Green AI in 4-Player)
   useEffect(() => {
@@ -822,7 +857,9 @@ export function ParchisiDuoGameView({
 
   // Live concise turn prompt text (clean unboxed text)
   const turnStatusLine = useMemo(() => {
-    if (gameState.phase === 'READY') return 'Official 2-Dice Parcheesi';
+    if (gameState.phase === 'READY') {
+      return gameState.diceCount === 1 ? 'Official 1-Die Parcheesi' : 'Official 2-Dice Parcheesi';
+    }
     if (gameState.phase === 'GAME_OVER' && gameState.winner) {
       return `${colorNames[gameState.winner]} wins!`;
     }
@@ -837,13 +874,15 @@ export function ParchisiDuoGameView({
     }
     if (gameState.phase === 'WAIT_ROLL') {
       return isLocalTurn
-        ? 'Your turn · Roll both dice'
+        ? gameState.diceCount === 1
+          ? 'Your turn · Roll the die'
+          : 'Your turn · Roll both dice'
         : `${colorNames[gameState.turn]} is rolling…`;
     }
     return isLocalTurn
       ? 'Pick a highlighted token'
       : `${colorNames[gameState.turn]} is moving…`;
-  }, [gameState.phase, gameState.winner, gameState.turn, gameState.mustBreakBlockade, noMovesBanner, activeBonus, isLocalTurn, colorNames]);
+  }, [gameState.phase, gameState.diceCount, gameState.winner, gameState.turn, gameState.mustBreakBlockade, noMovesBanner, activeBonus, isLocalTurn, colorNames]);
 
   const handleToggleSoundMute = () => {
     const next = !sfxMutedLocal;
@@ -883,6 +922,7 @@ export function ParchisiDuoGameView({
                 <ParchisiDice3D
                   dice={displayedDice}
                   usedDice={gameState.usedDice}
+                  diceCount={gameState.diceCount}
                   pendingBonus={activeBonus}
                   rollSeq={gameState.rollSeq}
                   rolling={isRollingAnim}
@@ -925,6 +965,7 @@ export function ParchisiDuoGameView({
             <ParchisiDice3D
               dice={displayedDice}
               usedDice={gameState.usedDice}
+              diceCount={gameState.diceCount}
               pendingBonus={activeBonus}
               rollSeq={gameState.rollSeq}
               rolling={isRollingAnim}
@@ -934,7 +975,7 @@ export function ParchisiDuoGameView({
               compact={gameState.mode === '4p'}
               accentColor={COLOR_PALETTE.yellow.fill}
               onRoll={handleRollDice}
-              ariaLabel="Roll both dice for Yellow"
+              ariaLabel={gameState.diceCount === 1 ? 'Roll die for Yellow' : 'Roll both dice for Yellow'}
             />
           )}
           <PlayerAvatarBadge
@@ -1005,8 +1046,46 @@ export function ParchisiDuoGameView({
                     Official Parcheesi
                   </h2>
                   <p className="text-xs text-[#6B7280] font-medium">
-                    2 Dice · Exit on 5 · Capture +20 · Home +10
+                    {selectedDiceCount === 1
+                      ? '1 Dé · Sortie sur 5 · Rejoue sur 6 · +20 / +10'
+                      : '2 Dés · Sortie sur 5 · Capture +20 · Centre +10'}
                   </p>
+                </div>
+
+                {/* 1 Dé / 2 Dés Pill Selector (Cream & Soft Pastel, active Coral #FF6B57, synced via PeerJS) */}
+                <div
+                  role="group"
+                  aria-label="Nombre de dés"
+                  className="grid grid-cols-2 gap-2 p-1 rounded-full bg-[#FAF7F2] border border-[#EAE4DC]"
+                >
+                  <button
+                    type="button"
+                    data-testid="parchisi-dice-count-1"
+                    aria-pressed={selectedDiceCount === 1}
+                    disabled={!isHost}
+                    onClick={() => handleSelectSetupConfig(selectedMode, 1)}
+                    className={`min-h-[40px] px-3 py-1.5 rounded-full text-xs sm:text-sm font-extrabold transition-all whitespace-nowrap ${
+                      selectedDiceCount === 1
+                        ? 'bg-[#FF6B57] text-white shadow-[0_4px_12px_rgba(255,107,87,0.32)]'
+                        : 'text-[#6B7280] hover:text-[#1F242D]'
+                    }`}
+                  >
+                    🎲 1 Dé
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="parchisi-dice-count-2"
+                    aria-pressed={selectedDiceCount === 2}
+                    disabled={!isHost}
+                    onClick={() => handleSelectSetupConfig(selectedMode, 2)}
+                    className={`min-h-[40px] px-3 py-1.5 rounded-full text-xs sm:text-sm font-extrabold transition-all whitespace-nowrap ${
+                      selectedDiceCount === 2
+                        ? 'bg-[#FF6B57] text-white shadow-[0_4px_12px_rgba(255,107,87,0.32)]'
+                        : 'text-[#6B7280] hover:text-[#1F242D]'
+                    }`}
+                  >
+                    🎲🎲 2 Dés
+                  </button>
                 </div>
 
                 {/* Mode selector (Host picks; Guest sees live selection) */}
@@ -1015,11 +1094,7 @@ export function ParchisiDuoGameView({
                     type="button"
                     data-testid="parchisi-mode-1v1"
                     disabled={!isHost}
-                    onClick={() => {
-                      soundFx.click();
-                      setSelectedMode('1v1');
-                      setGameState(createInitialParchisiState('1v1'));
-                    }}
+                    onClick={() => handleSelectSetupConfig('1v1', selectedDiceCount)}
                     className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 ${
                       selectedMode === '1v1'
                         ? 'bg-[#FFE8E2]/65 border-[#FF6B57] text-[#1F242D] shadow-xs'
@@ -1042,11 +1117,7 @@ export function ParchisiDuoGameView({
                     type="button"
                     data-testid="parchisi-mode-4p"
                     disabled={!isHost}
-                    onClick={() => {
-                      soundFx.click();
-                      setSelectedMode('4p');
-                      setGameState(createInitialParchisiState('4p'));
-                    }}
+                    onClick={() => handleSelectSetupConfig('4p', selectedDiceCount)}
                     className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 ${
                       selectedMode === '4p'
                         ? 'bg-[#EFE9FB] border-[#7C5CFC] text-[#1F242D] shadow-xs'
@@ -1070,7 +1141,7 @@ export function ParchisiDuoGameView({
                     type="button"
                     data-start="true"
                     data-testid="parchisi-start-btn"
-                    onClick={() => handleStartMatch(selectedMode)}
+                    onClick={() => handleStartMatch(selectedMode, selectedDiceCount)}
                     className="w-full min-h-[48px] px-5 py-2.5 rounded-2xl text-sm sm:text-base font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] active:scale-[0.98] shadow-[0_6px_18px_rgba(255,107,87,0.35)] transition-all whitespace-nowrap"
                   >
                     Start Match
@@ -1134,7 +1205,7 @@ export function ParchisiDuoGameView({
                       type="button"
                       data-start="true"
                       data-testid="parchisi-play-again-btn"
-                      onClick={() => handleStartMatch(gameState.mode)}
+                      onClick={() => handleStartMatch(gameState.mode, gameState.diceCount)}
                       className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] shadow-sm whitespace-nowrap"
                     >
                       <RotateCcw className="w-4 h-4 shrink-0" />
@@ -1174,8 +1245,15 @@ export function ParchisiDuoGameView({
           />
           {(gameState.turn === 'red' || gameState.phase === 'READY') && (
             <ParchisiDice3D
-              dice={gameState.phase === 'READY' ? [5, 6] : displayedDice}
+              dice={
+                gameState.phase === 'READY'
+                  ? gameState.diceCount === 1
+                    ? [5]
+                    : [5, 6]
+                  : displayedDice
+              }
               usedDice={gameState.usedDice}
+              diceCount={gameState.diceCount}
               pendingBonus={activeBonus}
               rollSeq={gameState.rollSeq}
               rolling={isRollingAnim}
@@ -1185,7 +1263,7 @@ export function ParchisiDuoGameView({
               compact={gameState.mode === '4p'}
               accentColor={COLOR_PALETTE.red.fill}
               onRoll={handleRollDice}
-              ariaLabel="Roll both dice for Red"
+              ariaLabel={gameState.diceCount === 1 ? 'Roll die for Red' : 'Roll both dice for Red'}
             />
           )}
         </div>
@@ -1198,6 +1276,7 @@ export function ParchisiDuoGameView({
                 <ParchisiDice3D
                   dice={displayedDice}
                   usedDice={gameState.usedDice}
+                  diceCount={gameState.diceCount}
                   pendingBonus={activeBonus}
                   rollSeq={gameState.rollSeq}
                   rolling={isRollingAnim}
