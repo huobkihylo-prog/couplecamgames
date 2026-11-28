@@ -90,13 +90,18 @@ export interface FirestoreRoomCallbacks {
  * Pluggable transport adapter so pure unit tests can exercise the full Host/Guest
  * room lifecycle, messaging, and WebRTC signaling deterministically without live network calls.
  */
+export interface RoomSnapshotMeta {
+  hasPendingWrites?: boolean;
+  fromCache?: boolean;
+}
+
 export interface FirestoreTransportAdapter {
   getRoom: (code: string) => Promise<FirestoreRoomDoc | null>;
   createRoom: (code: string, data: FirestoreRoomDoc) => Promise<void>;
   updateRoom: (code: string, patch: Record<string, unknown>) => Promise<void>;
   subscribeRoom: (
     code: string,
-    onData: (room: FirestoreRoomDoc | null) => void,
+    onData: (room: FirestoreRoomDoc | null, meta?: RoomSnapshotMeta) => void,
     onError: (err: unknown) => void,
   ) => Unsubscribe;
   addMessage: (code: string, data: FirestoreRoomMessageDoc) => Promise<void>;
@@ -135,7 +140,14 @@ const DEFAULT_FIRESTORE_ADAPTER: FirestoreTransportAdapter = {
   async updateRoom(code, patch) {
     const path = `rooms/${code}`;
     try {
-      await updateDoc(doc(db, 'rooms', code), patch);
+      // Strictly use updateDoc (partial merge) so status, hostName, guestName, offer & answer are never overwritten
+      const cleanPatch: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(patch)) {
+        if (v !== undefined) {
+          cleanPatch[k] = v;
+        }
+      }
+      await updateDoc(doc(db, 'rooms', code), cleanPatch);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, path);
     }
@@ -145,7 +157,10 @@ const DEFAULT_FIRESTORE_ADAPTER: FirestoreTransportAdapter = {
     return onSnapshot(
       doc(db, 'rooms', code),
       (snap) => {
-        onData(snap.exists() ? (snap.data() as FirestoreRoomDoc) : null);
+        onData(snap.exists() ? (snap.data() as FirestoreRoomDoc) : null, {
+          hasPendingWrites: snap.metadata.hasPendingWrites,
+          fromCache: snap.metadata.fromCache,
+        });
       },
       (err) => {
         try {
@@ -522,9 +537,20 @@ export class FirestoreRoomService {
   private attachRoomListener(code: string, gen: number): void {
     this.unsubRoom = this.adapter.subscribeRoom(
       code,
-      (room) => {
+      (room, meta) => {
         if (gen !== this.sessionGen) return;
-        if (!room || room.status === 'closed') {
+
+        // Ignore local latency-compensated snapshots (hasPendingWrites) or temporarily null/incomplete docs
+        // so switching games or updating scores NEVER ejects players back to the Lobby.
+        if (meta?.hasPendingWrites) {
+          return;
+        }
+        if (!room) {
+          return;
+        }
+
+        // ONLY leave the room when `status === 'closed'` is explicitly confirmed from Firestore
+        if (room.status === 'closed') {
           if (this.hasEnteredRoom) {
             this.hasEnteredRoom = false;
             this.closePeerConnection();
@@ -585,13 +611,18 @@ export class FirestoreRoomService {
       },
       (err) => {
         if (gen !== this.sessionGen) return;
+        // Once inside an active room, never kick players back to Lobby on a transient listener error
+        if (this.hasEnteredRoom) {
+          console.warn('[CoupleCam Firestore] Transient room listener error (session kept alive):', err);
+          return;
+        }
         this.callbacks.onStatusChange('error', formatUserFriendlyFirestoreError(err));
       },
     );
   }
 
   private attachMessagesListener(code: string, gen: number): void {
-    const joinedAtMs = Date.now() - 1500;
+    const joinedAtMs = Date.now() - 15_000;
     this.unsubMessages = this.adapter.subscribeMessages(
       code,
       (id, msgDoc) => {

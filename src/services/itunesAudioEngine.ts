@@ -16,6 +16,7 @@
  */
 
 import { soundFx } from '../utils/soundFx';
+import { getVerifiedItunesFallbackCatalog } from '../data/verifiedItunesCatalog';
 
 export interface ItunesTrack {
   trackId: number;
@@ -56,6 +57,28 @@ interface RawDeezerResponse {
   data?: RawDeezerTrack[];
 }
 
+interface RawAppleRssLink {
+  attributes?: {
+    type?: string;
+    href?: string;
+  };
+}
+
+interface RawAppleRssEntry {
+  id?: { attributes?: { 'im:id'?: string } };
+  'im:name'?: { label?: string };
+  'im:artist'?: { label?: string };
+  'im:collection'?: { 'im:name'?: { label?: string } };
+  'im:image'?: Array<{ label?: string }>;
+  link?: RawAppleRssLink[] | RawAppleRssLink;
+}
+
+export interface RawAppleRssFeedResponse {
+  feed?: {
+    entry?: RawAppleRssEntry[];
+  };
+}
+
 export const ITUNES_JSONP_TIMEOUT_MS = 7000;
 export const PLAYBACK_STALL_TIMEOUT_MS = 4000;
 export const DEFAULT_AUDIO_VOLUME = 0.85;
@@ -71,13 +94,55 @@ const categoryPoolCache = new Map<string, ItunesTrack[]>();
 /** Active cleanup callbacks so leaving a game immediately cancels pending requests */
 const activeJsonpCancelers = new Set<() => void>();
 
-/** Short-lived provider cooldowns so a blocked endpoint (e.g. Safari ITP proxy or Apple 5G 403) fails over instantly */
+/** Short-lived provider cooldowns so a blocked endpoint (e.g. Safari ITP proxy or Apple 5G 429) fails over instantly */
 let proxyCooldownUntil = 0;
 let directItunesCooldownUntil = 0;
 
+const APPLE_RSS_CATEGORY_URLS: Record<string, readonly string[]> = {
+  'quiz:all-hits': [
+    'https://itunes.apple.com/fr/rss/topsongs/limit=35/json',
+    'https://itunes.apple.com/us/rss/topsongs/limit=25/json',
+  ],
+  'quiz:pop-intl': [
+    'https://itunes.apple.com/us/rss/topsongs/limit=35/genre=14/json',
+    'https://itunes.apple.com/fr/rss/topsongs/limit=25/genre=14/json',
+  ],
+  'quiz:rai-chaabi': [
+    'https://itunes.apple.com/fr/rss/topsongs/limit=35/genre=19/json',
+    'https://itunes.apple.com/ma/rss/topsongs/limit=25/json',
+  ],
+  'quiz:rap': [
+    'https://itunes.apple.com/fr/rss/topsongs/limit=35/genre=18/json',
+    'https://itunes.apple.com/us/rss/topsongs/limit=25/genre=18/json',
+  ],
+  'quiz:movies-disney': [
+    'https://itunes.apple.com/us/rss/topsongs/limit=35/genre=16/json',
+    'https://itunes.apple.com/fr/rss/topsongs/limit=25/genre=16/json',
+  ],
+  'freeze:party-pop': [
+    'https://itunes.apple.com/fr/rss/topsongs/limit=30/genre=17/json',
+    'https://itunes.apple.com/us/rss/topsongs/limit=25/genre=14/json',
+  ],
+  'freeze:chaabi-rai': [
+    'https://itunes.apple.com/fr/rss/topsongs/limit=30/genre=19/json',
+    'https://itunes.apple.com/ma/rss/topsongs/limit=25/json',
+  ],
+  'freeze:reggaeton-latino': [
+    'https://itunes.apple.com/us/rss/topsongs/limit=30/genre=12/json',
+    'https://itunes.apple.com/es/rss/topsongs/limit=25/genre=12/json',
+  ],
+  'freeze:disco-funk': [
+    'https://itunes.apple.com/us/rss/topsongs/limit=30/genre=15/json',
+    'https://itunes.apple.com/fr/rss/topsongs/limit=25/genre=17/json',
+  ],
+};
+
 export function upgradeItunesArtwork(url?: string): string {
   if (!url) return '';
-  return url.replace(/100x100bb/i, '400x400bb').replace(/60x60bb/i, '400x400bb');
+  return url
+    .replace(/100x100bb/i, '400x400bb')
+    .replace(/170x170bb/i, '400x400bb')
+    .replace(/60x60bb/i, '400x400bb');
 }
 
 export function normalizeTrackKey(trackName: string): string {
@@ -189,13 +254,58 @@ export function parseRawDeezerResults(payload: RawDeezerResponse | null | undefi
   return dedupeItunesTracks(mapped);
 }
 
+export function parseRawAppleRssFeed(payload: RawAppleRssFeedResponse | null | undefined): ItunesTrack[] {
+  const entries = Array.isArray(payload?.feed?.entry) ? payload.feed.entry : [];
+  const mapped: ItunesTrack[] = [];
+
+  for (let idx = 0; idx < entries.length; idx += 1) {
+    const entry = entries[idx];
+    const title = entry?.['im:name']?.label?.trim();
+    const artist = entry?.['im:artist']?.label?.trim();
+    const collection = entry?.['im:collection']?.['im:name']?.label?.trim() ?? '';
+    const links = Array.isArray(entry?.link)
+      ? entry.link
+      : entry?.link
+        ? [entry.link]
+        : [];
+    const audioLink = links.find(
+      (l) =>
+        typeof l?.attributes?.type === 'string' &&
+        l.attributes.type.startsWith('audio/') &&
+        isValidHttpsPreviewUrl(l?.attributes?.href),
+    );
+    if (!title || !artist || !audioLink?.attributes?.href) continue;
+
+    const images = Array.isArray(entry?.['im:image']) ? entry['im:image'] : [];
+    const baseArt = (images[images.length - 1]?.label ?? '').trim();
+    const rawId = Number(entry?.id?.attributes?.['im:id'] ?? 0);
+
+    mapped.push({
+      trackId: Number.isFinite(rawId) && rawId > 0 ? rawId : Date.now() + 400000 + idx,
+      trackName: title,
+      artistName: artist,
+      collectionName: collection,
+      previewUrl: audioLink.attributes.href.trim(),
+      artworkUrl: baseArt,
+      artworkUrlHiRes: upgradeItunesArtwork(baseArt),
+    });
+  }
+
+  return dedupeItunesTracks(mapped);
+}
+
+interface FetchJsonResult<T> {
+  status: number;
+  data: T | null;
+}
+
 async function fetchJsonWithAbort<T>(
   url: string,
   timeoutMs: number,
-  options?: { credentials?: RequestCredentials },
-): Promise<T | null> {
+  options?: { credentials?: RequestCredentials; sendAcceptHeader?: boolean },
+): Promise<FetchJsonResult<T>> {
   if (typeof fetch !== 'function' || typeof window === 'undefined') {
-    return null;
+    return { status: 0, data: null };
   }
 
   const controller = new AbortController();
@@ -208,24 +318,27 @@ async function fetchJsonWithAbort<T>(
 
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
+    const init: RequestInit = {
       method: 'GET',
       signal: controller.signal,
       credentials: options?.credentials,
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) return null;
+    };
+    if (options?.sendAcceptHeader) {
+      init.headers = { Accept: 'application/json' };
+    }
+    const res = await fetch(url, init);
+    if (!res.ok) return { status: res.status, data: null };
     const text = await res.text();
     if (!text || text.trim().startsWith('<')) {
       // HTML redirect/login page (e.g. iOS Safari ITP inside preview iframe)
-      return null;
+      return { status: res.status, data: null };
     }
-    return JSON.parse(text) as T;
+    return { status: res.status, data: JSON.parse(text) as T };
   } catch (err) {
     if (abortedByCancel) {
       throw new Error('ITUNES_ABORTED');
     }
-    return null;
+    return { status: 0, data: null };
   } finally {
     window.clearTimeout(timer);
     activeJsonpCancelers.delete(cancelSelf);
@@ -305,26 +418,31 @@ async function searchItunesViaProxy(
   timeoutMs: number,
 ): Promise<ItunesTrack[]> {
   const url = `/api/itunes/search?term=${encodeURIComponent(cleanedTerm)}&limit=${limit}`;
-  const payload = await fetchJsonWithAbort<RawItunesResponse>(url, Math.min(timeoutMs, 4200), {
+  const { data } = await fetchJsonWithAbort<RawItunesResponse>(url, Math.min(timeoutMs, 3500), {
     credentials: 'same-origin',
+    sendAcceptHeader: true,
   });
-  return parseRawItunesResults(payload);
+  return parseRawItunesResults(data);
 }
 
 /**
- * Direct CORS fetch to Apple iTunes Search API (iTunes sends Access-Control-Allow-Origin: *).
- * Runs from the player's own browser connection and avoids `<script>` JSONP quirks.
+ * Direct headerless CORS fetch to Apple iTunes Search API (Access-Control-Allow-Origin: *).
+ * Avoids custom headers so iOS WebKit / Safari never trips on text/javascript content-type.
  */
 async function searchItunesDirectFetch(
   cleanedTerm: string,
   limit: number,
   timeoutMs: number,
-): Promise<ItunesTrack[]> {
+): Promise<{ rateLimited: boolean; tracks: ItunesTrack[] }> {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(cleanedTerm)}&media=music&entity=song&limit=${limit}`;
-  const payload = await fetchJsonWithAbort<RawItunesResponse>(url, Math.min(timeoutMs, 3800), {
+  const { status, data } = await fetchJsonWithAbort<RawItunesResponse>(url, Math.min(timeoutMs, 3200), {
     credentials: 'omit',
+    sendAcceptHeader: false,
   });
-  return parseRawItunesResults(payload);
+  return {
+    rateLimited: status === 403 || status === 429,
+    tracks: parseRawItunesResults(data),
+  };
 }
 
 /**
@@ -339,51 +457,94 @@ async function searchDeezerJsonp(
   const payload = await runJsonpScript<RawDeezerResponse>(
     (cbName) =>
       `https://api.deezer.com/search?q=${encodeURIComponent(cleanedTerm)}&limit=${limit}&output=jsonp&callback=${encodeURIComponent(cbName)}`,
-    Math.min(timeoutMs, 4500),
+    Math.min(timeoutMs, 3500),
   );
   return parseRawDeezerResults(payload);
 }
 
 /**
- * Last-resort live global chart safety net (server `/api/itunes/chart` or direct Deezer Chart JSONP).
+ * Direct Akamai edge-cached Apple RSS Top Songs JSON feed per category.
+ * Sends `Access-Control-Allow-Origin: *` and stays HTTP 200 even when Apple's `/search` API returns HTTP 429!
+ */
+export async function loadAppleRssCategoryTracks(
+  categoryCacheKey?: string,
+  timeoutMs = 3500,
+): Promise<ItunesTrack[]> {
+  if (typeof window === 'undefined' || typeof fetch !== 'function') {
+    return [];
+  }
+
+  const urls =
+    (categoryCacheKey && APPLE_RSS_CATEGORY_URLS[categoryCacheKey]) ||
+    APPLE_RSS_CATEGORY_URLS['quiz:all-hits'];
+
+  const collected: ItunesTrack[] = [];
+  for (const url of urls) {
+    try {
+      const { data } = await fetchJsonWithAbort<RawAppleRssFeedResponse>(url, timeoutMs, {
+        credentials: 'omit',
+        sendAcceptHeader: false,
+      });
+      const parsed = parseRawAppleRssFeed(data);
+      collected.push(...parsed);
+      if (dedupeItunesTracks(collected).length >= 20) break;
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ITUNES_ABORTED') throw err;
+    }
+  }
+  return dedupeItunesTracks(collected);
+}
+
+/**
+ * Last-resort live global chart safety net (Apple RSS + server `/api/itunes/chart` + Deezer Chart JSONP).
  * Ensures players always get real 30-second HTTPS previews even if per-term searches are throttled.
  */
-async function loadLiveChartSafetyTracks(timeoutMs = ITUNES_JSONP_TIMEOUT_MS): Promise<ItunesTrack[]> {
+async function loadLiveChartSafetyTracks(
+  categoryCacheKey?: string,
+  timeoutMs = ITUNES_JSONP_TIMEOUT_MS,
+): Promise<ItunesTrack[]> {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return [];
   }
 
-  // 1. Try server chart proxy if not in cooldown
+  // 1. Direct Apple RSS Top Songs JSON (Akamai edge-cached, immune to wsSearch 429 & ITP proxy blocks)
+  const rssTracks = await loadAppleRssCategoryTracks(categoryCacheKey, 3500);
+  if (rssTracks.length >= 12) {
+    return rssTracks;
+  }
+
+  // 2. Server chart proxy if not in cooldown
   if (Date.now() >= proxyCooldownUntil) {
     try {
-      const payload = await fetchJsonWithAbort<RawItunesResponse>('/api/itunes/chart', 3500, {
+      const { data } = await fetchJsonWithAbort<RawItunesResponse>('/api/itunes/chart', 3200, {
         credentials: 'same-origin',
+        sendAcceptHeader: true,
       });
-      const parsed = parseRawItunesResults(payload);
-      if (parsed.length > 0) return parsed;
+      const parsed = parseRawItunesResults(data);
+      if (parsed.length > 0) return dedupeItunesTracks([...rssTracks, ...parsed]);
     } catch (err) {
       if (err instanceof Error && err.message === 'ITUNES_ABORTED') throw err;
     }
   }
 
-  // 2. Direct client-side Deezer Global Chart JSONP
+  // 3. Direct client-side Deezer Global Chart JSONP
   try {
     const payload = await runJsonpScript<RawDeezerResponse>(
       (cbName) =>
         `https://api.deezer.com/chart/0/tracks?limit=50&output=jsonp&callback=${encodeURIComponent(cbName)}`,
-      Math.min(timeoutMs, 5000),
+      Math.min(timeoutMs, 3800),
     );
-    return parseRawDeezerResults(payload);
+    return dedupeItunesTracks([...rssTracks, ...parseRawDeezerResults(payload)]);
   } catch (err) {
     if (err instanceof Error && err.message === 'ITUNES_ABORTED') throw err;
-    return [];
+    return rssTracks;
   }
 }
 
 /**
  * Queries music tracks through a resilient 4-tier waterfall:
  * 1. Same-origin `/api/itunes/search` proxy (server cache + iTunes + Deezer fallback)
- * 2. Direct browser CORS `fetch()` to iTunes Search API
+ * 2. Direct browser headerless CORS `fetch()` to iTunes Search API
  * 3. Direct browser iTunes JSONP (`<script>`)
  * 4. Direct browser Deezer JSONP (`<script>`) — immune to Apple 5G CGNAT blocks & Safari ITP iframe blocks
  */
@@ -415,22 +576,26 @@ export async function searchItunesJsonp(
         termCache.set(cacheKey, proxyTracks);
         return [...proxyTracks];
       }
-      proxyCooldownUntil = Date.now() + 25_000;
+      // Cool down proxy for 3 min if blocked by iOS WebKit ITP / auth redirect
+      proxyCooldownUntil = Date.now() + 180_000;
     } catch (err) {
       if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
         throw err;
       }
-      proxyCooldownUntil = Date.now() + 25_000;
+      proxyCooldownUntil = Date.now() + 180_000;
     }
   }
 
-  // Tier 2 & 3: Direct browser iTunes (CORS fetch first, then JSONP) if not rate-limited
+  // Tier 2 & 3: Direct browser iTunes (clean CORS fetch first, then JSONP) if not rate-limited
   if (Date.now() >= directItunesCooldownUntil) {
     try {
-      const directTracks = await searchItunesDirectFetch(cleanedTerm, limit, timeoutMs);
-      if (directTracks.length > 0) {
-        termCache.set(cacheKey, directTracks);
-        return [...directTracks];
+      const direct = await searchItunesDirectFetch(cleanedTerm, limit, timeoutMs);
+      if (direct.tracks.length > 0) {
+        termCache.set(cacheKey, direct.tracks);
+        return [...direct.tracks];
+      }
+      if (direct.rateLimited) {
+        directItunesCooldownUntil = Date.now() + 60_000;
       }
     } catch (err) {
       if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
@@ -438,23 +603,25 @@ export async function searchItunesJsonp(
       }
     }
 
-    try {
-      const jsonpPayload = await runJsonpScript<RawItunesResponse>(
-        (cbName) =>
-          `https://itunes.apple.com/search?term=${encodeURIComponent(cleanedTerm)}&media=music&entity=song&limit=${limit}&callback=${encodeURIComponent(cbName)}`,
-        Math.min(timeoutMs, 4000),
-      );
-      const deduped = parseRawItunesResults(jsonpPayload);
-      if (deduped.length > 0) {
-        termCache.set(cacheKey, deduped);
-        return [...deduped];
+    if (Date.now() >= directItunesCooldownUntil) {
+      try {
+        const jsonpPayload = await runJsonpScript<RawItunesResponse>(
+          (cbName) =>
+            `https://itunes.apple.com/search?term=${encodeURIComponent(cleanedTerm)}&media=music&entity=song&limit=${limit}&callback=${encodeURIComponent(cbName)}`,
+          Math.min(timeoutMs, 3200),
+        );
+        const deduped = parseRawItunesResults(jsonpPayload);
+        if (deduped.length > 0) {
+          termCache.set(cacheKey, deduped);
+          return [...deduped];
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
+          throw err;
+        }
+        // Apple rate-limited or blocked this network -> cool down so RSS/Deezer answers immediately
+        directItunesCooldownUntil = Date.now() + 60_000;
       }
-    } catch (err) {
-      if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
-        throw err;
-      }
-      // Apple rate-limited or blocked this network -> cool down briefly so Deezer answers immediately
-      directItunesCooldownUntil = Date.now() + 45_000;
     }
   }
 
@@ -486,8 +653,12 @@ function shuffleStrings(items: readonly string[]): string[] {
 const UNIVERSAL_SAFETY_TERMS = ['The Weeknd', 'Dua Lipa', 'Stromae', 'Daft Punk'] as const;
 
 /**
- * Loads a rich deduplicated pool of music tracks from a category's search terms,
- * using session cache when available and automatically retrying fallback terms & live charts if needed.
+ * Loads a rich deduplicated pool of real 30-second HTTPS preview tracks for a category:
+ * 1. Live search across primary category artists/terms (Express proxy -> iTunes CORS -> iTunes JSONP -> Deezer JSONP)
+ * 2. Live Akamai edge-cached Apple RSS Top Songs genre feed (immune to iTunes /search HTTP 429 & ITP proxy blocks)
+ * 3. Fallback search terms & live global charts
+ * 4. Verified built-in real-audio Apple iTunes catalog (permanent audio-ssl.itunes.apple.com M4A previews)
+ *    so mobile 5G / iOS Safari players NEVER hit an empty-catalog error screen even on 15-round matches.
  */
 export async function loadCategoryTracksJsonp(
   primaryTerms: readonly string[],
@@ -514,6 +685,8 @@ export async function loadCategoryTracksJsonp(
   for (const res of settledFirst) {
     if (res.status === 'fulfilled') {
       collected.push(...res.value);
+    } else if (res.reason instanceof Error && res.reason.message === 'ITUNES_ABORTED') {
+      throw res.reason;
     }
   }
 
@@ -523,8 +696,23 @@ export async function loadCategoryTracksJsonp(
     return pool;
   }
 
-  // Automatic retry on fallback search terms if first batch wasn't enough or timed out
-  const retryQueue = [...shuffledPrimary.slice(3), ...shuffledFallback];
+  // Fast Tier-2 Safety Net: Akamai edge-cached Apple RSS genre feed (HTTP 200 even during Apple /search 429!)
+  try {
+    const rssTracks = await loadAppleRssCategoryTracks(categoryCacheKey, 3500);
+    collected.push(...rssTracks);
+    pool = dedupeItunesTracks(collected);
+    if (pool.length >= minDesiredTracks) {
+      if (categoryCacheKey) categoryPoolCache.set(categoryCacheKey, pool);
+      return pool;
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
+      throw err;
+    }
+  }
+
+  // Automatic retry on fallback search terms (only if live search isn't completely blocked)
+  const retryQueue = [...shuffledPrimary.slice(3), ...shuffledFallback].slice(0, 3);
   for (const term of retryQueue) {
     if (pool.length >= minDesiredTracks) break;
     try {
@@ -535,14 +723,26 @@ export async function loadCategoryTracksJsonp(
       if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
         throw err;
       }
-      // Continue trying next fallback term
     }
   }
 
-  // Safety net 1: if a niche category still returned < 6 tracks, supplement with universally indexed hits
+  // Safety net 1: live global chart tracks (Apple RSS / server chart / Deezer chart)
+  if (pool.length < minDesiredTracks) {
+    try {
+      const chartTracks = await loadLiveChartSafetyTracks(categoryCacheKey, ITUNES_JSONP_TIMEOUT_MS);
+      collected.push(...chartTracks);
+      pool = dedupeItunesTracks(collected);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
+        throw err;
+      }
+    }
+  }
+
+  // Safety net 2: universal artists if still short
   if (pool.length < 6) {
-    for (const term of UNIVERSAL_SAFETY_TERMS) {
-      if (pool.length >= Math.min(minDesiredTracks, 12)) break;
+    for (const term of UNIVERSAL_SAFETY_TERMS.slice(0, 2)) {
+      if (pool.length >= minDesiredTracks) break;
       try {
         const more = await searchItunesJsonp(term, 25, ITUNES_JSONP_TIMEOUT_MS);
         collected.push(...more);
@@ -555,17 +755,12 @@ export async function loadCategoryTracksJsonp(
     }
   }
 
-  // Safety net 2: live global chart tracks so mobile players never hit an empty catalog error
-  if (pool.length < 6) {
-    try {
-      const chartTracks = await loadLiveChartSafetyTracks(ITUNES_JSONP_TIMEOUT_MS);
-      collected.push(...chartTracks);
-      pool = dedupeItunesTracks(collected);
-    } catch (err) {
-      if (err instanceof Error && err.message === 'ITUNES_ABORTED') {
-        throw err;
-      }
-    }
+  // Final bulletproof safety net: verified permanent Apple iTunes preview catalog for this exact category
+  // Guarantees 100% real playable 30s Apple M4A previews even when every live search endpoint is blocked on 5G/iOS.
+  if (pool.length < minDesiredTracks) {
+    const verifiedFallback = getVerifiedItunesFallbackCatalog(categoryCacheKey);
+    collected.push(...verifiedFallback);
+    pool = dedupeItunesTracks(collected);
   }
 
   if (categoryCacheKey && pool.length > 0) {

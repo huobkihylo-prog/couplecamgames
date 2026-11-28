@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AnimatePresence, MotionConfig, motion } from 'motion/react';
+import { MotionConfig, motion } from 'motion/react';
 import type {
   ConnectionMode,
   FaceMetrics,
@@ -41,6 +41,7 @@ import { MusicQuizGameView } from './components/MusicQuizGameView';
 import { FreezeDanceGameView } from './components/FreezeDanceGameView';
 import { ToastStack, type AppToast } from './components/ToastStack';
 import { MediaPipeLoadingOverlay } from './components/MediaPipeLoadingOverlay';
+import { GameErrorBoundary } from './components/GameErrorBoundary';
 import { LanguageProvider, useI18n } from './i18n/LanguageContext';
 import { MirrorProvider } from './context/MirrorContext';
 import { RoomProvider, useRoom } from './context/RoomContext';
@@ -515,7 +516,7 @@ function CoupleCamApp() {
     return () => setHostStateProvider(null);
   }, [setHostStateProvider]);
 
-  // React to Duo Firestore room connection & disconnect transitions
+  // React to Duo Firestore room connection & explicit close transitions only
   const prevConnectionStatusRef = useRef(connectionStatus);
   useEffect(() => {
     const prev = prevConnectionStatusRef.current;
@@ -530,10 +531,11 @@ function CoupleCamApp() {
       soundFx.roundWin();
       pushToast(toastConnectedTextRef.current, 'success');
     } else if (
-      (connectionStatus === 'disconnected' || connectionStatus === 'error') &&
-      prev !== connectionStatus &&
+      connectionStatus === 'disconnected' &&
+      prev === 'connected' &&
       screenRef.current !== 'lobby'
     ) {
+      // Only return to Lobby when the room was explicitly closed (status === 'closed' or voluntary Leave)
       setScreen('lobby');
     }
   }, [connectionStatus, connectionMode, pushToast]);
@@ -541,66 +543,71 @@ function CoupleCamApp() {
   // Subscribe to all incoming Cloud Firestore / WebRTC messages across Hub & all 12 games
   useEffect(() => {
     return onData((msg) => {
-      if (msg.type === 'HELLO') {
-        // Partner name already synced in RoomContext
-      } else if (
-        msg.type === 'JOIN_ACCEPTED' ||
-        msg.type === 'JOIN_CONFIRMED' ||
-        msg.type === 'JOIN_WELCOME'
-      ) {
-        if (
-          msg.type === 'JOIN_ACCEPTED' &&
-          msg.currentGame &&
-          msg.currentGame !== 'lobby' &&
-          msg.currentGame !== 'hub'
+      if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
+      try {
+        if (msg.type === 'HELLO') {
+          // Partner name already synced in RoomContext
+        } else if (
+          msg.type === 'JOIN_ACCEPTED' ||
+          msg.type === 'JOIN_CONFIRMED' ||
+          msg.type === 'JOIN_WELCOME'
         ) {
+          if (
+            msg.type === 'JOIN_ACCEPTED' &&
+            msg.currentGame &&
+            msg.currentGame !== 'lobby' &&
+            msg.currentGame !== 'hub'
+          ) {
+            pendingGameMessagesRef.current = [];
+            setScreen(msg.currentGame);
+          }
+        } else if (msg.type === 'SELECT_GAME') {
+          soundFx.click();
           pendingGameMessagesRef.current = [];
-          setScreen(msg.currentGame);
-        }
-      } else if (msg.type === 'SELECT_GAME') {
-        soundFx.click();
-        pendingGameMessagesRef.current = [];
-        setScreen(msg.game);
-      } else if (msg.type === 'RETURN_HUB') {
-        soundFx.click();
-        pendingGameMessagesRef.current = [];
-        setScreen('hub');
-      } else if (msg.type === 'HUB_REACTION') {
-        spawnHubReaction(msg.emoji);
-      } else if (msg.type === 'FACE_FRAME') {
-        partnerMetricsRef.current = {
-          ...EMPTY_FACE_METRICS,
-          smileScore: msg.smileScore,
-          grimaceScore: msg.grimaceScore ?? 0,
-          laughBurst: 0,
-          headTiltRad: msg.headTiltRad,
-          noseOffsetX: 0,
-          faceDetected: msg.faceDetected,
-          timestamp: msg.ts,
-        };
-      } else if (msg.type === 'HAND_FRAME') {
-        const prev = partnerHandMetricsRef.current;
-        const isIndexGame = msg.game === 'ninja-fruits';
-        const isPalmGame = msg.game === 'air-hockey';
-        partnerHandMetricsRef.current = {
-          ...prev,
-          indexX: isIndexGame ? msg.x : prev.indexX,
-          indexY: isIndexGame ? msg.y : prev.indexY,
-          palmX: isPalmGame ? msg.x : prev.palmX,
-          palmY: isPalmGame ? msg.y : prev.palmY,
-          handDetected: msg.detected,
-          timestamp: msg.ts,
-        };
-      } else {
-        if (activeGamePeerHandlerRef.current) {
-          activeGamePeerHandlerRef.current(msg);
+          setScreen(msg.game);
+        } else if (msg.type === 'RETURN_HUB') {
+          soundFx.click();
+          pendingGameMessagesRef.current = [];
+          setScreen('hub');
+        } else if (msg.type === 'HUB_REACTION') {
+          spawnHubReaction(msg.emoji);
+        } else if (msg.type === 'FACE_FRAME') {
+          partnerMetricsRef.current = {
+            ...EMPTY_FACE_METRICS,
+            smileScore: msg.smileScore,
+            grimaceScore: msg.grimaceScore ?? 0,
+            laughBurst: 0,
+            headTiltRad: msg.headTiltRad,
+            noseOffsetX: 0,
+            faceDetected: msg.faceDetected,
+            timestamp: msg.ts,
+          };
+        } else if (msg.type === 'HAND_FRAME') {
+          const prev = partnerHandMetricsRef.current;
+          const isIndexGame = msg.game === 'ninja-fruits';
+          const isPalmGame = msg.game === 'air-hockey';
+          partnerHandMetricsRef.current = {
+            ...prev,
+            indexX: isIndexGame ? msg.x : prev.indexX,
+            indexY: isIndexGame ? msg.y : prev.indexY,
+            palmX: isPalmGame ? msg.x : prev.palmX,
+            palmY: isPalmGame ? msg.y : prev.palmY,
+            handDetected: msg.detected,
+            timestamp: msg.ts,
+          };
         } else {
-          // Buffer game messages arriving during the 200ms AnimatePresence screen switch
-          pendingGameMessagesRef.current.push(msg);
-          if (pendingGameMessagesRef.current.length > 24) {
-            pendingGameMessagesRef.current.shift();
+          if (activeGamePeerHandlerRef.current) {
+            activeGamePeerHandlerRef.current(msg);
+          } else {
+            // Buffer game messages arriving during the 200ms AnimatePresence screen switch
+            pendingGameMessagesRef.current.push(msg);
+            if (pendingGameMessagesRef.current.length > 24) {
+              pendingGameMessagesRef.current.shift();
+            }
           }
         }
+      } catch (err) {
+        console.warn('[CoupleCam] Safe message handler guard caught error:', err);
       }
     });
   }, [onData, spawnHubReaction]);
@@ -726,7 +733,11 @@ function CoupleCamApp() {
       const queued = pendingGameMessagesRef.current;
       pendingGameMessagesRef.current = [];
       for (const queuedMsg of queued) {
-        handler(queuedMsg);
+        try {
+          handler(queuedMsg);
+        } catch (err) {
+          console.warn('[CoupleCam] Buffered game message failed safely:', err);
+        }
       }
     }
   }, []);
@@ -903,7 +914,7 @@ function CoupleCamApp() {
           onNotify={pushToast}
         />
 
-        <AnimatePresence mode="wait" initial={false}>
+        <GameErrorBoundary resetKey={screen} onReturnToHub={handleReturnToHub}>
           {screen === 'hub' && (
             <motion.div
               key="hub-view"
@@ -1330,7 +1341,7 @@ function CoupleCamApp() {
               />
             </motion.div>
           )}
-        </AnimatePresence>
+        </GameErrorBoundary>
         <MediaPipeLoadingOverlay visible={isMediaPipeWarming} />
         <ToastStack toasts={toasts} />
       </div>

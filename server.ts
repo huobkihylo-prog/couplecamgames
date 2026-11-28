@@ -58,20 +58,70 @@ async function startServer() {
   const musicSearchCache = new Map<string, CachedMusicPayload>();
   let itunesBlockedUntil = 0;
 
-  const fetchWithTimeout = async (url: string, timeoutMs = 3000): Promise<globalThis.Response> => {
+  const fetchWithTimeout = async (url: string, timeoutMs = 4500): Promise<globalThis.Response> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       return await fetch(url, {
         signal: controller.signal,
         headers: {
-          Accept: 'application/json',
+          Accept: 'application/json, text/javascript, */*',
           'User-Agent': 'CoupleCam/1.0 (+https://aistudio.google.com)',
         },
       });
     } finally {
       clearTimeout(timer);
     }
+  };
+
+  const normalizeAppleRssList = (
+    payload: {
+      feed?: {
+        entry?: Array<{
+          id?: { attributes?: { 'im:id'?: string } };
+          'im:name'?: { label?: string };
+          'im:artist'?: { label?: string };
+          'im:collection'?: { 'im:name'?: { label?: string } };
+          'im:image'?: Array<{ label?: string }>;
+          link?:
+            | Array<{ attributes?: { type?: string; href?: string } }>
+            | { attributes?: { type?: string; href?: string } };
+        }>;
+      };
+    },
+  ): CachedMusicPayload['results'] => {
+    const entries = Array.isArray(payload?.feed?.entry) ? payload.feed.entry : [];
+    const out: CachedMusicPayload['results'] = [];
+    for (let idx = 0; idx < entries.length; idx += 1) {
+      const entry = entries[idx];
+      const trackName = entry?.['im:name']?.label?.trim();
+      const artistName = entry?.['im:artist']?.label?.trim();
+      const rawLinks = Array.isArray(entry?.link)
+        ? entry.link
+        : entry?.link
+          ? [entry.link]
+          : [];
+      const audioLink = rawLinks.find(
+        (l) =>
+          typeof l?.attributes?.type === 'string' &&
+          l.attributes.type.startsWith('audio/') &&
+          typeof l?.attributes?.href === 'string' &&
+          l.attributes.href.trim().startsWith('https://'),
+      );
+      if (!trackName || !artistName || !audioLink?.attributes?.href) continue;
+      const imgs = Array.isArray(entry?.['im:image']) ? entry['im:image'] : [];
+      const artworkUrl100 = (imgs[imgs.length - 1]?.label ?? '').trim();
+      const parsedId = Number(entry?.id?.attributes?.['im:id'] ?? 0);
+      out.push({
+        trackId: Number.isFinite(parsedId) && parsedId > 0 ? parsedId : Date.now() + 300000 + idx,
+        trackName,
+        artistName,
+        collectionName: (entry?.['im:collection']?.['im:name']?.label ?? '').trim(),
+        previewUrl: audioLink.attributes.href.trim(),
+        artworkUrl100,
+      });
+    }
+    return out;
   };
 
   const normalizeDeezerList = (
@@ -103,6 +153,7 @@ async function startServer() {
       }));
 
   app.get('/api/itunes/search', async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
     const rawTerm = typeof req.query.term === 'string' ? req.query.term.trim() : '';
     if (!rawTerm || rawTerm.length > 120) {
       res.status(400).json({ resultCount: 0, results: [], error: 'invalid-term' });
@@ -127,7 +178,7 @@ async function startServer() {
     if (now >= itunesBlockedUntil) {
       try {
         const itunesUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(rawTerm)}&media=music&entity=song&limit=${limit}`;
-        const upstream = await fetchWithTimeout(itunesUrl, 3000);
+        const upstream = await fetchWithTimeout(itunesUrl, 4500);
         if (upstream.status === 403 || upstream.status === 429) {
           itunesBlockedUntil = Date.now() + ITUNES_COOLDOWN_MS;
         } else if (upstream.ok) {
@@ -173,7 +224,7 @@ async function startServer() {
     if (normalized.length < 4) {
       try {
         const deezerUrl = `https://api.deezer.com/search?q=${encodeURIComponent(rawTerm)}&limit=${limit}`;
-        const upstream = await fetchWithTimeout(deezerUrl, 3000);
+        const upstream = await fetchWithTimeout(deezerUrl, 4500);
         if (upstream.ok) {
           const json = (await upstream.json()) as {
             data?: Array<{
@@ -213,8 +264,10 @@ async function startServer() {
     res.json({ resultCount: normalized.length, results: normalized, source });
   });
 
-  // Safety-net chart endpoint (`/api/itunes/chart`) returning live top global tracks (30s HTTPS previews)
+  // Safety-net chart endpoint (`/api/itunes/chart`) returning live top tracks (30s HTTPS previews)
+  // Uses Akamai-cached Apple RSS Top Songs first (immune to wsSearch 429), falling back to Deezer chart.
   app.get('/api/itunes/chart', async (_req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
     const cacheKey = '__chart__::50';
     const now = Date.now();
     const cached = musicSearchCache.get(cacheKey);
@@ -225,34 +278,55 @@ async function startServer() {
     }
 
     let normalized: CachedMusicPayload['results'] = [];
+    let source: 'itunes' | 'deezer' = 'itunes';
+
     try {
-      const upstream = await fetchWithTimeout('https://api.deezer.com/chart/0/tracks?limit=50', 3500);
-      if (upstream.ok) {
-        const json = (await upstream.json()) as {
-          data?: Array<{
-            id?: number;
-            title?: string;
-            preview?: string;
-            artist?: { name?: string };
-            album?: { title?: string; cover_medium?: string; cover_big?: string };
-          }>;
-        };
-        normalized = normalizeDeezerList(Array.isArray(json?.data) ? json.data : []);
+      const rssUpstream = await fetchWithTimeout(
+        'https://itunes.apple.com/fr/rss/topsongs/limit=50/json',
+        4500,
+      );
+      if (rssUpstream.ok) {
+        const rssJson = (await rssUpstream.json()) as Parameters<typeof normalizeAppleRssList>[0];
+        normalized = normalizeAppleRssList(rssJson);
       }
     } catch {
-      // Return empty array on network error
+      // Fall through to Deezer chart
+    }
+
+    if (normalized.length < 10) {
+      try {
+        const upstream = await fetchWithTimeout('https://api.deezer.com/chart/0/tracks?limit=50', 4500);
+        if (upstream.ok) {
+          const json = (await upstream.json()) as {
+            data?: Array<{
+              id?: number;
+              title?: string;
+              preview?: string;
+              artist?: { name?: string };
+              album?: { title?: string; cover_medium?: string; cover_big?: string };
+            }>;
+          };
+          const deezerTracks = normalizeDeezerList(Array.isArray(json?.data) ? json.data : []);
+          if (deezerTracks.length > normalized.length) {
+            normalized = deezerTracks;
+            source = 'deezer';
+          }
+        }
+      } catch {
+        // Return whatever Apple RSS provided (or empty array)
+      }
     }
 
     if (normalized.length > 0) {
       musicSearchCache.set(cacheKey, {
         expiresAt: now + MUSIC_CACHE_TTL_MS,
-        source: 'deezer',
+        source,
         results: normalized,
       });
     }
 
     res.setHeader('Cache-Control', 'public, max-age=300');
-    res.json({ resultCount: normalized.length, results: normalized, source: 'deezer' });
+    res.json({ resultCount: normalized.length, results: normalized, source });
   });
 
   // Fallback Transport 2: Server-Sent Events stream (`/api/room/stream`) for networks/proxies

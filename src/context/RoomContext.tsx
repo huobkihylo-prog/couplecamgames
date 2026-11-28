@@ -28,6 +28,7 @@ export interface RoomContextValue {
   onData: (handler: (msg: PeerMessage) => void) => () => void;
   isConnected: boolean;
   isHost: boolean;
+  isAIMode: boolean;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
 
@@ -79,6 +80,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   const mediaRequestPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
   const connectionModeRef = useRef<ConnectionMode>(connectionMode);
   connectionModeRef.current = connectionMode;
+  const isConnectedRef = useRef<boolean>(false);
 
   const dataSubscribersRef = useRef<Set<(msg: PeerMessage) => void>>(new Set());
   const hostStateProviderRef = useRef<(() => HostRoomStateSnapshot) | null>(null);
@@ -88,6 +90,18 @@ export function RoomProvider({ children }: { children: ReactNode }) {
       serviceRef.current = new FirestoreRoomService({
         getHostRoomState: () => hostStateProviderRef.current?.() ?? { currentGame: 'hub', scores: {} },
         onStatusChange: (status, message) => {
+          // Never drop an active Duo session on a transient error; only explicit 'disconnected' (status==='closed') exits
+          if (status === 'error' && isConnectedRef.current) {
+            console.warn('[CoupleCam RoomContext] Ignored transient error while connected:', message);
+            return;
+          }
+
+          if (status === 'connected') {
+            isConnectedRef.current = true;
+          } else if (status === 'disconnected' || status === 'error') {
+            isConnectedRef.current = false;
+          }
+
           setConnectionStatus(status);
           if (message !== undefined) {
             setStatusMessage(message);
@@ -237,6 +251,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
 
   const cancelRoom = useCallback((): void => {
     const shouldClose = connectionModeRef.current === 'p2p-host';
+    isConnectedRef.current = false;
     serviceRef.current?.destroy({ closeRemoteDoc: shouldClose });
     setRemoteStream(null);
     setConnectionMode('idle');
@@ -248,6 +263,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   const leaveRoom = useCallback((): void => {
     const shouldClose =
       connectionModeRef.current === 'p2p-host' || connectionModeRef.current === 'p2p-guest';
+    isConnectedRef.current = false;
     serviceRef.current?.destroy({ closeRemoteDoc: shouldClose });
     setRemoteStream(null);
     setConnectionMode('idle');
@@ -259,6 +275,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   const startSoloMode = useCallback((): void => {
     const shouldClose =
       connectionModeRef.current === 'p2p-host' || connectionModeRef.current === 'p2p-guest';
+    isConnectedRef.current = false;
     serviceRef.current?.destroy({ closeRemoteDoc: shouldClose });
     setRemoteStream(null);
     setPartnerName('Camille IA');
@@ -291,14 +308,25 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendData = useCallback((msg: PeerMessage): void => {
-    serviceRef.current?.sendData(msg);
+    if (!msg) return;
+    try {
+      serviceRef.current?.sendData(msg);
+    } catch (err) {
+      console.warn('[CoupleCam RoomContext] Safe sendData guard caught error:', err);
+    }
   }, []);
 
   const sendRealtime = useCallback((msg: PeerMessage): void => {
-    serviceRef.current?.sendRealtime(msg);
+    if (!msg) return;
+    try {
+      serviceRef.current?.sendRealtime(msg);
+    } catch (err) {
+      console.warn('[CoupleCam RoomContext] Safe sendRealtime guard caught error:', err);
+    }
   }, []);
 
   const onData = useCallback((handler: (msg: PeerMessage) => void): (() => void) => {
+    if (typeof handler !== 'function') return () => {};
     dataSubscribersRef.current.add(handler);
     return () => {
       dataSubscribersRef.current.delete(handler);
@@ -311,7 +339,11 @@ export function RoomProvider({ children }: { children: ReactNode }) {
       scores?: Record<string, number>;
       diceCount?: ParchisiDiceCount;
     }) => {
-      serviceRef.current?.syncRoomMetadata(patch);
+      try {
+        serviceRef.current?.syncRoomMetadata(patch);
+      } catch (err) {
+        console.warn('[CoupleCam RoomContext] Safe syncRoomMetadata guard caught error:', err);
+      }
     },
     [],
   );
@@ -339,6 +371,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
 
   const isConnected = connectionStatus === 'connected';
   const isHost = connectionMode === 'p2p-host';
+  const isAIMode = connectionMode === 'solo';
 
   const value = useMemo<RoomContextValue>(
     () => ({
@@ -347,6 +380,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
       onData,
       isConnected,
       isHost,
+      isAIMode,
       localStream,
       remoteStream,
       connectionMode,
@@ -375,6 +409,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
       onData,
       isConnected,
       isHost,
+      isAIMode,
       localStream,
       remoteStream,
       connectionMode,

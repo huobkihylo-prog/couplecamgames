@@ -7,6 +7,8 @@ import {
   isAutoplayBlockedError,
   isValidHttpsPreviewUrl,
   ITUNES_JSONP_TIMEOUT_MS,
+  loadCategoryTracksJsonp,
+  parseRawAppleRssFeed,
   parseRawDeezerResults,
   parseRawItunesResults,
   PLAYBACK_STALL_TIMEOUT_MS,
@@ -14,6 +16,7 @@ import {
   type ItunesTrack,
   type SharedAudioElementLike,
 } from './itunesAudioEngine';
+import { getVerifiedItunesFallbackCatalog } from '../data/verifiedItunesCatalog';
 
 function createFakeAudio(overrides?: Partial<SharedAudioElementLike>) {
   let playBehavior: (() => Promise<void> | undefined) | null = null;
@@ -357,4 +360,70 @@ test('parseRawDeezerResults parses direct Deezer JSONP payloads, keeps only HTTP
   assert.equal(tracks[0].artworkUrlHiRes, 'https://cdn-images.dzcdn.net/images/cover/abc/500x500.jpg');
   assert.equal(tracks[1].trackName, 'Alors on danse');
   assert.equal(tracks[1].artworkUrl, 'https://cdn-images.dzcdn.net/images/cover/def/250x250.jpg');
+});
+
+test('parseRawAppleRssFeed parses Apple Top Songs RSS JSON feeds with HTTPS audio previews and hi-res artwork', () => {
+  const tracks = parseRawAppleRssFeed({
+    feed: {
+      entry: [
+        {
+          id: { attributes: { 'im:id': '1440857781' } },
+          'im:name': { label: 'Blinding Lights' },
+          'im:artist': { label: 'The Weeknd' },
+          'im:collection': { 'im:name': { label: 'After Hours' } },
+          'im:image': [
+            { label: 'https://is1-ssl.mzstatic.com/image/thumb/a/55x55bb.jpg' },
+            { label: 'https://is1-ssl.mzstatic.com/image/thumb/a/170x170bb.jpg' },
+          ],
+          link: [
+            { attributes: { type: 'text/html', href: 'https://music.apple.com/fr/album/1' } },
+            {
+              attributes: {
+                type: 'audio/x-m4a',
+                href: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview/blinding.m4a',
+              },
+            },
+          ],
+        },
+        {
+          id: { attributes: { 'im:id': '999' } },
+          'im:name': { label: 'No Audio Entry' },
+          'im:artist': { label: 'Ghost' },
+          link: [{ attributes: { type: 'text/html', href: 'https://music.apple.com/fr/album/2' } }],
+        },
+      ],
+    },
+  });
+
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0].trackId, 1440857781);
+  assert.equal(tracks[0].trackName, 'Blinding Lights');
+  assert.equal(tracks[0].artistName, 'The Weeknd');
+  assert.equal(tracks[0].artworkUrlHiRes.includes('400x400bb'), true);
+});
+
+test('Verified fallback catalog guarantees >= 16 real HTTPS Apple preview tracks for all 9 categories and loadCategoryTracksJsonp never fails on 15-round matches', async () => {
+  const allCategories = [
+    'quiz:all-hits',
+    'quiz:pop-intl',
+    'quiz:rai-chaabi',
+    'quiz:rap',
+    'quiz:movies-disney',
+    'freeze:party-pop',
+    'freeze:chaabi-rai',
+    'freeze:reggaeton-latino',
+    'freeze:disco-funk',
+  ];
+
+  for (const cat of allCategories) {
+    const fallback = getVerifiedItunesFallbackCatalog(cat);
+    assert.ok(fallback.length >= 16, `Expected >= 16 verified tracks for ${cat}, got ${fallback.length}`);
+    for (const track of fallback) {
+      assert.equal(isValidHttpsPreviewUrl(track.previewUrl), true, `Track ${track.trackName} in ${cat} must have HTTPS previewUrl`);
+    }
+  }
+
+  // Even in Node (no window/fetch live search), loadCategoryTracksJsonp must fulfill 15-round requirement cleanly
+  const pool15 = await loadCategoryTracksJsonp(['The Weeknd'], ['Stromae'], 19, 'quiz:all-hits');
+  assert.ok(pool15.length >= 19, `Expected >= 19 tracks for 15-round quiz, got ${pool15.length}`);
 });

@@ -400,3 +400,94 @@ test('Host creates Firestore room, Guest joins without camera in <1s, exchanges 
     (globalThis as Record<string, unknown>).RTCPeerConnection = prevRTC;
   }
 });
+
+test('Active room ignores hasPendingWrites, transient null snapshots, and transient errors; only explicit server status===closed exits', async () => {
+  const prevRTC = (globalThis as Record<string, unknown>).RTCPeerConnection;
+  (globalThis as Record<string, unknown>).RTCPeerConnection = FakePeerConnection;
+
+  try {
+    const hooks: {
+      onData?: (room: FirestoreRoomDoc | null, meta?: { hasPendingWrites?: boolean; fromCache?: boolean }) => void;
+      onError?: (err: unknown) => void;
+    } = {};
+    const hub = createMemoryFirestoreHub();
+    const origSubscribe = hub.adapter.subscribeRoom;
+    let updateRoomCallCount = 0;
+    const origUpdateRoom = hub.adapter.updateRoom;
+
+    hub.adapter.updateRoom = async (code, patch) => {
+      updateRoomCallCount += 1;
+      await origUpdateRoom(code, patch);
+    };
+
+    hub.adapter.subscribeRoom = (code, onData, onError) => {
+      hooks.onData = onData;
+      hooks.onError = onError;
+      return origSubscribe(code, onData, onError);
+    };
+
+    const guestStatuses: Array<{ status: string; msg?: string }> = [];
+    const hostSvc = new FirestoreRoomService(
+      {
+        onStatusChange: () => {},
+        onRemoteStream: () => {},
+        onMessage: () => {},
+      },
+      {
+        adapter: hub.adapter,
+        peerConnectionFactory: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+      },
+    );
+    const guestSvc = new FirestoreRoomService(
+      {
+        onStatusChange: (status, msg) => guestStatuses.push({ status, msg }),
+        onRemoteStream: () => {},
+        onMessage: () => {},
+      },
+      {
+        adapter: hub.adapter,
+        peerConnectionFactory: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+      },
+    );
+
+    await hostSvc.createHostRoom('B8K2', 'Alex', null);
+    await guestSvc.joinGuestRoom('B8K2', 'Nadia', null);
+    await flushMicrotasks();
+    assert.equal(guestSvc.isConnected(), true);
+
+    // Selecting a game uses updateRoom (partial merge) and preserves status, hostName, guestName, offer, answer
+    const beforeUpdates = updateRoomCallCount;
+    hostSvc.sendData({ type: 'SELECT_GAME', game: 'laugh' });
+    await flushMicrotasks();
+    assert.ok(updateRoomCallCount > beforeUpdates);
+    const roomAfterGame = hub.rooms.get('B8K2');
+    assert.equal(roomAfterGame?.currentGame, 'laugh');
+    assert.equal(roomAfterGame?.status, 'connected');
+    assert.equal(roomAfterGame?.hostName, 'Alex');
+    assert.equal(roomAfterGame?.guestName, 'Nadia');
+
+    // Simulate a local pending-write snapshot with status='closed' -> MUST BE IGNORED
+    hooks.onData?.({ ...roomAfterGame!, status: 'closed' }, { hasPendingWrites: true });
+    assert.equal(guestSvc.isConnected(), true);
+
+    // Simulate a transient null snapshot -> MUST BE IGNORED
+    hooks.onData?.(null, { hasPendingWrites: false, fromCache: true });
+    assert.equal(guestSvc.isConnected(), true);
+
+    // Simulate a transient Firestore listener error while connected -> MUST NOT EJECT
+    hooks.onError?.(new Error('transient network glitch'));
+    assert.equal(guestSvc.isConnected(), true);
+    assert.notEqual(guestStatuses.at(-1)?.status, 'error');
+    assert.notEqual(guestStatuses.at(-1)?.status, 'disconnected');
+
+    // Simulate explicit server-confirmed status === 'closed' -> NOW cleanly disconnects
+    hooks.onData?.({ ...roomAfterGame!, status: 'closed' }, { hasPendingWrites: false });
+    assert.equal(guestSvc.isConnected(), false);
+    assert.equal(guestStatuses.at(-1)?.status, 'disconnected');
+
+    hostSvc.destroy({ closeRemoteDoc: false });
+    guestSvc.destroy({ closeRemoteDoc: false });
+  } finally {
+    (globalThis as Record<string, unknown>).RTCPeerConnection = prevRTC;
+  }
+});
