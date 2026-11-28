@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { ConnectionStatus, FaceMetrics } from '../types/duoplay';
-import { normalizeRoomCode } from '../services/peerService';
+import { normalizeRoomCode } from '../utils/roomCode';
 import { buildRoomShareUrl, copyTextToClipboard } from '../utils/clipboard';
 import { useI18n } from '../i18n/LanguageContext';
 import { useMirror } from '../context/MirrorContext';

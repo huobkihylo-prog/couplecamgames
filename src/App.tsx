@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
 import type {
   ConnectionMode,
-  ConnectionStatus,
   FaceMetrics,
   FunambulesState,
   GameId,
@@ -13,7 +12,6 @@ import type {
   ScreenView,
   TrackerStatus,
 } from './types/duoplay';
-import { DuoPeerService, generateRoomCode, normalizeRoomCode } from './services/peerService';
 import { DuoFaceTracker, EMPTY_FACE_METRICS } from './services/faceTracker';
 import { DuoHandTracker, EMPTY_HAND_METRICS } from './services/handTracker';
 import {
@@ -45,12 +43,15 @@ import { ToastStack, type AppToast } from './components/ToastStack';
 import { MediaPipeLoadingOverlay } from './components/MediaPipeLoadingOverlay';
 import { LanguageProvider, useI18n } from './i18n/LanguageContext';
 import { MirrorProvider } from './context/MirrorContext';
+import { RoomProvider, useRoom } from './context/RoomContext';
 
 export default function App() {
   return (
     <LanguageProvider>
       <MirrorProvider>
-        <CoupleCamApp />
+        <RoomProvider>
+          <CoupleCamApp />
+        </RoomProvider>
       </MirrorProvider>
     </LanguageProvider>
   );
@@ -58,27 +59,42 @@ export default function App() {
 
 function CoupleCamApp() {
   const { t } = useI18n();
+  const {
+    sendData,
+    sendRealtime,
+    onData,
+    localStream,
+    remoteStream,
+    connectionMode,
+    connectionStatus,
+    statusMessage,
+    roomCode,
+    partnerName,
+    cameraEnabled,
+    micMuted,
+    cameraHint,
+    createRoom,
+    joinRoom,
+    cancelRoom,
+    leaveRoom,
+    startSoloMode,
+    requestLocalMedia,
+    toggleMic: handleToggleMic,
+    toggleCamera: handleToggleCamera,
+    setHostStateProvider,
+  } = useRoom();
+
   const [screen, setScreen] = useState<ScreenView>('lobby');
   const [activeHubCategory, setActiveHubCategory] = useState<HubCategory>('all');
   const [toasts, setToasts] = useState<AppToast[]>([]);
   const [hubReactions, setHubReactions] = useState<HubFloatingReaction[]>([]);
   const [playerName, setPlayerName] = useState<string>('Alex');
-  const [partnerName, setPartnerName] = useState<string>('Camille IA');
-  const [connectionMode, setConnectionMode] = useState<ConnectionMode>('idle');
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
-  const [statusMessage, setStatusMessage] = useState<string>('');
-  const [roomCode, setRoomCode] = useState<string>('');
   const [initialJoinCode] = useState<string>(() =>
     typeof window !== 'undefined' ? extractRoomCodeFromSearch(window.location.search) : '',
   );
 
-  // Persistent webcam & audio state across Hub and all 9 games
-  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const [micMuted, setMicMuted] = useState(false);
-  const [cameraEnabled, setCameraEnabled] = useState(true);
+  // Audio SFX & MediaPipe tracking status
   const [sfxMuted, setSfxMuted] = useState(false);
-  const [cameraHint, setCameraHint] = useState<string | null>(null);
   const [trackerStatus, setTrackerStatus] = useState<TrackerStatus>('idle');
   const [handTrackerStatus, setHandTrackerStatus] = useState<TrackerStatus>('idle');
 
@@ -136,9 +152,6 @@ function CoupleCamApp() {
   // Refs shared across 60fps loops without triggering React re-renders
   const trackerVideoElRef = useRef<HTMLVideoElement | null>(null);
   const localVideoElRef = useRef<HTMLVideoElement | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const mediaRequestPromiseRef = useRef<Promise<MediaStream | null> | null>(null);
-  const pendingRoomAttemptRef = useRef(0);
   const lastFaceSeenMsRef = useRef(0);
   const lastHandSeenMsRef = useRef(0);
   const localMetricsRef = useRef<FaceMetrics>({ ...EMPTY_FACE_METRICS });
@@ -154,11 +167,12 @@ function CoupleCamApp() {
   });
 
   // Services
-  const peerServiceRef = useRef<DuoPeerService | null>(null);
   const faceTrackerRef = useRef<DuoFaceTracker | null>(null);
   const handTrackerRef = useRef<DuoHandTracker | null>(null);
   const activeGamePeerHandlerRef = useRef<((msg: PeerMessage) => void) | null>(null);
   const pendingGameMessagesRef = useRef<PeerMessage[]>([]);
+  const sendRealtimeRef = useRef(sendRealtime);
+  sendRealtimeRef.current = sendRealtime;
 
   // Solo AI Partner memory & active context
   const aiMemoryRef = useRef(createAiPartnerMemory());
@@ -172,77 +186,6 @@ function CoupleCamApp() {
   screenRef.current = screen;
   const connectionModeRef = useRef<ConnectionMode>(connectionMode);
   connectionModeRef.current = connectionMode;
-
-  const requestLocalMedia = useCallback(async (): Promise<MediaStream | null> => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getVideoTracks().forEach((track) => {
-        track.enabled = true;
-      });
-      setCameraEnabled(true);
-      peerServiceRef.current?.setLocalStream(localStreamRef.current);
-      return localStreamRef.current;
-    }
-    if (mediaRequestPromiseRef.current) return mediaRequestPromiseRef.current;
-
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraHint('Aucune webcam détectée — le mode clavier / boutons reste 100 % jouable.');
-      return null;
-    }
-
-    const req = (async (): Promise<MediaStream | null> => {
-      try {
-        // 1. Try full webcam + mic with echo cancellation
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-          audio: { echoCancellation: true, noiseSuppression: true },
-        });
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        setCameraEnabled(true);
-        setCameraHint(null);
-        peerServiceRef.current?.setLocalStream(stream);
-        return stream;
-      } catch {
-        // 2. Fallback to video-only if microphone is unavailable or denied
-        try {
-          const videoOnlyStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
-            audio: false,
-          });
-          localStreamRef.current = videoOnlyStream;
-          setLocalStream(videoOnlyStream);
-          setCameraEnabled(true);
-          setCameraHint('Micro indisponible — webcam activée sans son.');
-          peerServiceRef.current?.setLocalStream(videoOnlyStream);
-          return videoOnlyStream;
-        } catch {
-          // 3. Last-resort relaxed video constraint
-          try {
-            const basicVideo = await navigator.mediaDevices.getUserMedia({
-              video: true,
-              audio: false,
-            });
-            localStreamRef.current = basicVideo;
-            setLocalStream(basicVideo);
-            setCameraEnabled(true);
-            setCameraHint('Micro indisponible — webcam activée sans son.');
-            peerServiceRef.current?.setLocalStream(basicVideo);
-            return basicVideo;
-          } catch {
-            setCameraHint(
-              'Webcam ou micro indisponible — tu peux jouer avec l’avatar animé et les contrôles clavier.',
-            );
-            return null;
-          }
-        }
-      } finally {
-        mediaRequestPromiseRef.current = null;
-      }
-    })();
-
-    mediaRequestPromiseRef.current = req;
-    return req;
-  }, []);
 
   // Bind localStream to the single dedicated persistent tracker <video> element
   useEffect(() => {
@@ -340,21 +283,13 @@ function CoupleCamApp() {
     };
   }, [screen, localStream, parchisiHandDiceEnabled]);
 
-  // Cleanup on unmount
+  // Cleanup MediaPipe trackers on unmount
   useEffect(() => {
     return () => {
-      peerServiceRef.current?.destroy();
       faceTrackerRef.current?.dispose();
       handTrackerRef.current?.dispose();
     };
   }, []);
-
-  // Stop local media tracks when stream changes or unmounts
-  useEffect(() => {
-    return () => {
-      localStream?.getTracks().forEach((t) => t.stop());
-    };
-  }, [localStream]);
 
   // Dedicated 30fps FaceLandmarker + Solo AI Partner + PeerJS frame sync loop
   useEffect(() => {
@@ -427,7 +362,7 @@ function CoupleCamApp() {
           };
         }
 
-        // Broadcast lightweight hand coordinates (≤30fps) over PeerJS for games using HAND_FRAME
+        // Broadcast lightweight hand coordinates (≤30fps) for games using HAND_FRAME
         if (
           (connectionModeRef.current === 'p2p-host' || connectionModeRef.current === 'p2p-guest') &&
           activeScreen !== 'slingshot-duo' &&
@@ -441,7 +376,7 @@ function CoupleCamApp() {
           const useIndex = activeGame === 'ninja-fruits';
           const tx = useCam ? (useIndex ? hm.indexX : hm.palmX) : ptr.normX;
           const ty = useCam ? (useIndex ? hm.indexY : hm.palmY) : ptr.normY;
-          peerServiceRef.current?.sendRealtime({
+          sendRealtimeRef.current({
             type: 'HAND_FRAME',
             game: activeGame,
             x: tx,
@@ -510,10 +445,10 @@ function CoupleCamApp() {
           };
         }
 
-        // 2. Broadcast face metrics over PeerJS at 30fps when in P2P mode
+        // 2. Broadcast face metrics at 30fps when in P2P mode
         if (connectionModeRef.current === 'p2p-host' || connectionModeRef.current === 'p2p-guest') {
           const m = localMetricsRef.current;
-          peerServiceRef.current?.sendRealtime({
+          sendRealtimeRef.current({
             type: 'FACE_FRAME',
             smileScore: m.smileScore,
             grimaceScore: m.grimaceScore,
@@ -571,169 +506,136 @@ function CoupleCamApp() {
     return () => cancelAnimationFrame(rafId);
   }, [screen]);
 
-  const ensurePeerService = useCallback(() => {
-    if (!peerServiceRef.current) {
-      peerServiceRef.current = new DuoPeerService({
-        getHostRoomState: () => ({
-          currentGame: screenRef.current === 'lobby' ? 'hub' : screenRef.current,
-          scores: { ...hostScoresRef.current },
-        }),
-        onStatusChange: (status, msg) => {
-          setConnectionStatus(status);
-          if (msg !== undefined) setStatusMessage(msg);
-          if (status === 'connected') {
-            setStatusMessage('');
-            if (screenRef.current === 'lobby') {
-              setScreen('hub');
-            }
-            soundFx.roundWin();
-            pushToast(toastConnectedTextRef.current, 'success');
-          } else if (
-            (status === 'disconnected' || status === 'error') &&
-            connectionModeRef.current !== 'solo'
-          ) {
-            if (screenRef.current !== 'lobby') {
-              setScreen('lobby');
-            }
-            setConnectionMode('idle');
-          }
-        },
-        onRoomCodeChange: (newCode) => {
-          setRoomCode(normalizeRoomCode(newCode));
-        },
-        onRemoteStream: (stream) => {
-          setRemoteStream(stream);
-        },
-        onMessage: (msg) => {
-          if (msg.type === 'HELLO') {
-            setPartnerName(msg.name || 'Partenaire');
-          } else if (
-            msg.type === 'JOIN_ACCEPTED' ||
-            msg.type === 'JOIN_CONFIRMED' ||
-            msg.type === 'JOIN_WELCOME'
-          ) {
-            setPartnerName(msg.hostName || 'Hôte');
-            if (
-              msg.type === 'JOIN_ACCEPTED' &&
-              msg.currentGame &&
-              msg.currentGame !== 'lobby' &&
-              msg.currentGame !== 'hub'
-            ) {
-              pendingGameMessagesRef.current = [];
-              setScreen(msg.currentGame);
-            }
-          } else if (msg.type === 'SELECT_GAME') {
-            soundFx.click();
-            pendingGameMessagesRef.current = [];
-            setScreen(msg.game);
-          } else if (msg.type === 'RETURN_HUB') {
-            soundFx.click();
-            pendingGameMessagesRef.current = [];
-            setScreen('hub');
-          } else if (msg.type === 'HUB_REACTION') {
-            spawnHubReaction(msg.emoji);
-          } else if (msg.type === 'FACE_FRAME') {
-            partnerMetricsRef.current = {
-              ...EMPTY_FACE_METRICS,
-              smileScore: msg.smileScore,
-              grimaceScore: msg.grimaceScore ?? 0,
-              laughBurst: 0,
-              headTiltRad: msg.headTiltRad,
-              noseOffsetX: 0,
-              faceDetected: msg.faceDetected,
-              timestamp: msg.ts,
-            };
-          } else if (msg.type === 'HAND_FRAME') {
-            const prev = partnerHandMetricsRef.current;
-            const isIndexGame = msg.game === 'ninja-fruits';
-            const isPalmGame = msg.game === 'air-hockey';
-            partnerHandMetricsRef.current = {
-              ...prev,
-              indexX: isIndexGame ? msg.x : prev.indexX,
-              indexY: isIndexGame ? msg.y : prev.indexY,
-              palmX: isPalmGame ? msg.x : prev.palmX,
-              palmY: isPalmGame ? msg.y : prev.palmY,
-              handDetected: msg.detected,
-              timestamp: msg.ts,
-            };
-          } else {
-            if (activeGamePeerHandlerRef.current) {
-              activeGamePeerHandlerRef.current(msg);
-            } else {
-              // Buffer game messages arriving during the 200ms AnimatePresence screen switch
-              pendingGameMessagesRef.current.push(msg);
-              if (pendingGameMessagesRef.current.length > 24) {
-                pendingGameMessagesRef.current.shift();
-              }
-            }
-          }
-        },
-      });
+  // Supply current room snapshot (active game & scores) to RoomContext when Host creates a room
+  useEffect(() => {
+    setHostStateProvider(() => ({
+      currentGame: screenRef.current === 'lobby' ? 'hub' : screenRef.current,
+      scores: { ...hostScoresRef.current },
+    }));
+    return () => setHostStateProvider(null);
+  }, [setHostStateProvider]);
+
+  // React to Duo Firestore room connection & disconnect transitions
+  const prevConnectionStatusRef = useRef(connectionStatus);
+  useEffect(() => {
+    const prev = prevConnectionStatusRef.current;
+    prevConnectionStatusRef.current = connectionStatus;
+
+    if (connectionMode === 'solo') return;
+
+    if (connectionStatus === 'connected' && prev !== 'connected') {
+      if (screenRef.current === 'lobby') {
+        setScreen('hub');
+      }
+      soundFx.roundWin();
+      pushToast(toastConnectedTextRef.current, 'success');
+    } else if (
+      (connectionStatus === 'disconnected' || connectionStatus === 'error') &&
+      prev !== connectionStatus &&
+      screenRef.current !== 'lobby'
+    ) {
+      setScreen('lobby');
     }
-    return peerServiceRef.current;
-  }, []);
+  }, [connectionStatus, connectionMode, pushToast]);
+
+  // Subscribe to all incoming Cloud Firestore / WebRTC messages across Hub & all 12 games
+  useEffect(() => {
+    return onData((msg) => {
+      if (msg.type === 'HELLO') {
+        // Partner name already synced in RoomContext
+      } else if (
+        msg.type === 'JOIN_ACCEPTED' ||
+        msg.type === 'JOIN_CONFIRMED' ||
+        msg.type === 'JOIN_WELCOME'
+      ) {
+        if (
+          msg.type === 'JOIN_ACCEPTED' &&
+          msg.currentGame &&
+          msg.currentGame !== 'lobby' &&
+          msg.currentGame !== 'hub'
+        ) {
+          pendingGameMessagesRef.current = [];
+          setScreen(msg.currentGame);
+        }
+      } else if (msg.type === 'SELECT_GAME') {
+        soundFx.click();
+        pendingGameMessagesRef.current = [];
+        setScreen(msg.game);
+      } else if (msg.type === 'RETURN_HUB') {
+        soundFx.click();
+        pendingGameMessagesRef.current = [];
+        setScreen('hub');
+      } else if (msg.type === 'HUB_REACTION') {
+        spawnHubReaction(msg.emoji);
+      } else if (msg.type === 'FACE_FRAME') {
+        partnerMetricsRef.current = {
+          ...EMPTY_FACE_METRICS,
+          smileScore: msg.smileScore,
+          grimaceScore: msg.grimaceScore ?? 0,
+          laughBurst: 0,
+          headTiltRad: msg.headTiltRad,
+          noseOffsetX: 0,
+          faceDetected: msg.faceDetected,
+          timestamp: msg.ts,
+        };
+      } else if (msg.type === 'HAND_FRAME') {
+        const prev = partnerHandMetricsRef.current;
+        const isIndexGame = msg.game === 'ninja-fruits';
+        const isPalmGame = msg.game === 'air-hockey';
+        partnerHandMetricsRef.current = {
+          ...prev,
+          indexX: isIndexGame ? msg.x : prev.indexX,
+          indexY: isIndexGame ? msg.y : prev.indexY,
+          palmX: isPalmGame ? msg.x : prev.palmX,
+          palmY: isPalmGame ? msg.y : prev.palmY,
+          handDetected: msg.detected,
+          timestamp: msg.ts,
+        };
+      } else {
+        if (activeGamePeerHandlerRef.current) {
+          activeGamePeerHandlerRef.current(msg);
+        } else {
+          // Buffer game messages arriving during the 200ms AnimatePresence screen switch
+          pendingGameMessagesRef.current.push(msg);
+          if (pendingGameMessagesRef.current.length > 24) {
+            pendingGameMessagesRef.current.shift();
+          }
+        }
+      }
+    });
+  }, [onData, spawnHubReaction]);
 
   const handleCreateRoom = useCallback(() => {
-    pendingRoomAttemptRef.current += 1;
     const cleanName = playerName.trim() || 'Hôte';
     setPlayerName(cleanName);
-    const code = normalizeRoomCode(generateRoomCode());
-    setRoomCode(code);
-    setConnectionMode('p2p-host');
-    setPartnerName('Partenaire');
-
-    // Start PeerJS room immediately (never block signaling on camera/mic prompt)
-    const svc = ensurePeerService();
-    svc.createHostRoom(code, cleanName, localStreamRef.current);
-    void requestLocalMedia();
-  }, [playerName, requestLocalMedia, ensurePeerService]);
+    createRoom(cleanName);
+  }, [playerName, createRoom]);
 
   const handleCancelRoom = useCallback(() => {
-    pendingRoomAttemptRef.current += 1;
-    peerServiceRef.current?.destroy();
-    setConnectionMode('idle');
-    setConnectionStatus('disconnected');
-    setStatusMessage('');
-    setRoomCode('');
-  }, []);
+    cancelRoom();
+  }, [cancelRoom]);
 
   const handleJoinRoom = useCallback(
     (code: string) => {
-      pendingRoomAttemptRef.current += 1;
       const cleanName = playerName.trim() || 'Invité';
-      const cleanCode = normalizeRoomCode(code);
       setPlayerName(cleanName);
-      setRoomCode(cleanCode);
-      setConnectionMode('p2p-guest');
-      setPartnerName('Hôte');
-
-      // Start PeerJS connection immediately so the 10s timeout & handshake begin right away
-      const svc = ensurePeerService();
-      svc.joinGuestRoom(cleanCode, cleanName, localStreamRef.current);
-      void requestLocalMedia();
+      joinRoom(code, cleanName);
     },
-    [playerName, requestLocalMedia, ensurePeerService],
+    [playerName, joinRoom],
   );
 
   const handleStartSoloMode = useCallback(
-    async (targetScreen: ScreenView = 'hub') => {
-      pendingRoomAttemptRef.current += 1;
-      peerServiceRef.current?.destroy();
+    (targetScreen: ScreenView = 'hub') => {
       const cleanName = playerName.trim() || 'Alex';
       setPlayerName(cleanName);
-      setPartnerName('Camille IA');
-      setConnectionMode('solo');
-      setConnectionStatus('connected');
-      setRoomCode('SOLO');
+      startSoloMode();
       setScreen(targetScreen);
       soundFx.click();
       if (targetScreen === 'hub') {
         pushToast(t.toastSoloStarted, 'accent');
       }
-      // Request camera non-blockingly so Solo Mode opens instantaneously
-      void requestLocalMedia();
     },
-    [playerName, pushToast, requestLocalMedia, t.toastSoloStarted],
+    [playerName, pushToast, startSoloMode, t.toastSoloStarted],
   );
 
   // Support ?autostart=1|hub|laugh|stare-duel|miam-mania|funambules|ninja-fruits|air-hockey|whisper-secrets|slingshot-duo|xo-neon|parchisi-duo|music-quiz|freeze-dance
@@ -765,59 +667,36 @@ function CoupleCamApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSelectGame = useCallback((game: GameId) => {
-    soundFx.click();
-    setScreen(game);
-    peerServiceRef.current?.sendEvent({ type: 'SELECT_GAME', game });
-  }, []);
+  const handleSelectGame = useCallback(
+    (game: GameId) => {
+      soundFx.click();
+      setScreen(game);
+      sendData({ type: 'SELECT_GAME', game });
+    },
+    [sendData],
+  );
 
   const handleReturnToHub = useCallback(() => {
     soundFx.click();
     setParchisiHandDiceEnabled(false);
     setScreen('hub');
-    peerServiceRef.current?.sendEvent({ type: 'RETURN_HUB' });
-  }, []);
+    sendData({ type: 'RETURN_HUB' });
+  }, [sendData]);
 
   const handleSendHubReaction = useCallback(
     (emoji: '❤️' | '😂' | '🔥') => {
       soundFx.click();
       spawnHubReaction(emoji);
-      peerServiceRef.current?.sendEvent({ type: 'HUB_REACTION', emoji });
+      sendData({ type: 'HUB_REACTION', emoji });
     },
-    [spawnHubReaction],
+    [spawnHubReaction, sendData],
   );
 
   const handleLeaveRoom = useCallback(() => {
-    pendingRoomAttemptRef.current += 1;
     soundFx.click();
-    peerServiceRef.current?.destroy();
-    setRemoteStream(null);
-    setConnectionMode('idle');
-    setConnectionStatus('disconnected');
-    setStatusMessage('');
-    setRoomCode('');
+    leaveRoom();
     setScreen('lobby');
-  }, []);
-
-  const handleToggleMic = useCallback(() => {
-    setMicMuted((prev) => {
-      const next = !prev;
-      localStream?.getAudioTracks().forEach((track) => {
-        track.enabled = !next;
-      });
-      return next;
-    });
-  }, [localStream]);
-
-  const handleToggleCamera = useCallback(() => {
-    setCameraEnabled((prev) => {
-      const next = !prev;
-      localStream?.getVideoTracks().forEach((track) => {
-        track.enabled = next;
-      });
-      return next;
-    });
-  }, [localStream]);
+  }, [leaveRoom]);
 
   const handleToggleSfx = useCallback(() => {
     setSfxMuted((prev) => {
@@ -827,13 +706,19 @@ function CoupleCamApp() {
     });
   }, []);
 
-  const handleSendPeerMessage = useCallback((msg: PeerMessage) => {
-    peerServiceRef.current?.sendEvent(msg);
-  }, []);
+  const handleSendPeerMessage = useCallback(
+    (msg: PeerMessage) => {
+      sendData(msg);
+    },
+    [sendData],
+  );
 
-  const handleSendPeerRealtime = useCallback((msg: PeerMessage) => {
-    peerServiceRef.current?.sendRealtime(msg);
-  }, []);
+  const handleSendPeerRealtime = useCallback(
+    (msg: PeerMessage) => {
+      sendRealtime(msg);
+    },
+    [sendRealtime],
+  );
 
   const registerPeerHandler = useCallback((handler: ((msg: PeerMessage) => void) | null) => {
     activeGamePeerHandlerRef.current = handler;

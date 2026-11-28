@@ -1,4 +1,4 @@
-import { normalizeRoomCode } from '../services/peerService';
+import { normalizeRoomCode } from './roomCode';
 
 /**
  * Copies text reliably even inside cross-origin iframes where navigator.clipboard.writeText

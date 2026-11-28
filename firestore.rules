@@ -1,0 +1,231 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Shared hardened primitives
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidRoomCode(code) {
+      return code is string && code.size() == 4 && code.matches('^[A-Z0-9]{4}$');
+    }
+
+    function isValidSdp(sdpObj, expectedType) {
+      return sdpObj == null || (
+        sdpObj is map &&
+        sdpObj.keys().hasAll(['type', 'sdp']) &&
+        sdpObj.keys().hasOnly(['type', 'sdp']) &&
+        sdpObj.type is string &&
+        sdpObj.type == expectedType &&
+        sdpObj.sdp is string &&
+        sdpObj.sdp.size() >= 1 &&
+        sdpObj.sdp.size() <= 20000
+      );
+    }
+
+    function isValidRoom(data) {
+      return data is map &&
+        data.keys().hasAll([
+          'hostName',
+          'guestName',
+          'status',
+          'currentGame',
+          'scores',
+          'diceCount',
+          'webrtcGen',
+          'hostHasStream',
+          'guestHasStream',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'hostName',
+          'guestName',
+          'status',
+          'currentGame',
+          'scores',
+          'diceCount',
+          'offer',
+          'answer',
+          'webrtcGen',
+          'hostHasStream',
+          'guestHasStream',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.hostName is string &&
+        data.hostName.size() >= 1 &&
+        data.hostName.size() <= 32 &&
+        data.guestName is string &&
+        data.guestName.size() <= 32 &&
+        data.status is string &&
+        data.status in ['waiting', 'connected', 'closed'] &&
+        data.currentGame is string &&
+        data.currentGame.size() >= 1 &&
+        data.currentGame.size() <= 32 &&
+        data.currentGame.matches('^[a-z0-9\\-]+$') &&
+        data.scores is map &&
+        data.scores.size() <= 24 &&
+        data.diceCount is int &&
+        data.diceCount in [1, 2] &&
+        data.webrtcGen is int &&
+        data.webrtcGen >= 0 &&
+        data.webrtcGen <= 1000 &&
+        data.hostHasStream is bool &&
+        data.guestHasStream is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        (!('offer' in data) || isValidSdp(data.offer, 'offer')) &&
+        (!('answer' in data) || isValidSdp(data.answer, 'answer'));
+    }
+
+    function isValidMessage(data) {
+      return data is map &&
+        data.keys().hasAll(['sender', 'payload', 'createdAt']) &&
+        data.keys().hasOnly(['sender', 'payload', 'createdAt']) &&
+        data.sender is string &&
+        data.sender in ['host', 'guest'] &&
+        data.payload is map &&
+        data.payload.size() >= 1 &&
+        data.payload.size() <= 32 &&
+        'type' in data.payload &&
+        data.payload.type is string &&
+        data.payload.type.size() >= 1 &&
+        data.payload.type.size() <= 40 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidCandidate(data) {
+      return data is map &&
+        data.keys().hasAll(['sender', 'webrtcGen', 'candidate', 'createdAt']) &&
+        data.keys().hasOnly(['sender', 'webrtcGen', 'candidate', 'createdAt']) &&
+        data.sender is string &&
+        data.sender in ['host', 'guest'] &&
+        data.webrtcGen is int &&
+        data.webrtcGen >= 0 &&
+        data.webrtcGen <= 1000 &&
+        data.candidate is map &&
+        data.candidate.keys().hasAll(['candidate']) &&
+        data.candidate.keys().hasOnly(['candidate', 'sdpMid', 'sdpMLineIndex', 'usernameFragment']) &&
+        data.candidate.candidate is string &&
+        data.candidate.candidate.size() <= 2048 &&
+        (!('sdpMid' in data.candidate) || data.candidate.sdpMid == null || (data.candidate.sdpMid is string && data.candidate.sdpMid.size() <= 64)) &&
+        (!('sdpMLineIndex' in data.candidate) || data.candidate.sdpMLineIndex == null || (data.candidate.sdpMLineIndex is int && data.candidate.sdpMLineIndex >= 0 && data.candidate.sdpMLineIndex <= 32)) &&
+        (!('usernameFragment' in data.candidate) || data.candidate.usernameFragment == null || (data.candidate.usernameFragment is string && data.candidate.usernameFragment.size() <= 128)) &&
+        data.createdAt is timestamp;
+    }
+
+    function roomExistsAndActive(code) {
+      return exists(/databases/$(database)/documents/rooms/$(code)) &&
+        get(/databases/$(database)/documents/rooms/$(code)).data.status != 'closed';
+    }
+
+    // Collection: /rooms/{code}
+    match /rooms/{code} {
+      // Capability-gated single-document read only; listing rooms is strictly forbidden to prevent scraping
+      allow get: if isValidRoomCode(code);
+      allow list: if false;
+
+      // Host creates a new room in 'waiting' state with strict server timestamps
+      allow create: if isValidRoomCode(code) &&
+        isValidRoom(incoming()) &&
+        incoming().status == 'waiting' &&
+        incoming().guestName == '' &&
+        incoming().webrtcGen == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (!('offer' in incoming()) || incoming().offer == null) &&
+        (!('answer' in incoming()) || incoming().answer == null);
+
+      // Action-based updates with strict validation blueprint & terminal state locking
+      allow update: if isValidRoomCode(code) &&
+        isValidRoom(incoming()) &&
+        existing().status != 'closed' &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().hostName == existing().hostName &&
+        incoming().updatedAt == request.time && (
+          // Action 1: Guest joins the room instantaneously (sets guestName + status='connected')
+          (
+            incoming().status == 'connected' &&
+            incoming().guestName.size() >= 1 &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['guestName', 'status', 'guestHasStream', 'updatedAt'])
+          ) ||
+          // Action 2: Sync currentGame, scores, or Parcheesi diceCount
+          (
+            incoming().status == existing().status &&
+            incoming().guestName == existing().guestName &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['currentGame', 'scores', 'diceCount', 'updatedAt'])
+          ) ||
+          // Action 3: Host publishes or renegotiates WebRTC offer (bumps webrtcGen and clears stale answer)
+          (
+            incoming().status == 'connected' &&
+            incoming().guestName == existing().guestName &&
+            incoming().webrtcGen >= existing().webrtcGen &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['offer', 'answer', 'webrtcGen', 'hostHasStream', 'updatedAt'])
+          ) ||
+          // Action 4: Guest publishes WebRTC answer
+          (
+            incoming().status == 'connected' &&
+            incoming().guestName == existing().guestName &&
+            incoming().webrtcGen == existing().webrtcGen &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['answer', 'guestHasStream', 'updatedAt'])
+          ) ||
+          // Action 5: Update camera/stream availability indicator
+          (
+            incoming().status == existing().status &&
+            incoming().guestName == existing().guestName &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['hostHasStream', 'guestHasStream', 'updatedAt'])
+          ) ||
+          // Action 6: Close room cleanly (terminal state)
+          (
+            incoming().status == 'closed' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+
+      allow delete: if false;
+
+      // Subcollection: /rooms/{code}/messages/{messageId}
+      match /messages/{messageId} {
+        allow get: if isValidRoomCode(code) && isValidId(messageId);
+        allow list: if isValidRoomCode(code);
+
+        allow create: if isValidRoomCode(code) &&
+          isValidId(messageId) &&
+          isValidMessage(incoming()) &&
+          incoming().createdAt == request.time &&
+          roomExistsAndActive(code);
+
+        allow update, delete: if false;
+      }
+
+      // Subcollection: /rooms/{code}/candidates/{candidateId}
+      match /candidates/{candidateId} {
+        allow get: if isValidRoomCode(code) && isValidId(candidateId);
+        allow list: if isValidRoomCode(code);
+
+        allow create: if isValidRoomCode(code) &&
+          isValidId(candidateId) &&
+          isValidCandidate(incoming()) &&
+          incoming().createdAt == request.time &&
+          roomExistsAndActive(code);
+
+        allow update, delete: if false;
+      }
+    }
+  }
+}

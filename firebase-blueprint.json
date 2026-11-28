@@ -1,0 +1,149 @@
+{
+  "entities": {
+    "Room": {
+      "title": "CoupleCam Room",
+      "description": "Real-time multiplayer room state and WebRTC SDP signaling for a 2-player CoupleCam session.",
+      "type": "object",
+      "properties": {
+        "hostName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Display name of the host player who created the room."
+        },
+        "guestName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 32,
+          "description": "Display name of the guest player once joined (empty string while waiting)."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "connected", "closed"],
+          "description": "Lifecycle status of the room."
+        },
+        "currentGame": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9\\-]+$",
+          "description": "Currently active screen or mini-game identifier."
+        },
+        "scores": {
+          "type": "object",
+          "description": "Map of mini-game score counters for the current session."
+        },
+        "diceCount": {
+          "type": "number",
+          "enum": [1, 2],
+          "description": "Selected Parcheesi dice count (1 or 2)."
+        },
+        "offer": {
+          "type": "object",
+          "description": "Latest WebRTC SDP offer created by the host (or null before negotiation)."
+        },
+        "answer": {
+          "type": "object",
+          "description": "Latest WebRTC SDP answer created by the guest (or null before negotiation)."
+        },
+        "webrtcGen": {
+          "type": "number",
+          "description": "Monotonic WebRTC signaling generation counter for renegotiation and ICE restarts."
+        },
+        "hostHasStream": {
+          "type": "boolean",
+          "description": "Whether the host currently has an active camera/audio stream."
+        },
+        "guestHasStream": {
+          "type": "boolean",
+          "description": "Whether the guest currently has an active camera/audio stream."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the room was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the room was last updated."
+        }
+      },
+      "required": [
+        "hostName",
+        "guestName",
+        "status",
+        "currentGame",
+        "scores",
+        "diceCount",
+        "webrtcGen",
+        "hostHasStream",
+        "guestHasStream",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RoomMessage": {
+      "title": "Room Game Message",
+      "description": "Real-time game move, dice roll, score sync, or emoji reaction event inside a room.",
+      "type": "object",
+      "properties": {
+        "sender": {
+          "type": "string",
+          "enum": ["host", "guest"],
+          "description": "Role of the player who emitted the message."
+        },
+        "payload": {
+          "type": "object",
+          "description": "Structured game event payload containing a valid type field."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the event was persisted."
+        }
+      },
+      "required": ["sender", "payload", "createdAt"]
+    },
+    "IceCandidate": {
+      "title": "WebRTC ICE Candidate",
+      "description": "Trickle ICE candidate exchanged between host and guest for native RTCPeerConnection.",
+      "type": "object",
+      "properties": {
+        "sender": {
+          "type": "string",
+          "enum": ["host", "guest"],
+          "description": "Role of the peer that gathered this ICE candidate."
+        },
+        "webrtcGen": {
+          "type": "number",
+          "description": "Negotiation generation associated with this ICE candidate."
+        },
+        "candidate": {
+          "type": "object",
+          "description": "RTCIceCandidateInit fields (candidate string, sdpMid, sdpMLineIndex)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the candidate was added."
+        }
+      },
+      "required": ["sender", "webrtcGen", "candidate", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/rooms/{code}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Active 2-player CoupleCam rooms indexed by normalized 4-character uppercase alphanumeric code."
+    },
+    "/rooms/{code}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/RoomMessage" },
+      "description": "Append-only real-time game events, moves, dice rolls, scores, and emoji reactions for a room."
+    },
+    "/rooms/{code}/candidates/{candidateId}": {
+      "schema": { "$ref": "#/entities/IceCandidate" },
+      "description": "Append-only WebRTC trickle ICE candidates exchanged between host and guest."
+    }
+  }
+}
