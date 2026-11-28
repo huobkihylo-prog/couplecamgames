@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, signInAnonymously } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -10,6 +10,38 @@ const app = initializeApp(firebaseConfig);
  */
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+let authInitPromise: Promise<void> | null = null;
+let anonAuthUnavailable = false;
+
+/**
+ * Ensures an anonymous Firebase Auth session is initiated non-blockingly when available.
+ * Never throws or blocks Solo AI mode if Anonymous Auth is disabled or temporarily offline.
+ */
+export function ensureAnonymousAuth(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (auth.currentUser || anonAuthUnavailable) return Promise.resolve();
+  if (!authInitPromise) {
+    authInitPromise = signInAnonymously(auth)
+      .then(() => undefined)
+      .catch((err: unknown) => {
+        const code =
+          typeof err === 'object' && err !== null && 'code' in err
+            ? String((err as { code?: unknown }).code)
+            : '';
+        if (
+          code === 'auth/admin-restricted-operation' ||
+          code === 'auth/operation-not-allowed'
+        ) {
+          anonAuthUnavailable = true;
+        }
+      })
+      .finally(() => {
+        authInitPromise = null;
+      });
+  }
+  return authInitPromise;
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -75,7 +107,7 @@ export function handleFirestoreError(
 }
 
 /**
- * Converts low-level Firebase/Firestore exceptions into clear, friendly French UI messages
+ * Converts low-level Firebase/Firestore exceptions into clear, friendly UI messages
  * without crashing the app or blocking Solo AI mode.
  */
 export function formatUserFriendlyFirestoreError(error: unknown): string {
@@ -98,6 +130,7 @@ export function formatUserFriendlyFirestoreError(error: unknown): string {
  */
 async function testConnection(): Promise<void> {
   if (typeof window === 'undefined') return;
+  await ensureAnonymousAuth();
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {

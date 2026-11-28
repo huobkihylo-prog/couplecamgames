@@ -1,8 +1,8 @@
 {
   "entities": {
     "Room": {
-      "title": "CoupleCam Room",
-      "description": "Real-time multiplayer room state and WebRTC SDP signaling for a 2-player CoupleCam session.",
+      "title": "Parcheesi Voice Room",
+      "description": "Real-time multiplayer room state, host-controlled Parcheesi launch state, and audio-only WebRTC SDP signaling.",
       "type": "object",
       "properties": {
         "hostName": {
@@ -19,44 +19,50 @@
         },
         "status": {
           "type": "string",
-          "enum": ["waiting", "connected", "closed"],
-          "description": "Lifecycle status of the room."
+          "enum": ["waiting", "connected", "playing", "closed"],
+          "description": "Lifecycle status of the room: waiting -> connected (Room Menu) -> playing (Parcheesi) -> closed."
         },
-        "currentGame": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 32,
-          "pattern": "^[a-z0-9\\-]+$",
-          "description": "Currently active screen or mini-game identifier."
+        "activeGame": {
+          "type": ["string", "null"],
+          "enum": [null, "parcheesi"],
+          "description": "Host-controlled active game. Strictly null in the Room Menu; set to 'parcheesi' only when Host launches Parcheesi."
         },
         "scores": {
           "type": "object",
-          "description": "Map of mini-game score counters for the current session."
+          "description": "Map of Parcheesi victory counters for the current room session."
         },
         "diceCount": {
           "type": "number",
           "enum": [1, 2],
-          "description": "Selected Parcheesi dice count (1 or 2)."
+          "description": "Selected Parcheesi dice count (1 or 2), controlled by the host and synced live."
         },
         "offer": {
-          "type": "object",
-          "description": "Latest WebRTC SDP offer created by the host (or null before negotiation)."
+          "type": ["object", "null"],
+          "description": "Latest audio-only WebRTC SDP offer created by the host (or null before negotiation)."
         },
         "answer": {
-          "type": "object",
-          "description": "Latest WebRTC SDP answer created by the guest (or null before negotiation)."
+          "type": ["object", "null"],
+          "description": "Latest audio-only WebRTC SDP answer created by the guest (or null before negotiation)."
         },
         "webrtcGen": {
           "type": "number",
           "description": "Monotonic WebRTC signaling generation counter for renegotiation and ICE restarts."
         },
-        "hostHasStream": {
+        "hostHasAudio": {
           "type": "boolean",
-          "description": "Whether the host currently has an active camera/audio stream."
+          "description": "Whether the host currently has an active microphone audio stream."
         },
-        "guestHasStream": {
+        "guestHasAudio": {
           "type": "boolean",
-          "description": "Whether the guest currently has an active camera/audio stream."
+          "description": "Whether the guest currently has an active microphone audio stream."
+        },
+        "hostMicMuted": {
+          "type": "boolean",
+          "description": "Whether the host microphone is currently muted."
+        },
+        "guestMicMuted": {
+          "type": "boolean",
+          "description": "Whether the guest microphone is currently muted."
         },
         "createdAt": {
           "type": "string",
@@ -73,29 +79,66 @@
         "hostName",
         "guestName",
         "status",
-        "currentGame",
+        "activeGame",
         "scores",
         "diceCount",
         "webrtcGen",
-        "hostHasStream",
-        "guestHasStream",
+        "hostHasAudio",
+        "guestHasAudio",
+        "hostMicMuted",
+        "guestMicMuted",
         "createdAt",
         "updatedAt"
       ]
     },
-    "RoomMessage": {
-      "title": "Room Game Message",
-      "description": "Real-time game move, dice roll, score sync, or emoji reaction event inside a room.",
+    "RoomChatMessage": {
+      "title": "Room Live Chat Message",
+      "description": "Persistent live text message or quick emoji reaction sent inside a room across Room Menu and Parcheesi.",
       "type": "object",
       "properties": {
         "sender": {
           "type": "string",
           "enum": ["host", "guest"],
-          "description": "Role of the player who emitted the message."
+          "description": "Role of the player who sent the chat message."
+        },
+        "senderName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "description": "Display name of the sender."
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 280,
+          "description": "Chat message text or quick reaction emoji."
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["text", "reaction"],
+          "description": "Whether this item is a standard text chat message or a quick reaction."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the chat message was created."
+        }
+      },
+      "required": ["sender", "senderName", "text", "kind", "createdAt"]
+    },
+    "RoomMessage": {
+      "title": "Room Parcheesi Event",
+      "description": "Authoritative Parcheesi move, dice roll, board state sync, or quick taunt event inside a room.",
+      "type": "object",
+      "properties": {
+        "sender": {
+          "type": "string",
+          "enum": ["host", "guest"],
+          "description": "Role of the player who emitted the game event."
         },
         "payload": {
           "type": "object",
-          "description": "Structured game event payload containing a valid type field."
+          "description": "Structured Parcheesi event payload containing a valid type field."
         },
         "createdAt": {
           "type": "string",
@@ -106,8 +149,8 @@
       "required": ["sender", "payload", "createdAt"]
     },
     "IceCandidate": {
-      "title": "WebRTC ICE Candidate",
-      "description": "Trickle ICE candidate exchanged between host and guest for native RTCPeerConnection.",
+      "title": "Audio WebRTC ICE Candidate",
+      "description": "Trickle ICE candidate exchanged between host and guest for audio-only RTCPeerConnection.",
       "type": "object",
       "properties": {
         "sender": {
@@ -135,15 +178,19 @@
   "firestore": {
     "/rooms/{code}": {
       "schema": { "$ref": "#/entities/Room" },
-      "description": "Active 2-player CoupleCam rooms indexed by normalized 4-character uppercase alphanumeric code."
+      "description": "Active 2-player Parcheesi voice rooms indexed by normalized 4-character uppercase alphanumeric code."
+    },
+    "/rooms/{code}/chat/{chatId}": {
+      "schema": { "$ref": "#/entities/RoomChatMessage" },
+      "description": "Append-only live chat messages and quick reactions persisted across Room Menu and Parcheesi."
     },
     "/rooms/{code}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/RoomMessage" },
-      "description": "Append-only real-time game events, moves, dice rolls, scores, and emoji reactions for a room."
+      "description": "Append-only real-time Parcheesi game events, moves, dice rolls, and board states for a room."
     },
     "/rooms/{code}/candidates/{candidateId}": {
       "schema": { "$ref": "#/entities/IceCandidate" },
-      "description": "Append-only WebRTC trickle ICE candidates exchanged between host and guest."
+      "description": "Append-only audio-only WebRTC trickle ICE candidates exchanged between host and guest."
     }
   }
 }

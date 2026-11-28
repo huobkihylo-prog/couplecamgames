@@ -1,25 +1,37 @@
-# CoupleCam Firestore Security Specification (Phase 0)
+# Security Specification — Parcheesi Voice Room & Live Chat
 
-## 1. Data Invariants
+## Collections & Access Matrix
+- `/rooms/{code}`:
+  - `get`: capability-gated on exact 4-char uppercase alphanumeric `code` (`^[A-Z0-9]{4}$`).
+  - `list`: strictly `false` (anti-enumeration / anti-scraping).
+  - `create`: strict Room schema (`status == 'waiting'`, `activeGame == null`, `guestName == ''`, `webrtcGen == 0`, server timestamps).
+  - `update`: action-based partial updates only, terminal `status == 'closed'` lock, immutable `createdAt` & `hostName`, strict server `updatedAt == request.time`:
+    - Action 1 (Guest Join): sets `guestName` (1..32), `status: 'connected'`, `guestHasAudio`, `guestMicMuted`, `updatedAt` (never changes `activeGame`!).
+    - Action 2 (Host Game Control & Config): updates `activeGame` (`null` or `'parcheesi'`), `status` (`'connected'` when `activeGame == null`, `'playing'` when `activeGame == 'parcheesi'`, or unchanged while `'waiting'`), `diceCount` (`1 | 2`), `scores`, `updatedAt`.
+    - Action 3 (Host Audio WebRTC Offer): updates `offer`, `answer`, `webrtcGen >= existing`, `hostHasAudio`, `hostMicMuted`, `updatedAt` while active (`status in ['connected', 'playing']`).
+    - Action 4 (Guest Audio WebRTC Answer): updates `answer`, `guestHasAudio`, `guestMicMuted`, `updatedAt` while active (`status in ['connected', 'playing']`).
+    - Action 5 (Audio/Mic Status Indicator): updates `hostHasAudio`, `guestHasAudio`, `hostMicMuted`, `guestMicMuted`, `updatedAt` without altering `status` or `activeGame`.
+    - Action 6 (Explicit Leave / Close Room): sets `status: 'closed'`, `activeGame: null`, `updatedAt`.
+  - `delete`: strictly `false`.
+- `/rooms/{code}/chat/{chatId}`:
+  - `get`, `list`: capability-gated on valid `code` (and `isValidId(chatId)` on `get`).
+  - `create`: strict `RoomChatMessage` schema (`sender in ['host','guest']`, `senderName` 1..32, `text` 1..280, `kind in ['text','reaction']`, `createdAt == request.time`, Master Gate `roomExistsAndActive(code)`).
+  - `update`, `delete`: strictly `false` (append-only).
+- `/rooms/{code}/messages/{messageId}`:
+  - Append-only Parcheesi game events with Master Gate `roomExistsAndActive(code)`.
+- `/rooms/{code}/candidates/{candidateId}`:
+  - Append-only audio WebRTC ICE candidates with Master Gate `roomExistsAndActive(code)`.
 
-1. **No Room Scraping / Enumeration**: Listing `/rooms` is strictly forbidden (`allow list: if false`). Players can only `get` a specific room when they possess its normalized 4-character alphanumeric code (`^[A-Z0-9]{4}$`).
-2. **No PII Storage**: Rooms store only casual display names (1..32 chars), game states, scores, and ephemeral WebRTC SDP/ICE metadata. Zero emails, phone numbers, or addresses exist in Firestore.
-3. **Strict Schema & Size Enforcement**: Every string, map, and SDP field is bounded in size (`hostName`/`guestName` <= 32, `currentGame` <= 32, `offer.sdp`/`answer.sdp` <= 20000, `candidate.candidate` <= 2048). Unknown/shadow keys are rejected on both create and update.
-4. **Master Gate on Subcollections**: Every write to `/rooms/{code}/messages/{messageId}` and `/rooms/{code}/candidates/{candidateId}` requires the parent `/rooms/{code}` document to exist and NOT be in terminal `'closed'` state.
-5. **Action-Based Updates & Terminal State Locking**: Updates to `/rooms/{code}` are split into explicit actions (`join`, `gameSync`, `webrtcOffer`, `webrtcAnswer`, `mediaStatus`, `closeRoom`) with `affectedKeys().hasOnly(...)` and full `isValidRoom(incoming())` validation. Once `status == 'closed'`, no further updates are permitted.
-6. **Temporal Integrity & Immutability**: `createdAt` must equal `request.time` on creation and can never change on update. `updatedAt` must equal `request.time` on creation and every update. Messages and ICE candidates are append-only (updates and deletes denied).
-
-## 2. The "Dirty Dozen" Adversarial Payloads
-
-1. **Room Code ID Poisoning**: Creating `/rooms/invalid-1.5kb-id...` -> DENIED (`isValidRoomCode` rejects non-4-char IDs).
-2. **Room Enumeration / Scraping**: `list` query on `/rooms` -> DENIED (`allow list: if false`).
-3. **Shadow Field Injection on Create**: Creating `/rooms/A7K4` with extra field `isAdmin: true` -> DENIED (`keys().hasOnly(...)`).
-4. **Initial Status Bypass**: Creating `/rooms/A7K4` with `status: 'connected'` instead of `'waiting'` -> DENIED.
-5. **Spoofed Client Timestamp**: Creating `/rooms/A7K4` with `createdAt` != `request.time` -> DENIED.
-6. **Immutable `createdAt` Tampering**: Updating `/rooms/A7K4` to alter `createdAt` or `hostName` -> DENIED.
-7. **Post-Close Terminal Mutation**: Updating `/rooms/A7K4` after `status == 'closed'` -> DENIED.
-8. **Value Poisoning on `diceCount`**: Updating `diceCount` to `99` or `"hack"` -> DENIED (`diceCount in [1, 2]`).
-9. **Oversized SDP / DoW Attack**: Writing a 100KB string into `offer.sdp` -> DENIED (`sdp.size() <= 20000`).
-10. **Orphaned Message Creation**: Writing to `/rooms/ZZZZ/messages/m1` when `/rooms/ZZZZ` does not exist -> DENIED (`exists(...)` Master Gate).
-11. **Message Tampering / Deletion**: Updating or deleting an existing `/rooms/A7K4/messages/m1` -> DENIED (`allow update, delete: if false`).
-12. **Malformed ICE Candidate**: Writing `/rooms/A7K4/candidates/c1` with invalid `sender: 'hacker'` or shadow keys -> DENIED.
+## Dirty Dozen Adversarial Payloads (Verified in `firestore.rules.test.ts`)
+1. Room Code ID Poisoning (`code` length != 4 or invalid chars) -> DENIED.
+2. Room Enumeration (`list` on `/rooms`) -> DENIED.
+3. Shadow Field Injection on Room Create (`isAdmin: true`) -> DENIED.
+4. Initial Status / Auto-Start Bypass (`status: 'playing'` or `activeGame: 'parcheesi'` on create) -> DENIED.
+5. Spoofed Client Timestamp (`createdAt != request.time`) -> DENIED.
+6. Immutable `hostName` / `createdAt` Tampering -> DENIED.
+7. Post-Close Terminal Mutation (`existing.status == 'closed'`) -> DENIED.
+8. Value Poisoning on `diceCount` (`diceCount: 99`) or `activeGame` (`activeGame: 'music-quiz'`) -> DENIED.
+9. Oversized SDP / DoW Attack (> 20KB) -> DENIED.
+10. Orphaned Subcollection Creation (missing or closed parent room for `chat` / `messages` / `candidates`) -> DENIED.
+11. Chat Message Oversized Payload (> 280 chars) or Update/Delete -> DENIED.
+12. Malformed ICE Candidate (invalid sender or shadow key) -> DENIED.

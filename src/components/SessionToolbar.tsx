@@ -3,20 +3,17 @@ import {
   ArrowLeft,
   Check,
   Copy,
-  FlipHorizontal2,
   LogOut,
+  MessageCircle,
   Mic,
   MicOff,
   Settings,
-  Video,
-  VideoOff,
   Volume2,
   VolumeX,
 } from 'lucide-react';
 import type { ConnectionMode, ScreenView } from '../types/duoplay';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { useI18n } from '../i18n/LanguageContext';
-import { useMirror } from '../context/MirrorContext';
 import { CoupleCamLogo } from './CoupleCamLogo';
 import { LanguageSwitcher } from './LanguageSwitcher';
 
@@ -24,15 +21,16 @@ interface SessionToolbarProps {
   screen: ScreenView;
   connectionMode: ConnectionMode;
   roomCode: string;
+  isHostOrAi: boolean;
   micMuted: boolean;
-  cameraEnabled: boolean;
-  hasPhysicalCamera: boolean;
   sfxMuted: boolean;
+  chatOpen: boolean;
+  unreadChatCount: number;
   onToggleMic: () => void;
-  onToggleCamera: () => void;
   onToggleSfx: () => void;
-  onReturnToHub: () => void;
-  onLeaveRoom: () => void;
+  onToggleChat: () => void;
+  onReturnToRoomMenu: () => void;
+  onRequestLeaveRoom: () => void;
   onNotify?: (message: string, tone?: 'success' | 'info' | 'accent') => void;
 }
 
@@ -40,19 +38,19 @@ export function SessionToolbar({
   screen,
   connectionMode,
   roomCode,
+  isHostOrAi,
   micMuted,
-  cameraEnabled,
-  hasPhysicalCamera,
   sfxMuted,
+  chatOpen,
+  unreadChatCount,
   onToggleMic,
-  onToggleCamera,
   onToggleSfx,
-  onReturnToHub,
-  onLeaveRoom,
+  onToggleChat,
+  onReturnToRoomMenu,
+  onRequestLeaveRoom,
   onNotify,
 }: SessionToolbarProps) {
   const { t } = useI18n();
-  const { isMirrored, toggleMirrored } = useMirror();
   const [copied, setCopied] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
@@ -78,35 +76,35 @@ export function SessionToolbar({
     }
   };
 
-  const isInGame = screen !== 'hub';
+  const isInParcheesi = screen === 'parcheesi';
 
   return (
     <header className="sticky top-0 z-30 shrink-0 w-full border-b border-[#EAE4DC] bg-[#FAF7F2]/92 backdrop-blur-xl px-2.5 sm:px-6 py-2 shadow-[0_2px_14px_rgba(31,36,45,0.04)]">
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-1.5 sm:gap-2">
-        {/* Left: Brand Logo or In-Game Back Button + Status Pill */}
+        {/* Left: Brand Logo (or Host Back-to-Room-Menu button inside Parcheesi) + Room Code Pill */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
-          {isInGame ? (
+          {isInParcheesi && isHostOrAi ? (
             <button
               type="button"
-              data-testid="toolbar-change-game"
-              onClick={onReturnToHub}
-              title={t.changeGame}
-              aria-label={t.changeGame}
+              data-testid="toolbar-back-room-menu"
+              onClick={onReturnToRoomMenu}
+              title={t.backToRoomMenu}
+              aria-label={t.backToRoomMenu}
               className="min-h-[38px] sm:min-h-[40px] inline-flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] hover:border-[#FF6B57]/40 shadow-sm transition-all whitespace-nowrap shrink-0 cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4 text-[#FF6B57] shrink-0 rtl:rotate-180" />
-              <span>{t.changeGame}</span>
+              <span>{t.backToRoomMenu}</span>
             </button>
           ) : (
             <CoupleCamLogo size="sm" />
           )}
 
-          {/* Status Pill: "● En direct • #XXXX" or "🤖 Mode IA" */}
+          {/* Status Pill: "● Salon • #XXXX" or "🤖 Mode IA" */}
           {connectionMode === 'solo' ? (
             <span
               data-testid="toolbar-status-pill"
               className={`${
-                isInGame ? 'hidden sm:inline-flex' : 'inline-flex'
+                isInParcheesi ? 'hidden sm:inline-flex' : 'inline-flex'
               } items-center gap-1 sm:gap-1.5 px-2.5 py-1 rounded-full bg-white border border-[#EAE4DC] text-[11px] sm:text-xs font-bold text-[#1F242D] shadow-sm whitespace-nowrap shrink-0`}
             >
               <span aria-hidden="true">🤖</span>
@@ -124,7 +122,9 @@ export function SessionToolbar({
                 className="min-h-[34px] inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-white border border-[#EAE4DC] hover:border-[#FF6B57]/45 text-[11px] sm:text-xs font-bold text-[#1F242D] shadow-sm transition-all whitespace-nowrap shrink-0 cursor-pointer"
               >
                 <span className="w-2 h-2 rounded-full bg-[#16A34A] shrink-0" />
-                <span className="hidden sm:inline text-[#6B7280] font-semibold">{t.toolbarLivePrefix}</span>
+                <span className="hidden sm:inline text-[#6B7280] font-semibold">
+                  {t.toolbarLivePrefix}
+                </span>
                 <span
                   dir="ltr"
                   data-testid="toolbar-room-code"
@@ -142,25 +142,8 @@ export function SessionToolbar({
           )}
         </div>
 
-        {/* Right: Light round white buttons (w-9 h-9) */}
+        {/* Right: Mic Toggle + Live Chat Drawer Toggle (in Parcheesi) + Settings Popover (ZERO Camera / Mirror) */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Mirror Toggle */}
-          <button
-            type="button"
-            data-testid="toolbar-mirror-btn"
-            onClick={toggleMirrored}
-            title={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
-            aria-label={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
-            aria-pressed={isMirrored}
-            className={`w-9 h-9 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-sm cursor-pointer ${
-              isMirrored
-                ? 'bg-white text-[#7C5CFC] border-[#7C5CFC]/35 hover:bg-[#EFE9FB]/40'
-                : 'bg-white text-[#6B7280] border-[#EAE4DC] hover:text-[#1F242D]'
-            }`}
-          >
-            <FlipHorizontal2 className="w-4 h-4 shrink-0" />
-          </button>
-
           {/* Mic Toggle */}
           <button
             type="button"
@@ -178,25 +161,34 @@ export function SessionToolbar({
             {micMuted ? <MicOff className="w-4 h-4 shrink-0" /> : <Mic className="w-4 h-4 shrink-0" />}
           </button>
 
-          {/* Camera Toggle */}
-          <button
-            type="button"
-            data-testid="toolbar-camera-btn"
-            onClick={onToggleCamera}
-            disabled={!hasPhysicalCamera}
-            title={t.enableCamera}
-            aria-label={t.enableCamera}
-            aria-pressed={!cameraEnabled}
-            className={`w-9 h-9 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-sm disabled:opacity-45 cursor-pointer ${
-              !cameraEnabled
-                ? 'bg-[#FEE2E2] text-[#DC2626] border-[#FCA5A5]'
-                : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
-            }`}
-          >
-            {cameraEnabled ? <Video className="w-4 h-4 shrink-0" /> : <VideoOff className="w-4 h-4 shrink-0" />}
-          </button>
+          {/* Slide-over Live Chat Toggle during Parcheesi */}
+          {isInParcheesi && (
+            <button
+              type="button"
+              data-testid="toolbar-chat-btn"
+              onClick={onToggleChat}
+              title={t.chatTitle}
+              aria-label={t.chatTitle}
+              aria-pressed={chatOpen}
+              className={`relative w-9 h-9 inline-flex items-center justify-center rounded-full border transition-all shrink-0 shadow-sm cursor-pointer ${
+                chatOpen
+                  ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
+                  : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
+              }`}
+            >
+              <MessageCircle className="w-4 h-4 shrink-0" />
+              {unreadChatCount > 0 && !chatOpen && (
+                <span
+                  data-testid="toolbar-chat-unread"
+                  className="absolute -top-1 -end-1 min-w-[18px] h-[18px] px-1 rounded-full bg-[#FF6B57] text-white text-[10px] font-extrabold flex items-center justify-center border-2 border-[#FAF7F2] tabular-nums"
+                >
+                  {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                </span>
+              )}
+            </button>
+          )}
 
-          {/* Settings Popover (Language + Sound SFX + Leave) */}
+          {/* Settings Popover (Language + Sound SFX + Leave Room with confirmation modal) */}
           <div ref={settingsRef} className="relative">
             <button
               type="button"
@@ -251,12 +243,12 @@ export function SessionToolbar({
                   data-testid="toolbar-leave-btn"
                   onClick={() => {
                     setSettingsOpen(false);
-                    onLeaveRoom();
+                    onRequestLeaveRoom();
                   }}
                   className="w-full min-h-[42px] inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold bg-[#FEF2F2] text-[#DC2626] border border-[#FECACA] hover:bg-[#FEE2E2] transition-colors cursor-pointer"
                 >
                   <LogOut className="w-4 h-4 shrink-0" />
-                  <span>{t.leave}</span>
+                  <span>{t.leaveRoom}</span>
                 </button>
               </div>
             )}

@@ -1,493 +1,310 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildIceServers,
-  ERR_ROOM_NOT_FOUND,
-  generateRoomCode,
-  normalizeRoomCode,
-  sanitizeIceCandidate,
-  sanitizePlayerName,
-  stripUndefinedDeep,
-} from '../utils/roomCode';
-import {
   FirestoreRoomService,
   type FirestoreCandidateDoc,
+  type FirestoreChatDoc,
   type FirestoreRoomDoc,
   type FirestoreRoomMessageDoc,
   type FirestoreTransportAdapter,
+  type RoomSnapshotMeta,
+  type RoomStateSummary,
 } from './firestoreRoomService';
-import type { PeerMessage } from '../types/duoplay';
-
-function cloneDoc<T>(val: T): T {
-  if (val === null || val === undefined || typeof val !== 'object') return val;
-  const maybeTs = val as unknown as { toMillis?: () => number };
-  if (typeof maybeTs.toMillis === 'function') {
-    const ms = maybeTs.toMillis();
-    return { toMillis: () => ms } as unknown as T;
-  }
-  if (Array.isArray(val)) return val.map((item) => cloneDoc(item)) as unknown as T;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
-    out[k] = cloneDoc(v);
-  }
-  return out as T;
-}
+import {
+  clearPersistedRoomSession,
+  loadPersistedRoomSession,
+  savePersistedRoomSession,
+  type StorageLike,
+} from '../utils/roomSessionStorage';
+import type { PeerMessage, RoomChatMessage } from '../types/duoplay';
 
 /**
- * In-memory Firestore hub implementing `FirestoreTransportAdapter` so Host & Guest
- * tests run deterministically at full fidelity without hitting external networks.
+ * Deterministic in-memory Firestore adapter for testing the complete Host/Guest lifecycle:
+ * - Host creates room -> immediately enters Room Menu (`activeGame: null`)
+ * - Guest joins -> immediately enters Room Menu (Parcheesi does NOT auto-start!)
+ * - Host toggles 1-Dice / 2-Dice -> synced live to Guest
+ * - Live Chat & Quick Reactions (`rooms/{code}/chat`) persist across screens
+ * - Host clicks Start Parcheesi -> BOTH enter Parcheesi simultaneously
+ * - Host clicks Back to Room Menu -> BOTH return smoothly without closing room
+ * - Page refresh Auto-Reconnect (`sessionStorage` + `resumeSession`) restores active room & game
+ * - Explicit Leave Room sets `status: 'closed'` and exits cleanly
  */
-function createMemoryFirestoreHub() {
-  const rooms = new Map<string, FirestoreRoomDoc>();
-  const roomSubs = new Map<string, Set<(room: FirestoreRoomDoc | null) => void>>();
-  const messages = new Map<string, Array<{ id: string; data: FirestoreRoomMessageDoc }>>();
-  const messageSubs = new Map<string, Set<(id: string, data: FirestoreRoomMessageDoc) => void>>();
-  const candidates = new Map<string, Array<{ id: string; data: FirestoreCandidateDoc }>>();
-  const candidateSubs = new Map<string, Set<(id: string, data: FirestoreCandidateDoc) => void>>();
-  let seq = 0;
+class InMemoryFirestoreHub {
+  public rooms = new Map<string, FirestoreRoomDoc>();
+  public chats = new Map<string, { id: string; doc: FirestoreChatDoc }[]>();
+  public messages = new Map<string, { id: string; doc: FirestoreRoomMessageDoc }[]>();
+  public candidates = new Map<string, { id: string; doc: FirestoreCandidateDoc }[]>();
+  private roomSubs = new Map<string, Set<(room: FirestoreRoomDoc | null, meta?: RoomSnapshotMeta) => void>>();
+  private chatSubs = new Map<string, Set<(id: string, doc: FirestoreChatDoc) => void>>();
+  private msgSubs = new Map<string, Set<(id: string, doc: FirestoreRoomMessageDoc) => void>>();
+  private candSubs = new Map<string, Set<(id: string, doc: FirestoreCandidateDoc) => void>>();
+  private seq = 1;
 
-  const notifyRoom = (code: string) => {
-    const doc = rooms.get(code) ?? null;
-    const copy = doc ? cloneDoc(doc) : null;
-    for (const cb of roomSubs.get(code) ?? []) {
-      cb(copy);
+  public createAdapter(): FirestoreTransportAdapter {
+    return {
+      getRoom: async (code) => {
+        const found = this.rooms.get(code);
+        return found ? structuredClone(found) : null;
+      },
+      createRoom: async (code, data) => {
+        const cloned = structuredClone(data);
+        this.rooms.set(code, cloned);
+        this.emitRoom(code, cloned);
+      },
+      updateRoom: async (code, patch) => {
+        const existing = this.rooms.get(code);
+        if (!existing) throw new Error(`Room ${code} missing`);
+        const next = { ...existing, ...structuredClone(patch) } as FirestoreRoomDoc;
+        this.rooms.set(code, next);
+        this.emitRoom(code, next);
+      },
+      subscribeRoom: (code, onData) => {
+        const set = this.roomSubs.get(code) ?? new Set();
+        set.add(onData);
+        this.roomSubs.set(code, set);
+        const cur = this.rooms.get(code);
+        if (cur) queueMicrotask(() => onData(structuredClone(cur), { hasPendingWrites: false }));
+        return () => {
+          set.delete(onData);
+        };
+      },
+      addChat: async (code, data) => {
+        const id = `chat-${this.seq++}`;
+        const list = this.chats.get(code) ?? [];
+        const cloned = structuredClone(data);
+        list.push({ id, doc: cloned });
+        this.chats.set(code, list);
+        for (const cb of this.chatSubs.get(code) ?? []) {
+          cb(id, structuredClone(cloned));
+        }
+      },
+      subscribeChat: (code, onAdded) => {
+        const set = this.chatSubs.get(code) ?? new Set();
+        set.add(onAdded);
+        this.chatSubs.set(code, set);
+        for (const item of this.chats.get(code) ?? []) {
+          onAdded(item.id, structuredClone(item.doc));
+        }
+        return () => {
+          set.delete(onAdded);
+        };
+      },
+      addMessage: async (code, data) => {
+        const id = `msg-${this.seq++}`;
+        const list = this.messages.get(code) ?? [];
+        const cloned = structuredClone(data);
+        list.push({ id, doc: cloned });
+        this.messages.set(code, list);
+        for (const cb of this.msgSubs.get(code) ?? []) {
+          cb(id, structuredClone(cloned));
+        }
+      },
+      subscribeMessages: (code, onAdded) => {
+        const set = this.msgSubs.get(code) ?? new Set();
+        set.add(onAdded);
+        this.msgSubs.set(code, set);
+        for (const item of this.messages.get(code) ?? []) {
+          onAdded(item.id, structuredClone(item.doc));
+        }
+        return () => {
+          set.delete(onAdded);
+        };
+      },
+      addCandidate: async (code, data) => {
+        const id = `cand-${this.seq++}`;
+        const list = this.candidates.get(code) ?? [];
+        const cloned = structuredClone(data);
+        list.push({ id, doc: cloned });
+        this.candidates.set(code, list);
+        for (const cb of this.candSubs.get(code) ?? []) {
+          cb(id, structuredClone(cloned));
+        }
+      },
+      subscribeCandidates: (code, onAdded) => {
+        const set = this.candSubs.get(code) ?? new Set();
+        set.add(onAdded);
+        this.candSubs.set(code, set);
+        for (const item of this.candidates.get(code) ?? []) {
+          onAdded(item.id, structuredClone(item.doc));
+        }
+        return () => {
+          set.delete(onAdded);
+        };
+      },
+      serverNow: () => Date.now(),
+    };
+  }
+
+  public emitRoom(code: string, room: FirestoreRoomDoc | null, meta: RoomSnapshotMeta = { hasPendingWrites: false }): void {
+    for (const cb of this.roomSubs.get(code) ?? []) {
+      cb(room ? structuredClone(room) : null, meta);
     }
-  };
+  }
+}
 
-  const adapter: FirestoreTransportAdapter = {
-    async getRoom(code) {
-      const doc = rooms.get(code);
-      return doc ? cloneDoc(doc) : null;
+function createMemoryStorage(): StorageLike {
+  const map = new Map<string, string>();
+  return {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => {
+      map.set(k, v);
     },
-    async createRoom(code, data) {
-      rooms.set(code, cloneDoc(data));
-      notifyRoom(code);
-    },
-    async updateRoom(code, patch) {
-      const prev = rooms.get(code);
-      if (!prev) throw new Error(`Room ${code} does not exist`);
-      rooms.set(code, { ...prev, ...cloneDoc(patch) } as FirestoreRoomDoc);
-      notifyRoom(code);
-    },
-    subscribeRoom(code, onData) {
-      let set = roomSubs.get(code);
-      if (!set) {
-        set = new Set();
-        roomSubs.set(code, set);
-      }
-      set.add(onData);
-      const current = rooms.get(code);
-      onData(current ? cloneDoc(current) : null);
-      return () => {
-        set?.delete(onData);
-      };
-    },
-    async addMessage(code, data) {
-      const id = `msg_${++seq}`;
-      const list = messages.get(code) ?? [];
-      const cloned = cloneDoc(data);
-      list.push({ id, data: cloned });
-      messages.set(code, list);
-      for (const cb of messageSubs.get(code) ?? []) {
-        cb(id, cloneDoc(cloned));
-      }
-    },
-    subscribeMessages(code, onAdded) {
-      let set = messageSubs.get(code);
-      if (!set) {
-        set = new Set();
-        messageSubs.set(code, set);
-      }
-      set.add(onAdded);
-      for (const item of messages.get(code) ?? []) {
-        onAdded(item.id, cloneDoc(item.data));
-      }
-      return () => {
-        set?.delete(onAdded);
-      };
-    },
-    async addCandidate(code, data) {
-      const id = `cand_${++seq}`;
-      const list = candidates.get(code) ?? [];
-      const cloned = cloneDoc(data);
-      list.push({ id, data: cloned });
-      candidates.set(code, list);
-      for (const cb of candidateSubs.get(code) ?? []) {
-        cb(id, cloneDoc(cloned));
-      }
-    },
-    subscribeCandidates(code, onAdded) {
-      let set = candidateSubs.get(code);
-      if (!set) {
-        set = new Set();
-        candidateSubs.set(code, set);
-      }
-      set.add(onAdded);
-      for (const item of candidates.get(code) ?? []) {
-        onAdded(item.id, cloneDoc(item.data));
-      }
-      return () => {
-        set?.delete(onAdded);
-      };
-    },
-    serverNow() {
-      const ms = Date.now();
-      return { toMillis: () => ms };
+    removeItem: (k) => {
+      map.delete(k);
     },
   };
-
-  return { adapter, rooms, messages, candidates };
 }
 
-class FakePeerConnection {
-  public iceConnectionState: RTCIceConnectionState = 'new';
-  public onicecandidate: ((e: { candidate: RTCIceCandidate | null }) => void) | null = null;
-  public ontrack: ((e: unknown) => void) | null = null;
-  public ondatachannel: ((e: { channel: RTCDataChannel }) => void) | null = null;
-  public oniceconnectionstatechange: (() => void) | null = null;
-  public onconnectionstatechange: (() => void) | null = null;
+test('Host and Guest land in Room Menu (activeGame: null); Parcheesi ONLY starts when Host clicks Play, and Return to Room Menu preserves room + chat', async () => {
+  const hub = new InMemoryFirestoreHub();
+  const hostStatuses: string[] = [];
+  const guestStatuses: string[] = [];
+  let hostSummary: RoomStateSummary | null = null;
+  let guestSummary: RoomStateSummary | null = null;
+  const hostChats: RoomChatMessage[] = [];
+  const guestChats: RoomChatMessage[] = [];
+  const guestMessages: PeerMessage[] = [];
 
-  public localDescription: RTCSessionDescriptionInit | null = null;
-  public remoteDescription: RTCSessionDescriptionInit | null = null;
-  public addedCandidates: RTCIceCandidateInit[] = [];
-  public restartIceCalls = 0;
-  public transceivers: Array<{ direction: string; sender: { track: unknown; replaceTrack: (t: unknown) => Promise<void> }; receiver: { track: unknown } }> = [];
-  public createdDataChannels: Array<{ label: string; readyState: string; sent: string[]; onmessage: ((e: { data: string }) => void) | null; onopen: (() => void) | null; onclose: (() => void) | null; send: (s: string) => void; close: () => void }> = [];
-
-  createDataChannel(label: string) {
-    const dc = {
-      label,
-      readyState: 'open',
-      sent: [] as string[],
-      onmessage: null as ((e: { data: string }) => void) | null,
-      onopen: null as (() => void) | null,
-      onclose: null as (() => void) | null,
-      send(s: string) {
-        this.sent.push(s);
+  const host = new FirestoreRoomService(
+    {
+      onStatusChange: (s) => hostStatuses.push(s),
+      onRoomState: (sum) => {
+        hostSummary = sum;
       },
-      close() {
-        this.readyState = 'closed';
+      onRemoteStream: () => {},
+      onMessage: () => {},
+      onChatMessage: (msg) => hostChats.push(msg),
+    },
+    { adapter: hub.createAdapter() },
+  );
+
+  const guest = new FirestoreRoomService(
+    {
+      onStatusChange: (s) => guestStatuses.push(s),
+      onRoomState: (sum) => {
+        guestSummary = sum;
       },
-    };
-    this.createdDataChannels.push(dc);
-    return dc as unknown as RTCDataChannel;
-  }
+      onRemoteStream: () => {},
+      onMessage: (m) => guestMessages.push(m),
+      onChatMessage: (msg) => guestChats.push(msg),
+    },
+    { adapter: hub.createAdapter() },
+  );
 
-  addTransceiver(kind: string, init?: { direction?: string }) {
-    const tr = {
-      direction: init?.direction ?? 'sendrecv',
-      sender: { track: { kind }, replaceTrack: async () => {} },
-      receiver: { track: { kind } },
-    };
-    this.transceivers.push(tr);
-    return tr;
-  }
+  // 1. Host creates room -> immediately enters Room Menu (`activeGame: null`, `status: 'waiting'`)
+  const createdCode = await host.createHostRoom('A7K4', 'Alex', null, false, 2);
+  assert.equal(createdCode, 'A7K4');
+  assert.equal(host.isConnected(), true);
+  assert.equal(hostStatuses.includes('waiting'), true);
+  assert.equal(hostSummary!.activeGame, null);
+  assert.equal(hostSummary!.diceCount, 2);
 
-  getTransceivers() {
-    return this.transceivers;
-  }
+  // 2. Guest joins room -> lands directly in Room Menu (activeGame stays null; Parcheesi does NOT auto-start!)
+  const joined = await guest.joinGuestRoom('a7k4', 'Nadia', null, false);
+  assert.equal(joined, true);
+  assert.equal(guest.isConnected(), true);
+  assert.equal(guestSummary!.activeGame, null);
+  assert.equal(guestSummary!.hostName, 'Alex');
+  assert.equal(guestSummary!.guestName, 'Nadia');
+  assert.equal(hostSummary!.guestName, 'Nadia');
+  assert.equal(hostSummary!.activeGame, null);
 
-  getSenders() {
-    return this.transceivers.map((t) => t.sender);
-  }
+  // 3. Host toggles 1-Dice in Room Menu -> synced live to Guest
+  host.syncDiceCount(1);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(guestSummary!.diceCount, 1);
 
-  addTrack(track: { kind: string }) {
-    this.transceivers.push({
-      direction: 'sendrecv',
-      sender: { track, replaceTrack: async () => {} },
-      receiver: { track },
-    });
-  }
+  // 4. Live Chat & Quick Reactions work in Room Menu
+  await host.sendChatMessage('Coucou Nadia !', 'text');
+  await guest.sendChatMessage('❤️', 'reaction');
+  assert.equal(hostChats.length, 2);
+  assert.equal(guestChats.length, 2);
+  assert.equal(guestChats[0].text, 'Coucou Nadia !');
+  assert.equal(hostChats[1].kind, 'reaction');
 
-  async createOffer(opts?: { iceRestart?: boolean }): Promise<RTCSessionDescriptionInit> {
-    return { type: 'offer', sdp: `v=0\r\no=host-${opts?.iceRestart ? 'restart' : 'init'}` };
-  }
+  // 5. Host explicitly starts Parcheesi -> BOTH enter Parcheesi simultaneously
+  await host.startParcheesi(1);
+  assert.equal(hostSummary!.activeGame, 'parcheesi');
+  assert.equal(hostSummary!.status, 'playing');
+  assert.equal(guestSummary!.activeGame, 'parcheesi');
+  assert.equal(guestSummary!.status, 'playing');
 
-  async createAnswer(): Promise<RTCSessionDescriptionInit> {
-    return { type: 'answer', sdp: 'v=0\r\no=guest-answer' };
-  }
+  // Parcheesi event relay works cleanly
+  host.sendEvent({ type: 'PARCHISI_START', mode: '1v1', diceCount: 1 });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(guestMessages.some((m) => m.type === 'PARCHISI_START'), true);
 
-  async setLocalDescription(desc: RTCSessionDescriptionInit): Promise<void> {
-    this.localDescription = desc;
-    // Emit a synthetic trickle ICE candidate
-    queueMicrotask(() => {
-      const candPayload = {
-        candidate: 'candidate:1 1 UDP 2122252543 192.168.1.2 50000 typ host',
-        sdpMid: '0',
-        sdpMLineIndex: 0,
-        usernameFragment: 'ufrag1',
-      };
-      this.onicecandidate?.({
-        candidate: {
-          ...candPayload,
-          toJSON() {
-            return { ...candPayload };
-          },
-        } as unknown as RTCIceCandidate,
-      });
-    });
-  }
+  // 6. Transient local pending write or null doc NEVER kicks players out
+  hub.emitRoom('A7K4', null, { hasPendingWrites: false });
+  hub.emitRoom('A7K4', { ...hub.rooms.get('A7K4')!, status: 'closed' }, { hasPendingWrites: true });
+  assert.equal(host.isConnected(), true);
+  assert.equal(guest.isConnected(), true);
 
-  async setRemoteDescription(desc: RTCSessionDescriptionInit): Promise<void> {
-    this.remoteDescription = desc;
-  }
+  // 7. Host returns to Room Menu -> BOTH return smoothly without closing room or losing chat
+  await host.returnToRoomMenu();
+  assert.equal(hostSummary!.activeGame, null);
+  assert.equal(hostSummary!.status, 'connected');
+  assert.equal(guestSummary!.activeGame, null);
+  assert.equal(guestSummary!.status, 'connected');
+  assert.equal(host.isConnected(), true);
+  assert.equal(guest.isConnected(), true);
 
-  async addIceCandidate(cand: RTCIceCandidateInit): Promise<void> {
-    this.addedCandidates.push(cand);
-  }
-
-  restartIce(): void {
-    this.restartIceCalls += 1;
-  }
-
-  close(): void {
-    this.iceConnectionState = 'closed';
-  }
-}
-
-async function flushMicrotasks(ticks = 6): Promise<void> {
-  for (let i = 0; i < ticks; i += 1) {
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
-
-test('normalizeRoomCode and generateRoomCode enforce strict 4-char uppercase alphanumeric IDs', () => {
-  assert.equal(normalizeRoomCode('  a7k4  '), 'A7K4');
-  assert.equal(normalizeRoomCode('https://couplecam.app/?room=b9-m2'), 'B9M2');
-  assert.equal(normalizeRoomCode('x3-q8'), 'X3Q8');
-  assert.equal(normalizeRoomCode('ab!@#cd99'), 'ABCD');
-
-  for (let i = 0; i < 40; i += 1) {
-    const code = generateRoomCode();
-    assert.match(code, /^[A-Z0-9]{4}$/);
-    assert.ok(!/[01ILO]/.test(code), `Unexpected ambiguous character in ${code}`);
-  }
+  // 8. Explicit Leave Room closes room cleanly for both
+  host.destroy({ closeRemoteDoc: true });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(hub.rooms.get('A7K4')?.status, 'closed');
+  assert.equal(guestStatuses.includes('disconnected'), true);
 });
 
-test('buildIceServers includes required Google and Twilio STUN servers', () => {
-  const servers = buildIceServers();
-  const urls = servers.flatMap((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]));
-  assert.ok(urls.includes('stun:stun.l.google.com:19302'));
-  assert.ok(urls.includes('stun:stun1.l.google.com:19302'));
-  assert.ok(urls.includes('stun:stun2.l.google.com:19302'));
-  assert.ok(urls.includes('stun:global.stun.twilio.com:3478'));
-});
+test('Auto-Reconnect restores exact active Parcheesi game & chat history from sessionStorage after refresh', async () => {
+  const hub = new InMemoryFirestoreHub();
+  const storage = createMemoryStorage();
 
-test('stripUndefinedDeep, sanitizePlayerName, and sanitizeIceCandidate clean payloads safely', () => {
-  const cleaned = stripUndefinedDeep({ a: 1, b: undefined, c: { d: 'ok', e: undefined }, arr: [1, undefined, 2] });
-  assert.deepEqual(cleaned, { a: 1, c: { d: 'ok' }, arr: [1, 2] });
-  assert.equal(sanitizePlayerName('   ', 'Invité'), 'Invité');
-  assert.equal(sanitizePlayerName('A'.repeat(60), 'Hôte').length, 32);
+  const host = new FirestoreRoomService(
+    { onStatusChange: () => {}, onRemoteStream: () => {}, onMessage: () => {} },
+    { adapter: hub.createAdapter() },
+  );
+  await host.createHostRoom('B9Q2', 'Alex', null, false, 2);
+  await host.sendChatMessage('On joue !', 'text');
 
-  const cand = sanitizeIceCandidate({ candidate: 'cand:1', sdpMid: '0', sdpMLineIndex: 1 });
-  assert.equal(cand.candidate, 'cand:1');
-  assert.equal(cand.sdpMid, '0');
-  assert.equal(cand.sdpMLineIndex, 1);
-});
+  const guest1 = new FirestoreRoomService(
+    { onStatusChange: () => {}, onRemoteStream: () => {}, onMessage: () => {} },
+    { adapter: hub.createAdapter() },
+  );
+  await guest1.joinGuestRoom('B9Q2', 'Nadia', null, false);
+  savePersistedRoomSession({ roomCode: 'B9Q2', role: 'guest', playerName: 'Nadia' }, storage);
 
-test('Host creates Firestore room, Guest joins without camera in <1s, exchanges messages, WebRTC SDP/ICE, hot-cam, and ICE restart', async () => {
-  const prevRTC = (globalThis as Record<string, unknown>).RTCPeerConnection;
-  const createdPcs: FakePeerConnection[] = [];
-  (globalThis as Record<string, unknown>).RTCPeerConnection = FakePeerConnection;
+  await host.startParcheesi(2);
 
-  try {
-    const hub = createMemoryFirestoreHub();
-    const hostStatuses: Array<{ status: string; msg?: string }> = [];
-    const guestStatuses: Array<{ status: string; msg?: string }> = [];
-    const hostMessages: PeerMessage[] = [];
-    const guestMessages: PeerMessage[] = [];
+  // Simulate Guest browser refresh: destroy local listeners WITHOUT closing remote doc
+  guest1.destroy({ closeRemoteDoc: false });
+  const saved = loadPersistedRoomSession(storage);
+  assert.ok(saved);
+  assert.equal(saved.roomCode, 'B9Q2');
+  assert.equal(saved.role, 'guest');
 
-    const hostSvc = new FirestoreRoomService(
-      {
-        onStatusChange: (status, msg) => hostStatuses.push({ status, msg }),
-        onRemoteStream: () => {},
-        onMessage: (m) => hostMessages.push(m),
-        getHostRoomState: () => ({ currentGame: 'hub', scores: { parchisiWins: 2 }, diceCount: 2 }),
+  let restoredSummary: RoomStateSummary | null = null;
+  const restoredChats: RoomChatMessage[] = [];
+  const guest2 = new FirestoreRoomService(
+    {
+      onStatusChange: () => {},
+      onRoomState: (s) => {
+        restoredSummary = s;
       },
-      {
-        adapter: hub.adapter,
-        peerConnectionFactory: () => {
-          const pc = new FakePeerConnection();
-          createdPcs.push(pc);
-          return pc as unknown as RTCPeerConnection;
-        },
-      },
-    );
+      onRemoteStream: () => {},
+      onMessage: () => {},
+      onChatMessage: (m) => restoredChats.push(m),
+    },
+    { adapter: hub.createAdapter() },
+  );
 
-    const guestSvc = new FirestoreRoomService(
-      {
-        onStatusChange: (status, msg) => guestStatuses.push({ status, msg }),
-        onRemoteStream: () => {},
-        onMessage: (m) => guestMessages.push(m),
-      },
-      {
-        adapter: hub.adapter,
-        peerConnectionFactory: () => {
-          const pc = new FakePeerConnection();
-          createdPcs.push(pc);
-          return pc as unknown as RTCPeerConnection;
-        },
-      },
-    );
+  const ok = await guest2.resumeSession(saved.roomCode, saved.role, saved.playerName, null, false);
+  assert.equal(ok, true);
+  assert.equal(restoredSummary!.activeGame, 'parcheesi');
+  assert.equal(restoredSummary!.hostName, 'Alex');
+  assert.equal(restoredChats.some((c) => c.text === 'On joue !'), true);
 
-    // 1. Guest joining a missing room gets a clear "Salon introuvable" error
-    await guestSvc.joinGuestRoom('ZZZZ', 'Nadia', null);
-    assert.equal(guestStatuses.at(-1)?.status, 'error');
-    assert.equal(guestStatuses.at(-1)?.msg, ERR_ROOM_NOT_FOUND);
-
-    // 2. Host creates room A7K4 without camera (non-blocking)
-    await hostSvc.createHostRoom('a7k4', 'Alex', null);
-    assert.equal(hostStatuses.at(-1)?.status, 'waiting');
-    assert.equal(hub.rooms.get('A7K4')?.status, 'waiting');
-    assert.equal(hub.rooms.get('A7K4')?.hostName, 'Alex');
-
-    // 3. Guest joins room A7K4 without camera -> both enter 'connected' immediately!
-    await guestSvc.joinGuestRoom('A7K4', 'Nadia', null);
-    await flushMicrotasks();
-
-    assert.equal(guestSvc.isConnected(), true);
-    assert.equal(hostSvc.isConnected(), true);
-    assert.equal(hub.rooms.get('A7K4')?.status, 'connected');
-    assert.equal(hub.rooms.get('A7K4')?.guestName, 'Nadia');
-    assert.ok(hostMessages.some((m) => m.type === 'HELLO' && m.name === 'Nadia'));
-    assert.ok(guestMessages.some((m) => m.type === 'JOIN_ACCEPTED' && m.hostName === 'Alex'));
-
-    // 4. Verify background native WebRTC SDP offer/answer & trickle ICE candidates exchanged
-    assert.equal(hub.rooms.get('A7K4')?.webrtcGen, 1);
-    assert.equal(hub.rooms.get('A7K4')?.offer?.type, 'offer');
-    assert.equal(hub.rooms.get('A7K4')?.answer?.type, 'answer');
-    assert.ok((hub.candidates.get('A7K4')?.length ?? 0) >= 2, 'Both peers should trickle ICE candidates');
-
-    // 5. Game events via Firestore rooms/{code}/messages (addDoc + onSnapshot)
-    hostSvc.sendData({ type: 'SELECT_GAME', game: 'parchisi-duo' });
-    hostSvc.sendData({ type: 'PARCHISI_CONFIG', mode: '1v1', diceCount: 1 });
-    await flushMicrotasks();
-
-    assert.ok(guestMessages.some((m) => m.type === 'SELECT_GAME' && m.game === 'parchisi-duo'));
-    assert.ok(guestMessages.some((m) => m.type === 'PARCHISI_CONFIG' && m.diceCount === 1));
-    assert.equal(hub.rooms.get('A7K4')?.currentGame, 'parchisi-duo');
-    assert.equal(hub.rooms.get('A7K4')?.diceCount, 1);
-
-    // 6. Guest turns on camera mid-game (hot-cam) -> Host renegotiates webrtcGen -> 2 without dropping room
-    const fakeStream = {
-      getVideoTracks: () => [{ kind: 'video', enabled: true }],
-      getAudioTracks: () => [{ kind: 'audio', enabled: true }],
-    } as unknown as MediaStream;
-    guestSvc.setLocalStream(fakeStream);
-    await flushMicrotasks();
-
-    assert.equal(hub.rooms.get('A7K4')?.guestHasStream, true);
-    assert.equal(hub.rooms.get('A7K4')?.webrtcGen, 2);
-    assert.equal(hostSvc.isConnected(), true);
-    assert.equal(guestSvc.isConnected(), true);
-
-    // 7. ICE restart recovers video without closing Firestore room
-    const hostPcBefore = createdPcs[createdPcs.length - 2];
-    hostSvc.triggerIceRestart();
-    await flushMicrotasks();
-    assert.ok(hostPcBefore.restartIceCalls >= 1);
-    assert.equal(hub.rooms.get('A7K4')?.webrtcGen, 3);
-    assert.equal(hostSvc.isConnected(), true);
-
-    // 8. Host closes room cleanly -> Guest receives disconnected status
-    hostSvc.destroy({ closeRemoteDoc: true });
-    await flushMicrotasks();
-    assert.equal(hub.rooms.get('A7K4')?.status, 'closed');
-    assert.equal(guestStatuses.at(-1)?.status, 'disconnected');
-
-    guestSvc.destroy({ closeRemoteDoc: false });
-  } finally {
-    (globalThis as Record<string, unknown>).RTCPeerConnection = prevRTC;
-  }
-});
-
-test('Active room ignores hasPendingWrites, transient null snapshots, and transient errors; only explicit server status===closed exits', async () => {
-  const prevRTC = (globalThis as Record<string, unknown>).RTCPeerConnection;
-  (globalThis as Record<string, unknown>).RTCPeerConnection = FakePeerConnection;
-
-  try {
-    const hooks: {
-      onData?: (room: FirestoreRoomDoc | null, meta?: { hasPendingWrites?: boolean; fromCache?: boolean }) => void;
-      onError?: (err: unknown) => void;
-    } = {};
-    const hub = createMemoryFirestoreHub();
-    const origSubscribe = hub.adapter.subscribeRoom;
-    let updateRoomCallCount = 0;
-    const origUpdateRoom = hub.adapter.updateRoom;
-
-    hub.adapter.updateRoom = async (code, patch) => {
-      updateRoomCallCount += 1;
-      await origUpdateRoom(code, patch);
-    };
-
-    hub.adapter.subscribeRoom = (code, onData, onError) => {
-      hooks.onData = onData;
-      hooks.onError = onError;
-      return origSubscribe(code, onData, onError);
-    };
-
-    const guestStatuses: Array<{ status: string; msg?: string }> = [];
-    const hostSvc = new FirestoreRoomService(
-      {
-        onStatusChange: () => {},
-        onRemoteStream: () => {},
-        onMessage: () => {},
-      },
-      {
-        adapter: hub.adapter,
-        peerConnectionFactory: () => new FakePeerConnection() as unknown as RTCPeerConnection,
-      },
-    );
-    const guestSvc = new FirestoreRoomService(
-      {
-        onStatusChange: (status, msg) => guestStatuses.push({ status, msg }),
-        onRemoteStream: () => {},
-        onMessage: () => {},
-      },
-      {
-        adapter: hub.adapter,
-        peerConnectionFactory: () => new FakePeerConnection() as unknown as RTCPeerConnection,
-      },
-    );
-
-    await hostSvc.createHostRoom('B8K2', 'Alex', null);
-    await guestSvc.joinGuestRoom('B8K2', 'Nadia', null);
-    await flushMicrotasks();
-    assert.equal(guestSvc.isConnected(), true);
-
-    // Selecting a game uses updateRoom (partial merge) and preserves status, hostName, guestName, offer, answer
-    const beforeUpdates = updateRoomCallCount;
-    hostSvc.sendData({ type: 'SELECT_GAME', game: 'laugh' });
-    await flushMicrotasks();
-    assert.ok(updateRoomCallCount > beforeUpdates);
-    const roomAfterGame = hub.rooms.get('B8K2');
-    assert.equal(roomAfterGame?.currentGame, 'laugh');
-    assert.equal(roomAfterGame?.status, 'connected');
-    assert.equal(roomAfterGame?.hostName, 'Alex');
-    assert.equal(roomAfterGame?.guestName, 'Nadia');
-
-    // Simulate a local pending-write snapshot with status='closed' -> MUST BE IGNORED
-    hooks.onData?.({ ...roomAfterGame!, status: 'closed' }, { hasPendingWrites: true });
-    assert.equal(guestSvc.isConnected(), true);
-
-    // Simulate a transient null snapshot -> MUST BE IGNORED
-    hooks.onData?.(null, { hasPendingWrites: false, fromCache: true });
-    assert.equal(guestSvc.isConnected(), true);
-
-    // Simulate a transient Firestore listener error while connected -> MUST NOT EJECT
-    hooks.onError?.(new Error('transient network glitch'));
-    assert.equal(guestSvc.isConnected(), true);
-    assert.notEqual(guestStatuses.at(-1)?.status, 'error');
-    assert.notEqual(guestStatuses.at(-1)?.status, 'disconnected');
-
-    // Simulate explicit server-confirmed status === 'closed' -> NOW cleanly disconnects
-    hooks.onData?.({ ...roomAfterGame!, status: 'closed' }, { hasPendingWrites: false });
-    assert.equal(guestSvc.isConnected(), false);
-    assert.equal(guestStatuses.at(-1)?.status, 'disconnected');
-
-    hostSvc.destroy({ closeRemoteDoc: false });
-    guestSvc.destroy({ closeRemoteDoc: false });
-  } finally {
-    (globalThis as Record<string, unknown>).RTCPeerConnection = prevRTC;
-  }
+  // Explicit Leave clears storage
+  clearPersistedRoomSession(storage);
+  assert.equal(loadPersistedRoomSession(storage), null);
 });

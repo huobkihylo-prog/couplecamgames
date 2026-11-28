@@ -3,7 +3,11 @@ import { AlertTriangle, ArrowLeft } from 'lucide-react';
 
 interface GameErrorBoundaryProps {
   resetKey: string;
-  onReturnToHub: () => void;
+  canReturnToRoomMenu: boolean;
+  onReturnToRoomMenu: () => void;
+  title?: string;
+  subtitle?: string;
+  returnLabel?: string;
   children: ReactNode;
 }
 
@@ -13,9 +17,8 @@ interface GameErrorBoundaryState {
 }
 
 /**
- * Isolates runtime errors inside any active mini-game so both players ALWAYS stay
- * connected to their Cloud Firestore room with cameras active, and can inspect the
- * exact error message and return safely to the Hub.
+ * Isolates runtime errors inside Parcheesi so both players ALWAYS stay connected to
+ * their Cloud Firestore room, voice call, and live chat, and can return safely to the Room Menu.
  */
 export class GameErrorBoundary extends Component<GameErrorBoundaryProps, GameErrorBoundaryState> {
   public state: GameErrorBoundaryState = {
@@ -31,7 +34,7 @@ export class GameErrorBoundary extends Component<GameErrorBoundaryProps, GameErr
   }
 
   public componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error('[CoupleCam GameErrorBoundary] Game crashed safely inside room:', error, info.componentStack);
+    console.error('[Parcheesi GameErrorBoundary] Caught runtime error safely inside room:', error, info.componentStack);
   }
 
   public componentDidUpdate(prevProps: GameErrorBoundaryProps): void {
@@ -43,9 +46,9 @@ export class GameErrorBoundary extends Component<GameErrorBoundaryProps, GameErr
   private handleReturn = (): void => {
     this.setState({ hasError: false, error: null });
     try {
-      this.props.onReturnToHub();
+      this.props.onReturnToRoomMenu();
     } catch (err) {
-      console.error('[CoupleCam GameErrorBoundary] Return to Hub failed:', err);
+      console.error('[Parcheesi GameErrorBoundary] Return to Room Menu failed:', err);
     }
   };
 
@@ -54,7 +57,7 @@ export class GameErrorBoundary extends Component<GameErrorBoundaryProps, GameErr
       return this.props.children;
     }
 
-    const message = this.state.error?.message || 'Erreur inattendue dans le mini-jeu.';
+    const message = this.state.error?.message || 'Erreur inattendue dans Parcheesi.';
 
     return (
       <div
@@ -69,10 +72,10 @@ export class GameErrorBoundary extends Component<GameErrorBoundaryProps, GameErr
 
           <div className="space-y-1">
             <h2 className="text-lg font-extrabold text-[#1F242D]">
-              Oups, ce jeu a rencontré une erreur
+              {this.props.title ?? 'Oups, Parcheesi a rencontré une erreur'}
             </h2>
             <p className="text-xs sm:text-sm text-[#6B7280] leading-relaxed">
-              Le salon et vos caméras restent connectés.
+              {this.props.subtitle ?? 'Ton salon, ton micro et le chat restent 100 % connectés.'}
             </p>
           </div>
 
@@ -85,15 +88,17 @@ export class GameErrorBoundary extends Component<GameErrorBoundaryProps, GameErr
             </p>
           </div>
 
-          <button
-            type="button"
-            data-testid="game-error-return-hub"
-            onClick={this.handleReturn}
-            className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-extrabold bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-[0_6px_18px_-4px_rgba(255,107,87,0.45)] transition-all cursor-pointer"
-          >
-            <ArrowLeft className="w-4 h-4 shrink-0 rtl:rotate-180" />
-            <span>← Retour au Hub</span>
-          </button>
+          {this.props.canReturnToRoomMenu && (
+            <button
+              type="button"
+              data-testid="game-error-return-menu"
+              onClick={this.handleReturn}
+              className="w-full min-h-[48px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-extrabold bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-[0_6px_18px_-4px_rgba(255,107,87,0.45)] transition-all cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4 shrink-0 rtl:rotate-180" />
+              <span>{this.props.returnLabel ?? 'Menu du salon'}</span>
+            </button>
+          )}
         </div>
       </div>
     );

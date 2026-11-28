@@ -24,6 +24,10 @@ service cloud.firestore {
       return code is string && code.size() == 4 && code.matches('^[A-Z0-9]{4}$');
     }
 
+    function isValidActiveGame(val) {
+      return val == null || (val is string && val == 'parcheesi');
+    }
+
     function isValidSdp(sdpObj, expectedType) {
       return sdpObj == null || (
         sdpObj is map &&
@@ -43,12 +47,14 @@ service cloud.firestore {
           'hostName',
           'guestName',
           'status',
-          'currentGame',
+          'activeGame',
           'scores',
           'diceCount',
           'webrtcGen',
-          'hostHasStream',
-          'guestHasStream',
+          'hostHasAudio',
+          'guestHasAudio',
+          'hostMicMuted',
+          'guestMicMuted',
           'createdAt',
           'updatedAt'
         ]) &&
@@ -56,14 +62,16 @@ service cloud.firestore {
           'hostName',
           'guestName',
           'status',
-          'currentGame',
+          'activeGame',
           'scores',
           'diceCount',
           'offer',
           'answer',
           'webrtcGen',
-          'hostHasStream',
-          'guestHasStream',
+          'hostHasAudio',
+          'guestHasAudio',
+          'hostMicMuted',
+          'guestMicMuted',
           'createdAt',
           'updatedAt'
         ]) &&
@@ -73,24 +81,40 @@ service cloud.firestore {
         data.guestName is string &&
         data.guestName.size() <= 32 &&
         data.status is string &&
-        data.status in ['waiting', 'connected', 'closed'] &&
-        data.currentGame is string &&
-        data.currentGame.size() >= 1 &&
-        data.currentGame.size() <= 32 &&
-        data.currentGame.matches('^[a-z0-9\\-]+$') &&
+        data.status in ['waiting', 'connected', 'playing', 'closed'] &&
+        isValidActiveGame(data.activeGame) &&
         data.scores is map &&
-        data.scores.size() <= 24 &&
+        data.scores.size() <= 16 &&
         data.diceCount is int &&
         data.diceCount in [1, 2] &&
         data.webrtcGen is int &&
         data.webrtcGen >= 0 &&
         data.webrtcGen <= 1000 &&
-        data.hostHasStream is bool &&
-        data.guestHasStream is bool &&
+        data.hostHasAudio is bool &&
+        data.guestHasAudio is bool &&
+        data.hostMicMuted is bool &&
+        data.guestMicMuted is bool &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp &&
         (!('offer' in data) || isValidSdp(data.offer, 'offer')) &&
         (!('answer' in data) || isValidSdp(data.answer, 'answer'));
+    }
+
+    function isValidChatMessage(data) {
+      return data is map &&
+        data.keys().hasAll(['sender', 'senderName', 'text', 'kind', 'createdAt']) &&
+        data.keys().hasOnly(['sender', 'senderName', 'text', 'kind', 'createdAt']) &&
+        data.sender is string &&
+        data.sender in ['host', 'guest'] &&
+        data.senderName is string &&
+        data.senderName.size() >= 1 &&
+        data.senderName.size() <= 32 &&
+        data.text is string &&
+        data.text.size() >= 1 &&
+        data.text.size() <= 280 &&
+        data.kind is string &&
+        data.kind in ['text', 'reaction'] &&
+        data.createdAt is timestamp;
     }
 
     function isValidMessage(data) {
@@ -136,14 +160,15 @@ service cloud.firestore {
 
     // Collection: /rooms/{code}
     match /rooms/{code} {
-      // Capability-gated single-document read only; listing rooms is strictly forbidden to prevent scraping
+      // Capability-gated single-document read only; listing rooms is strictly forbidden
       allow get: if isValidRoomCode(code);
       allow list: if false;
 
-      // Host creates a new room in 'waiting' state with strict server timestamps
+      // Host creates a new room in 'waiting' Room Menu state (activeGame MUST be null)
       allow create: if isValidRoomCode(code) &&
         isValidRoom(incoming()) &&
         incoming().status == 'waiting' &&
+        incoming().activeGame == null &&
         incoming().guestName == '' &&
         incoming().webrtcGen == 0 &&
         incoming().createdAt == request.time &&
@@ -151,53 +176,105 @@ service cloud.firestore {
         (!('offer' in incoming()) || incoming().offer == null) &&
         (!('answer' in incoming()) || incoming().answer == null);
 
-      // Action-based updates with strict validation blueprint & terminal state locking
+      // Action-based partial updates with strict validation blueprint & terminal state locking
       allow update: if isValidRoomCode(code) &&
         isValidRoom(incoming()) &&
         existing().status != 'closed' &&
         incoming().createdAt == existing().createdAt &&
         incoming().hostName == existing().hostName &&
         incoming().updatedAt == request.time && (
-          // Action 1: Guest joins the room instantaneously (sets guestName + status='connected')
+          // Action 1: Guest joins the room into the Room Menu (or rejoins active game) without mutating activeGame
           (
-            incoming().status == 'connected' &&
+            incoming().status == (existing().activeGame == 'parcheesi' ? 'playing' : 'connected') &&
+            incoming().activeGame == existing().activeGame &&
             incoming().guestName.size() >= 1 &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['guestName', 'status', 'guestHasStream', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'guestName',
+              'status',
+              'guestHasAudio',
+              'guestMicMuted',
+              'updatedAt'
+            ])
           ) ||
-          // Action 2: Sync currentGame, scores, or Parcheesi diceCount
+          // Action 2: Host launches Parcheesi, returns to Room Menu, toggles diceCount, or updates scores
           (
-            incoming().status == existing().status &&
             incoming().guestName == existing().guestName &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['currentGame', 'scores', 'diceCount', 'updatedAt'])
+            (
+              (incoming().activeGame == null && incoming().status in ['waiting', 'connected']) ||
+              (incoming().activeGame == 'parcheesi' && incoming().status == 'playing')
+            ) &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'activeGame',
+              'status',
+              'scores',
+              'diceCount',
+              'updatedAt'
+            ])
           ) ||
-          // Action 3: Host publishes or renegotiates WebRTC offer (bumps webrtcGen and clears stale answer)
+          // Action 3: Host publishes or renegotiates audio-only WebRTC offer
           (
-            incoming().status == 'connected' &&
+            incoming().status in ['connected', 'playing'] &&
             incoming().guestName == existing().guestName &&
+            incoming().activeGame == existing().activeGame &&
             incoming().webrtcGen >= existing().webrtcGen &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['offer', 'answer', 'webrtcGen', 'hostHasStream', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'offer',
+              'answer',
+              'webrtcGen',
+              'hostHasAudio',
+              'hostMicMuted',
+              'updatedAt'
+            ])
           ) ||
-          // Action 4: Guest publishes WebRTC answer
+          // Action 4: Guest publishes audio-only WebRTC answer
           (
-            incoming().status == 'connected' &&
+            incoming().status in ['connected', 'playing'] &&
             incoming().guestName == existing().guestName &&
+            incoming().activeGame == existing().activeGame &&
             incoming().webrtcGen == existing().webrtcGen &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['answer', 'guestHasStream', 'updatedAt'])
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'answer',
+              'guestHasAudio',
+              'guestMicMuted',
+              'updatedAt'
+            ])
           ) ||
-          // Action 5: Update camera/stream availability indicator
+          // Action 5: Update microphone / audio availability indicators
           (
             incoming().status == existing().status &&
             incoming().guestName == existing().guestName &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['hostHasStream', 'guestHasStream', 'updatedAt'])
+            incoming().activeGame == existing().activeGame &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'hostHasAudio',
+              'guestHasAudio',
+              'hostMicMuted',
+              'guestMicMuted',
+              'updatedAt'
+            ])
           ) ||
-          // Action 6: Close room cleanly (terminal state)
+          // Action 6: Close room cleanly (terminal state) on explicit Leave Room
           (
             incoming().status == 'closed' &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+            incoming().activeGame == null &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'activeGame', 'updatedAt'])
           )
         );
 
       allow delete: if false;
+
+      // Subcollection: /rooms/{code}/chat/{chatId}
+      match /chat/{chatId} {
+        allow get: if isValidRoomCode(code) && isValidId(chatId);
+        allow list: if isValidRoomCode(code);
+
+        allow create: if isValidRoomCode(code) &&
+          isValidId(chatId) &&
+          isValidChatMessage(incoming()) &&
+          incoming().createdAt == request.time &&
+          roomExistsAndActive(code);
+
+        allow update, delete: if false;
+      }
 
       // Subcollection: /rooms/{code}/messages/{messageId}
       match /messages/{messageId} {

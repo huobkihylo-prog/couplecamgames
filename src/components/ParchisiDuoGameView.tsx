@@ -1,18 +1,12 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MutableRefObject,
-} from 'react';
-import {
-  Camera,
+  Bot,
   Crown,
-  Hand,
+  MessageCircle,
   MessageSquare,
   MicOff,
   RotateCcw,
+  SlidersHorizontal,
   Smile,
   Users,
   Volume2,
@@ -20,31 +14,26 @@ import {
 } from 'lucide-react';
 import type {
   ConnectionMode,
-  FaceMetrics,
-  HandMetrics,
   ParchisiColor,
   ParchisiDiceCount,
   ParchisiMode,
   ParchisiMoveOption,
   ParchisiState,
   PeerMessage,
-  TrackerStatus,
 } from '../types/duoplay';
 import { COLOR_PALETTE, PARCHISI_HOME_PROGRESS } from '../game/parchisiBoard';
 import {
   applyParchisiMove,
   chooseAiParchisiMove,
-  createHandShakeState,
   createInitialParchisiState,
   getLegalParchisiMoves,
   PARCHISI_TURN_SECONDS,
   passParchisiTurnOrBonus,
   rollParchisiDice,
   startParchisiMatch,
-  stepHandShakeDetector,
 } from '../game/parchisiLogic';
+import { useI18n } from '../i18n/LanguageContext';
 import { soundFx } from '../utils/soundFx';
-import { AvatarCanvas } from './AvatarCanvas';
 import { ParchisiBoardSvg, type FloatingReactionItem } from './ParchisiBoardSvg';
 import { PARCHISI_DICE_ROLL_MS, ParchisiDice3D } from './ParchisiDice3D';
 
@@ -52,22 +41,18 @@ interface ParchisiDuoGameViewProps {
   localName: string;
   partnerName: string;
   connectionMode: ConnectionMode;
-  localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
-  cameraEnabled: boolean;
+  initialDiceCount: ParchisiDiceCount;
+  onSyncDiceCount: (count: ParchisiDiceCount) => void;
   micMuted: boolean;
-  handTrackerStatus: TrackerStatus;
-  handDiceEnabled: boolean;
-  onToggleHandDice: (enabled: boolean) => void;
-  localFaceMetricsRef: MutableRefObject<FaceMetrics>;
-  partnerFaceMetricsRef: MutableRefObject<FaceMetrics>;
-  localHandMetricsRef: MutableRefObject<HandMetrics>;
+  partnerMicMuted: boolean;
+  localSpeaking: boolean;
+  remoteSpeaking: boolean;
+  unreadChatCount: number;
+  onOpenLiveChat: () => void;
   onRecordVictory: () => void;
-  onVideoRef: (el: HTMLVideoElement | null) => void;
-  onRequestCamera: () => void;
   onSendPeerMessage: (msg: PeerMessage) => void;
   registerPeerHandler: (handler: ((msg: PeerMessage) => void) | null) => void;
-  onReturnToHub: () => void;
+  onReturnToRoomMenu: () => void;
 }
 
 const QUICK_EMOJIS = ['😀', '😈', '😭', '🔥', '👏', '😱'] as const;
@@ -81,17 +66,6 @@ const QUICK_CHATS = [
 ] as const;
 
 const CONFETTI_COLORS = ['#E53935', '#FBC02D', '#2E9E5B', '#1E88E5', '#FEF08A', '#FFFFFF'];
-const BASE_CAMS_STORAGE_KEY = 'parchisi_base_cams';
-
-function readStoredBaseCams(): boolean {
-  try {
-    const raw = window.localStorage.getItem(BASE_CAMS_STORAGE_KEY);
-    if (raw === '0' || raw === 'false') return false;
-    return true;
-  } catch {
-    return true;
-  }
-}
 
 interface PlayerAvatarBadgeProps {
   color: ParchisiColor;
@@ -100,11 +74,8 @@ interface PlayerAvatarBadgeProps {
   isActiveTurn: boolean;
   turnRemainingFrac: number; // 0..1
   align?: 'left' | 'right';
-  videoRef?: MutableRefObject<HTMLVideoElement | null>;
-  showLiveVideo?: boolean;
-  mirrorVideo?: boolean;
   showMicMuted?: boolean;
-  faceMetricsRef?: MutableRefObject<FaceMetrics>;
+  isSpeaking?: boolean;
   isBot?: boolean;
 }
 
@@ -115,11 +86,8 @@ function PlayerAvatarBadge({
   isActiveTurn,
   turnRemainingFrac,
   align = 'left',
-  videoRef,
-  showLiveVideo = false,
-  mirrorVideo = false,
   showMicMuted = false,
-  faceMetricsRef,
+  isSpeaking = false,
   isBot = false,
 }: PlayerAvatarBadgeProps) {
   const pal = COLOR_PALETTE[color];
@@ -128,6 +96,7 @@ function PlayerAvatarBadge({
   const clampedFrac = Math.max(0, Math.min(1, turnRemainingFrac));
   const dashOffset = circumference * (1 - clampedFrac);
   const urgentTimer = isActiveTurn && clampedFrac < 0.25;
+  const activeVoice = isSpeaking && !showMicMuted && !isBot;
 
   const avatarEl = (
     <div className="relative w-11 h-11 sm:w-12 sm:h-12 shrink-0 flex items-center justify-center">
@@ -171,46 +140,24 @@ function PlayerAvatarBadge({
         )}
       </svg>
 
-      {/* Circular Avatar / Live Webcam Frame */}
+      {/* Circular Pastel Voice Avatar (ZERO <video>) */}
       <div
         style={{
-          boxShadow: isActiveTurn
-            ? `0 0 14px ${pal.fill}66`
-            : '0 2px 8px rgba(31,36,45,0.12)',
-          borderColor: pal.fill,
+          boxShadow: activeVoice
+            ? '0 0 18px rgba(22, 163, 74, 0.55)'
+            : isActiveTurn
+              ? `0 0 14px ${pal.fill}66`
+              : '0 2px 8px rgba(31,36,45,0.12)',
+          borderColor: activeVoice ? '#16A34A' : pal.fill,
+          background: `radial-gradient(circle at 35% 30%, ${pal.light}, ${pal.dark})`,
         }}
-        className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 bg-white flex items-center justify-center"
+        className={`relative w-9 h-9 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 flex items-center justify-center text-xs sm:text-sm font-black text-white transition-transform duration-150 ${
+          activeVoice ? 'scale-105' : ''
+        }`}
       >
-        {videoRef && (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted={mirrorVideo}
-            className={`w-full h-full object-cover ${mirrorVideo ? 'mirror-video' : ''} ${
-              showLiveVideo ? 'block' : 'hidden'
-            }`}
-          />
-        )}
-        {!showLiveVideo && faceMetricsRef ? (
-          <AvatarCanvas
-            name={name}
-            metricsRef={faceMetricsRef}
-            accentColor={pal.fill}
-            bgTop="#FFE8E2"
-            bgBottom="#EFE9FB"
-            isAi={isBot}
-          />
-        ) : !showLiveVideo ? (
-          <div
-            style={{ background: `radial-gradient(circle at 35% 30%, ${pal.light}, ${pal.dark})` }}
-            className="w-full h-full flex items-center justify-center text-xs sm:text-sm font-black text-white"
-          >
-            {name.slice(0, 2).toUpperCase()}
-          </div>
-        ) : null}
+        {isBot ? <Bot className="w-4 h-4 sm:w-5 sm:h-5" /> : <span>{name.slice(0, 2).toUpperCase()}</span>}
 
-        {showMicMuted && (
+        {showMicMuted && !isBot && (
           <span
             aria-label="Microphone muted"
             className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#EF4444] text-white flex items-center justify-center border border-white"
@@ -261,23 +208,20 @@ export function ParchisiDuoGameView({
   localName,
   partnerName,
   connectionMode,
-  localStream,
-  remoteStream,
-  cameraEnabled,
+  initialDiceCount,
+  onSyncDiceCount,
   micMuted,
-  handTrackerStatus,
-  handDiceEnabled,
-  onToggleHandDice,
-  localFaceMetricsRef,
-  partnerFaceMetricsRef,
-  localHandMetricsRef,
+  partnerMicMuted,
+  localSpeaking,
+  remoteSpeaking,
+  unreadChatCount,
+  onOpenLiveChat,
   onRecordVictory,
-  onVideoRef,
-  onRequestCamera,
   onSendPeerMessage,
   registerPeerHandler,
-  onReturnToHub,
+  onReturnToRoomMenu,
 }: ParchisiDuoGameViewProps) {
+  const { t } = useI18n();
   const isSolo = connectionMode === 'solo';
   const isHost = connectionMode === 'p2p-host' || isSolo;
   const localColor: ParchisiColor = connectionMode === 'p2p-guest' ? 'yellow' : 'red';
@@ -298,9 +242,15 @@ export function ParchisiDuoGameView({
   );
 
   const [selectedMode, setSelectedMode] = useState<ParchisiMode>('1v1');
-  const [selectedDiceCount, setSelectedDiceCount] = useState<ParchisiDiceCount>(2);
+  const [selectedDiceCount, setSelectedDiceCount] = useState<ParchisiDiceCount>(initialDiceCount);
+  const [setupModalOpen, setSetupModalOpen] = useState(false);
+
+  // Host & Solo start immediately into 1v1 with the diceCount chosen in Room Menu!
+  // Guest initializes cleanly and receives Host's live PARCHISI_STATE immediately.
   const [gameState, setGameState] = useState<ParchisiState>(() =>
-    createInitialParchisiState('1v1', Date.now(), 2),
+    isHost
+      ? startParchisiMatch('1v1', Date.now(), initialDiceCount)
+      : createInitialParchisiState('1v1', Date.now(), initialDiceCount),
   );
   const stateRef = useRef<ParchisiState>(gameState);
   stateRef.current = gameState;
@@ -313,81 +263,18 @@ export function ParchisiDuoGameView({
   const [floatingReactions, setFloatingReactions] = useState<FloatingReactionItem[]>([]);
   const [openDrawer, setOpenDrawer] = useState<'none' | 'emoji' | 'chat'>('none');
   const [sfxMutedLocal, setSfxMutedLocal] = useState(() => soundFx.muted);
-  const [shakeIntensity, setShakeIntensity] = useState(0);
   const [turnSecondsLeft, setTurnSecondsLeft] = useState(PARCHISI_TURN_SECONDS);
   const [noMovesBanner, setNoMovesBanner] = useState(false);
   const [confettiSeed, setConfettiSeed] = useState(0);
-  const [baseCamsEnabled, setBaseCamsEnabled] = useState<boolean>(readStoredBaseCams);
 
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const showLocalLiveVideo = Boolean(localStream) && cameraEnabled;
-  const showRemoteLiveVideo = Boolean(remoteStream) && !isSolo;
-
-  // Base Camera Mode mapping: Red Base = Host, Yellow Base = Guest; mirror ONLY localStream
-  const redBaseStream =
-    localColor === 'red'
-      ? showLocalLiveVideo
-        ? localStream
-        : null
-      : showRemoteLiveVideo
-        ? remoteStream
-        : null;
-  const yellowBaseStream =
-    localColor === 'yellow'
-      ? showLocalLiveVideo
-        ? localStream
-        : null
-      : showRemoteLiveVideo
-        ? remoteStream
-        : null;
-  const mirrorRedBase = localColor === 'red';
-  const mirrorYellowBase = localColor === 'yellow';
-
-  const handleToggleBaseCams = useCallback(() => {
-    soundFx.click();
-    setBaseCamsEnabled((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(BASE_CAMS_STORAGE_KEY, next ? '1' : '0');
-      } catch {
-        // Ignore storage quota / private-mode errors
-      }
-      return next;
-    });
-  }, []);
-
-  const handDetectorRef = useRef(createHandShakeState());
   const reactionIdRef = useRef(1);
   const lastRollSeqRef = useRef(0);
   const victoryRecordedRef = useRef(false);
 
-  // Attach local & remote MediaStreams cleanly into HUD avatar videos
+  // Sync diceCount if changed externally from Room Menu
   useEffect(() => {
-    const v = localVideoRef.current;
-    onVideoRef(v);
-    if (!v) return;
-    if (showLocalLiveVideo && localStream) {
-      if (v.srcObject !== localStream) v.srcObject = localStream;
-      v.play().catch(() => {});
-    } else {
-      v.srcObject = null;
-    }
-    return () => {
-      onVideoRef(null);
-    };
-  }, [localStream, showLocalLiveVideo, onVideoRef]);
-
-  useEffect(() => {
-    const v = remoteVideoRef.current;
-    if (!v) return;
-    if (showRemoteLiveVideo && remoteStream) {
-      if (v.srcObject !== remoteStream) v.srcObject = remoteStream;
-      v.play().catch(() => {});
-    } else {
-      v.srcObject = null;
-    }
-  }, [remoteStream, showRemoteLiveVideo]);
+    setSelectedDiceCount(initialDiceCount);
+  }, [initialDiceCount]);
 
   // Mirror phase to document.body.dataset.state for testability
   useEffect(() => {
@@ -399,13 +286,6 @@ export function ParchisiDuoGameView({
       document.body.dataset.state = 'playing';
     }
   }, [gameState.phase]);
-
-  // Cleanup hand tracker toggle on unmount
-  useEffect(() => {
-    return () => {
-      onToggleHandDice(false);
-    };
-  }, [onToggleHandDice]);
 
   const spawnReaction = useCallback(
     (color: ParchisiColor, text: string, kind: 'emoji' | 'chat') => {
@@ -419,7 +299,7 @@ export function ParchisiDuoGameView({
     [],
   );
 
-  // Host-authoritative state commit + PeerJS broadcast
+  // Host-authoritative state commit + Firestore/WebRTC broadcast
   const commitHostState = useCallback(
     (next: ParchisiState) => {
       stateRef.current = next;
@@ -433,6 +313,25 @@ export function ParchisiDuoGameView({
     },
     [connectionMode, onSendPeerMessage],
   );
+
+  // Broadcast initial active state when Host enters Parcheesi, and let Guest request sync on mount/reconnect!
+  useEffect(() => {
+    if (connectionMode === 'p2p-host') {
+      const t1 = window.setTimeout(() => {
+        onSendPeerMessage({ type: 'PARCHISI_STATE', state: stateRef.current });
+      }, 80);
+      return () => window.clearTimeout(t1);
+    }
+    if (connectionMode === 'p2p-guest') {
+      onSendPeerMessage({ type: 'PARCHISI_SYNC_REQ' });
+      const retry = window.setTimeout(() => {
+        if (stateRef.current.phase === 'READY') {
+          onSendPeerMessage({ type: 'PARCHISI_SYNC_REQ' });
+        }
+      }, 650);
+      return () => window.clearTimeout(retry);
+    }
+  }, [connectionMode, onSendPeerMessage]);
 
   const legalMoves = useMemo(() => getLegalParchisiMoves(gameState), [gameState]);
 
@@ -512,19 +411,19 @@ export function ParchisiDuoGameView({
     }
   }, [gameState.phase, gameState.winner, localColor, onRecordVictory]);
 
-  // Host real-time pre-game config sync (Mode + 1 Dé / 2 Dés) to Guest over PeerJS
+  // Host real-time setup config sync (Mode + 1 Dé / 2 Dés)
   const handleSelectSetupConfig = useCallback(
     (mode: ParchisiMode, diceCount: ParchisiDiceCount) => {
       if (!isHost) return;
       soundFx.click();
       setSelectedMode(mode);
       setSelectedDiceCount(diceCount);
-      setGameState(createInitialParchisiState(mode, Date.now(), diceCount));
+      onSyncDiceCount(diceCount);
       if (connectionMode === 'p2p-host') {
         onSendPeerMessage({ type: 'PARCHISI_CONFIG', mode, diceCount });
       }
     },
-    [isHost, connectionMode, onSendPeerMessage],
+    [isHost, connectionMode, onSyncDiceCount, onSendPeerMessage],
   );
 
   // Start or Restart match
@@ -533,33 +432,30 @@ export function ParchisiDuoGameView({
       if (!isHost) return;
       soundFx.click();
       setOpenDrawer('none');
+      setSetupModalOpen(false);
       setNoMovesBanner(false);
       lastRollSeqRef.current = 0;
       setCompletedAnimSeq(0);
       setIsRollingAnim(false);
+      onSyncDiceCount(diceCount);
       const fresh = startParchisiMatch(mode, Date.now(), diceCount);
       commitHostState(fresh);
       if (connectionMode === 'p2p-host') {
         onSendPeerMessage({ type: 'PARCHISI_START', mode, diceCount });
       }
     },
-    [isHost, selectedMode, selectedDiceCount, commitHostState, connectionMode, onSendPeerMessage],
+    [
+      isHost,
+      selectedMode,
+      selectedDiceCount,
+      onSyncDiceCount,
+      commitHostState,
+      connectionMode,
+      onSendPeerMessage,
+    ],
   );
 
-  // Bind Enter / Space while in READY title card to start match immediately
-  useEffect(() => {
-    if (gameState.phase !== 'READY' || !isHost) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        handleStartMatch(selectedMode, selectedDiceCount);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [gameState.phase, isHost, handleStartMatch, selectedMode, selectedDiceCount]);
-
-  // Roll both dice (Host executes directly; Guest sends PeerJS action)
+  // Roll dice (Host executes directly; Guest sends action)
   const handleRollDice = useCallback(() => {
     const st = stateRef.current;
     if (st.phase !== 'WAIT_ROLL' || st.turn !== localColor) return;
@@ -636,9 +532,16 @@ export function ParchisiDuoGameView({
     [localColor, isSolo, spawnReaction, onSendPeerMessage],
   );
 
-  // PeerJS incoming message handler
+  // Incoming Firestore/WebRTC Parcheesi message handler
   useEffect(() => {
     registerPeerHandler((msg) => {
+      if (msg.type === 'PARCHISI_SYNC_REQ' && isHost) {
+        if (connectionMode === 'p2p-host') {
+          onSendPeerMessage({ type: 'PARCHISI_STATE', state: stateRef.current });
+        }
+        return;
+      }
+
       if (msg.type === 'PARCHISI_CONFIG' && !isHost) {
         setSelectedMode(msg.mode);
         setSelectedDiceCount(msg.diceCount);
@@ -697,9 +600,9 @@ export function ParchisiDuoGameView({
     });
 
     return () => registerPeerHandler(null);
-  }, [registerPeerHandler, isHost, commitHostState, spawnReaction]);
+  }, [registerPeerHandler, isHost, connectionMode, onSendPeerMessage, commitHostState, spawnReaction]);
 
-  // Host Auto-Skip: if active player has 0 legal moves during WAIT_MOVE, advance automatically (0.8s in 1-Die mode, 1.0s in 2-Dice mode)
+  // Host Auto-Skip: if active player has 0 legal moves during WAIT_MOVE, advance automatically
   useEffect(() => {
     if (gameState.phase !== 'WAIT_MOVE' || isRollingAnim || isMoveAnimating) {
       setNoMovesBanner(false);
@@ -720,7 +623,16 @@ export function ParchisiDuoGameView({
     }, skipDelayMs);
 
     return () => window.clearTimeout(timer);
-  }, [gameState.phase, gameState.stateSeq, gameState.diceCount, legalMoves.length, isRollingAnim, isMoveAnimating, isHost, commitHostState]);
+  }, [
+    gameState.phase,
+    gameState.stateSeq,
+    gameState.diceCount,
+    legalMoves.length,
+    isRollingAnim,
+    isMoveAnimating,
+    isHost,
+    commitHostState,
+  ]);
 
   // Host Smart AI Loop (~700ms natural pacing for Yellow AI in Solo & Blue/Green AI in 4-Player)
   useEffect(() => {
@@ -728,17 +640,17 @@ export function ParchisiDuoGameView({
     if (!isBotTurn(gameState)) return;
 
     if (gameState.phase === 'WAIT_ROLL') {
-      const t = window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
         const cur = stateRef.current;
         if (cur.phase === 'WAIT_ROLL' && isBotTurn(cur)) {
           commitHostState(rollParchisiDice(cur));
         }
       }, 700);
-      return () => window.clearTimeout(t);
+      return () => window.clearTimeout(timer);
     }
 
     if (gameState.phase === 'WAIT_MOVE' && legalMoves.length > 0) {
-      const t = window.setTimeout(() => {
+      const timer = window.setTimeout(() => {
         const cur = stateRef.current;
         if (cur.phase === 'WAIT_MOVE' && isBotTurn(cur)) {
           const choice = chooseAiParchisiMove(cur);
@@ -747,7 +659,7 @@ export function ParchisiDuoGameView({
           }
         }
       }, 720);
-      return () => window.clearTimeout(t);
+      return () => window.clearTimeout(timer);
     }
   }, [
     isHost,
@@ -801,36 +713,6 @@ export function ParchisiDuoGameView({
     commitHostState,
   ]);
 
-  // Optional Hand-Shake Dice Roll (MediaPipe HandLandmarker)
-  useEffect(() => {
-    if (!handDiceEnabled || !canRollNow) {
-      setShakeIntensity(0);
-      return;
-    }
-
-    let rafId = 0;
-    const poll = () => {
-      rafId = requestAnimationFrame(poll);
-      const hm = localHandMetricsRef.current;
-      const res = stepHandShakeDetector(
-        handDetectorRef.current,
-        hm.handDetected,
-        hm.palmX,
-        hm.palmY,
-        performance.now(),
-      );
-      setShakeIntensity(res.intensity);
-      if (res.triggered) {
-        handleRollDice();
-      }
-    };
-    rafId = requestAnimationFrame(poll);
-    return () => {
-      cancelAnimationFrame(rafId);
-      setShakeIntensity(0);
-    };
-  }, [handDiceEnabled, canRollNow, localHandMetricsRef, handleRollDice]);
-
   // Resolve active hover target preview on the board
   const activeHoveredMove = useMemo<ParchisiMoveOption | null>(() => {
     if (!canInteractBoard) return null;
@@ -845,7 +727,7 @@ export function ParchisiDuoGameView({
   // Home counts per color (0..4)
   const homeCount = useCallback(
     (color: ParchisiColor) =>
-      gameState.tokens[color].filter((t) => t.progress >= PARCHISI_HOME_PROGRESS).length,
+      gameState.tokens[color].filter((tok) => tok.progress >= PARCHISI_HOME_PROGRESS).length,
     [gameState.tokens],
   );
 
@@ -855,7 +737,7 @@ export function ParchisiDuoGameView({
   const isTopTurn = gameState.turn === 'yellow' || gameState.turn === 'blue';
   const isBottomTurn = gameState.turn === 'red' || gameState.turn === 'green';
 
-  // Live concise turn prompt text (clean unboxed text)
+  // Live concise turn prompt text
   const turnStatusLine = useMemo(() => {
     if (gameState.phase === 'READY') {
       return gameState.diceCount === 1 ? 'Official 1-Die Parcheesi' : 'Official 2-Dice Parcheesi';
@@ -879,10 +761,18 @@ export function ParchisiDuoGameView({
           : 'Your turn · Roll both dice'
         : `${colorNames[gameState.turn]} is rolling…`;
     }
-    return isLocalTurn
-      ? 'Pick a highlighted token'
-      : `${colorNames[gameState.turn]} is moving…`;
-  }, [gameState.phase, gameState.diceCount, gameState.winner, gameState.turn, gameState.mustBreakBlockade, noMovesBanner, activeBonus, isLocalTurn, colorNames]);
+    return isLocalTurn ? 'Pick a highlighted token' : `${colorNames[gameState.turn]} is moving…`;
+  }, [
+    gameState.phase,
+    gameState.diceCount,
+    gameState.winner,
+    gameState.turn,
+    gameState.mustBreakBlockade,
+    noMovesBanner,
+    activeBonus,
+    isLocalTurn,
+    colorNames,
+  ]);
 
   const handleToggleSoundMute = () => {
     const next = !sfxMutedLocal;
@@ -890,6 +780,10 @@ export function ParchisiDuoGameView({
     setSfxMutedLocal(next);
     if (!next) soundFx.click();
   };
+
+  const redIsLocal = localColor === 'red';
+  const yellowIsLocal = localColor === 'yellow';
+  const showSetupOverlay = setupModalOpen || (gameState.phase === 'READY' && isHost);
 
   return (
     <section
@@ -901,422 +795,416 @@ export function ParchisiDuoGameView({
       }}
       className="relative flex-1 min-h-0 h-full w-full overflow-hidden flex flex-col items-center justify-between px-1 sm:px-4 py-1 sm:py-2 select-none touch-manipulation text-[#1F242D]"
     >
-      {/* CENTERED STAGE: Top HUD + Square Wooden Board (96-100% mobile width) + Bottom HUD snugly framed together */}
+      {/* CENTERED STAGE: Top HUD + Square Wooden Board + Bottom HUD */}
       <div className="relative z-10 flex-1 min-h-0 w-full flex flex-col items-center justify-center gap-1.5 sm:gap-2 overflow-hidden">
-      {/* 1. CLASSIC TOP PLAYER HUD BAR (Blue TL in 4P · Yellow TR + Active Top Dice Tray) */}
-      <div className="relative z-20 w-full max-w-[660px] flex items-center justify-between gap-2 px-1 shrink-0 min-h-[48px]">
-        {/* Top-Left slot: Blue AI (4P) or clean event status readout (1v1) */}
-        <div className="flex items-center gap-2 min-w-0">
-          {gameState.mode === '4p' ? (
-            <>
-              <PlayerAvatarBadge
-                color="blue"
-                name={colorNames.blue}
-                homeCount={homeCount('blue')}
-                isActiveTurn={gameState.turn === 'blue' && gameState.phase !== 'READY'}
-                turnRemainingFrac={turnFrac}
-                align="left"
-                isBot
-              />
-              {gameState.turn === 'blue' && gameState.phase !== 'READY' && (
-                <ParchisiDice3D
-                  dice={displayedDice}
-                  usedDice={gameState.usedDice}
-                  diceCount={gameState.diceCount}
-                  pendingBonus={activeBonus}
-                  rollSeq={gameState.rollSeq}
-                  rolling={isRollingAnim}
-                  shakeIntensity={0}
-                  canRoll={false}
-                  isActiveTray
-                  compact
-                  accentColor={COLOR_PALETTE.blue.fill}
-                  onRoll={handleRollDice}
-                  ariaLabel="Blue AI dice"
+        {/* 1. CLASSIC TOP PLAYER HUD BAR (Blue TL in 4P · Yellow TR + Active Top Dice Tray) */}
+        <div className="relative z-20 w-full max-w-[660px] flex items-center justify-between gap-2 px-1 shrink-0 min-h-[48px]">
+          <div className="flex items-center gap-2 min-w-0">
+            {gameState.mode === '4p' ? (
+              <>
+                <PlayerAvatarBadge
+                  color="blue"
+                  name={colorNames.blue}
+                  homeCount={homeCount('blue')}
+                  isActiveTurn={gameState.turn === 'blue' && gameState.phase !== 'READY'}
+                  turnRemainingFrac={turnFrac}
+                  align="left"
+                  isBot
                 />
-              )}
-            </>
-          ) : (
-            <div className="min-w-0 flex flex-col">
-              <span
-                data-testid="parchisi-turn-status"
-                className={`text-xs sm:text-sm font-extrabold truncate ${
-                  noMovesBanner
-                    ? 'text-[#DC2626]'
-                    : activeBonus !== null
-                      ? 'text-[#D97706]'
-                      : 'text-[#1F242D]'
-                }`}
-              >
-                {turnStatusLine}
-              </span>
-              {gameState.lastEventText && gameState.phase !== 'READY' && (
-                <span className="text-[11px] text-[#6B7280] font-medium truncate max-w-[165px] sm:max-w-[260px]">
-                  {gameState.lastEventText}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Top-Right slot: Yellow's 2-Dice Tray (when Yellow active) + Yellow Avatar Badge */}
-        <div className="flex items-center gap-2 shrink-0">
-          {isTopTurn && gameState.turn === 'yellow' && gameState.phase !== 'READY' && (
-            <ParchisiDice3D
-              dice={displayedDice}
-              usedDice={gameState.usedDice}
-              diceCount={gameState.diceCount}
-              pendingBonus={activeBonus}
-              rollSeq={gameState.rollSeq}
-              rolling={isRollingAnim}
-              shakeIntensity={localColor === 'yellow' ? shakeIntensity : 0}
-              canRoll={localColor === 'yellow' && canRollNow}
-              isActiveTray
-              compact={gameState.mode === '4p'}
-              accentColor={COLOR_PALETTE.yellow.fill}
-              onRoll={handleRollDice}
-              ariaLabel={gameState.diceCount === 1 ? 'Roll die for Yellow' : 'Roll both dice for Yellow'}
-            />
-          )}
-          <PlayerAvatarBadge
-            color="yellow"
-            name={colorNames.yellow}
-            homeCount={homeCount('yellow')}
-            isActiveTurn={gameState.turn === 'yellow' && gameState.phase !== 'READY'}
-            turnRemainingFrac={turnFrac}
-            align="right"
-            videoRef={localColor === 'yellow' ? localVideoRef : remoteVideoRef}
-            showLiveVideo={localColor === 'yellow' ? showLocalLiveVideo : showRemoteLiveVideo}
-            mirrorVideo={localColor === 'yellow'}
-            showMicMuted={localColor === 'yellow' && micMuted}
-            faceMetricsRef={localColor === 'yellow' ? localFaceMetricsRef : partnerFaceMetricsRef}
-            isBot={isSolo && localColor !== 'yellow'}
-          />
-        </div>
-      </div>
-
-      {/* 2. CENTER SQUARE WOODEN PARCHEESI BOARD (96-100% mobile width, HD crisp, zero scroll) */}
-      <div className="relative z-10 w-full flex-1 min-h-0 max-h-[min(100%,98vw)] flex items-center justify-center [container-type:size]">
-        <div className="relative w-[min(100cqw,100cqh)] h-[min(100cqw,100cqh)] flex items-center justify-center">
-          <ParchisiBoardSvg
-            state={gameState}
-            legalMoves={legalMoves}
-            canInteract={canInteractBoard}
-            selectedTokenId={selectedTokenId}
-            hoveredMove={activeHoveredMove}
-            pendingMoveAnim={pendingMoveAnim}
-            onMoveAnimComplete={handleMoveAnimComplete}
-            onTriggerCelebration={handleTriggerCelebration}
-            floatingReactions={floatingReactions}
-            baseCamsEnabled={baseCamsEnabled}
-            redBaseStream={redBaseStream}
-            yellowBaseStream={yellowBaseStream}
-            mirrorRedBase={mirrorRedBase}
-            mirrorYellowBase={mirrorYellowBase}
-            onTokenClick={handleTokenClick}
-            onTokenHover={setHoveredTokenId}
-            onSelectMoveOption={handleExecuteMove}
-            onHoverMoveOption={setHoveredOption}
-            onDismissPicker={() => setSelectedTokenId(null)}
-          />
-
-          {/* Compact "No legal moves" toast over center hub when auto-skipping */}
-          {noMovesBanner && (
-            <div
-              role="status"
-              data-testid="parchisi-no-moves-toast"
-              className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 rounded-full bg-white/95 border border-[#EAE4DC] text-xs sm:text-sm font-extrabold text-[#1F242D] shadow-lg whitespace-nowrap"
-            >
-              No legal moves
-            </div>
-          )}
-
-          {/* Setup Modal Overlay (READY phase) */}
-          {gameState.phase === 'READY' && (
-            <div className="absolute inset-0 z-30 flex items-center justify-center p-3 bg-[#1F242D]/35 backdrop-blur-xs rounded-2xl">
-              <div
-                data-testid="parchisi-setup-modal"
-                className="w-full max-w-[336px] rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_18px_48px_rgba(31,36,45,0.18)] p-5 text-center space-y-3.5"
-              >
-                <div className="flex flex-col items-center gap-1">
-                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-[#FEF6DC] border border-[#F3E3BE] text-[#D97706] shadow-xs">
-                    <Crown className="w-5 h-5" />
-                  </span>
-                  <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#1F242D]">
-                    Official Parcheesi
-                  </h2>
-                  <p className="text-xs text-[#6B7280] font-medium">
-                    {selectedDiceCount === 1
-                      ? '1 Dé · Sortie sur 5 · Rejoue sur 6 · +20 / +10'
-                      : '2 Dés · Sortie sur 5 · Capture +20 · Centre +10'}
-                  </p>
-                </div>
-
-                {/* 1 Dé / 2 Dés Pill Selector (Cream & Soft Pastel, active Coral #FF6B57, synced via PeerJS) */}
-                <div
-                  role="group"
-                  aria-label="Nombre de dés"
-                  className="grid grid-cols-2 gap-2 p-1 rounded-full bg-[#FAF7F2] border border-[#EAE4DC]"
+                {gameState.turn === 'blue' && gameState.phase !== 'READY' && (
+                  <ParchisiDice3D
+                    dice={displayedDice}
+                    usedDice={gameState.usedDice}
+                    diceCount={gameState.diceCount}
+                    pendingBonus={activeBonus}
+                    rollSeq={gameState.rollSeq}
+                    rolling={isRollingAnim}
+                    shakeIntensity={0}
+                    canRoll={false}
+                    isActiveTray
+                    compact
+                    accentColor={COLOR_PALETTE.blue.fill}
+                    onRoll={handleRollDice}
+                    ariaLabel="Blue AI dice"
+                  />
+                )}
+              </>
+            ) : (
+              <div className="min-w-0 flex flex-col">
+                <span
+                  data-testid="parchisi-turn-status"
+                  className={`text-xs sm:text-sm font-extrabold truncate ${
+                    noMovesBanner
+                      ? 'text-[#DC2626]'
+                      : activeBonus !== null
+                        ? 'text-[#D97706]'
+                        : 'text-[#1F242D]'
+                  }`}
                 >
-                  <button
-                    type="button"
-                    data-testid="parchisi-dice-count-1"
-                    aria-pressed={selectedDiceCount === 1}
-                    disabled={!isHost}
-                    onClick={() => handleSelectSetupConfig(selectedMode, 1)}
-                    className={`min-h-[40px] px-3 py-1.5 rounded-full text-xs sm:text-sm font-extrabold transition-all whitespace-nowrap ${
-                      selectedDiceCount === 1
-                        ? 'bg-[#FF6B57] text-white shadow-[0_4px_12px_rgba(255,107,87,0.32)]'
-                        : 'text-[#6B7280] hover:text-[#1F242D]'
-                    }`}
-                  >
-                    🎲 1 Dé
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="parchisi-dice-count-2"
-                    aria-pressed={selectedDiceCount === 2}
-                    disabled={!isHost}
-                    onClick={() => handleSelectSetupConfig(selectedMode, 2)}
-                    className={`min-h-[40px] px-3 py-1.5 rounded-full text-xs sm:text-sm font-extrabold transition-all whitespace-nowrap ${
-                      selectedDiceCount === 2
-                        ? 'bg-[#FF6B57] text-white shadow-[0_4px_12px_rgba(255,107,87,0.32)]'
-                        : 'text-[#6B7280] hover:text-[#1F242D]'
-                    }`}
-                  >
-                    🎲🎲 2 Dés
-                  </button>
-                </div>
-
-                {/* Mode selector (Host picks; Guest sees live selection) */}
-                <div className="grid grid-cols-1 gap-2 text-left">
-                  <button
-                    type="button"
-                    data-testid="parchisi-mode-1v1"
-                    disabled={!isHost}
-                    onClick={() => handleSelectSetupConfig('1v1', selectedDiceCount)}
-                    className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 ${
-                      selectedMode === '1v1'
-                        ? 'bg-[#FFE8E2]/65 border-[#FF6B57] text-[#1F242D] shadow-xs'
-                        : 'bg-[#FAF7F2] border-[#EAE4DC] text-[#6B7280] hover:border-[#FF6B57]/40'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-[#1F242D] leading-tight flex items-center gap-1.5">
-                        <Users className="w-4 h-4 text-[#FF6B57] shrink-0" />
-                        <span>1v1 Classic</span>
-                      </p>
-                      <p className="text-[11px] text-[#6B7280] mt-0.5">
-                        Red vs Yellow · Opposite corners
-                      </p>
-                    </div>
-                    <span className="text-[11px] font-bold text-[#FF6B57] shrink-0">Default</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    data-testid="parchisi-mode-4p"
-                    disabled={!isHost}
-                    onClick={() => handleSelectSetupConfig('4p', selectedDiceCount)}
-                    className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 ${
-                      selectedMode === '4p'
-                        ? 'bg-[#EFE9FB] border-[#7C5CFC] text-[#1F242D] shadow-xs'
-                        : 'bg-[#FAF7F2] border-[#EAE4DC] text-[#6B7280] hover:border-[#7C5CFC]/40'
-                    }`}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-[#1F242D] leading-tight flex items-center gap-1.5">
-                        <Crown className="w-4 h-4 text-[#7C5CFC] shrink-0" />
-                        <span>4-Player Classic</span>
-                      </p>
-                      <p className="text-[11px] text-[#6B7280] mt-0.5">
-                        Red, Yellow + Blue & Green AI Bots
-                      </p>
-                    </div>
-                  </button>
-                </div>
-
-                {isHost ? (
-                  <button
-                    type="button"
-                    data-start="true"
-                    data-testid="parchisi-start-btn"
-                    onClick={() => handleStartMatch(selectedMode, selectedDiceCount)}
-                    className="w-full min-h-[48px] px-5 py-2.5 rounded-2xl text-sm sm:text-base font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] active:scale-[0.98] shadow-[0_6px_18px_rgba(255,107,87,0.35)] transition-all whitespace-nowrap"
-                  >
-                    Start Match
-                  </button>
-                ) : (
-                  <p className="text-xs font-bold text-[#FF6B57] py-1">
-                    Waiting for {colorNames.red} to start the match…
-                  </p>
+                  {turnStatusLine}
+                </span>
+                {gameState.lastEventText && gameState.phase !== 'READY' && (
+                  <span className="text-[11px] text-[#6B7280] font-medium truncate max-w-[165px] sm:max-w-[260px]">
+                    {gameState.lastEventText}
+                  </span>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* Victory Modal Overlay (GAME_OVER phase) */}
-          {gameState.phase === 'GAME_OVER' && gameState.winner && (
-            <div className="absolute inset-0 z-40 flex items-center justify-center p-3 bg-[#1F242D]/40 backdrop-blur-xs rounded-2xl">
+          {/* Top-Right: Yellow Dice Tray + Yellow Voice Avatar */}
+          <div className="flex items-center gap-2 shrink-0">
+            {isTopTurn && gameState.turn === 'yellow' && gameState.phase !== 'READY' && (
+              <ParchisiDice3D
+                dice={displayedDice}
+                usedDice={gameState.usedDice}
+                diceCount={gameState.diceCount}
+                pendingBonus={activeBonus}
+                rollSeq={gameState.rollSeq}
+                rolling={isRollingAnim}
+                shakeIntensity={0}
+                canRoll={localColor === 'yellow' && canRollNow}
+                isActiveTray
+                compact={gameState.mode === '4p'}
+                accentColor={COLOR_PALETTE.yellow.fill}
+                onRoll={handleRollDice}
+                ariaLabel={gameState.diceCount === 1 ? 'Roll die for Yellow' : 'Roll both dice for Yellow'}
+              />
+            )}
+            <PlayerAvatarBadge
+              color="yellow"
+              name={colorNames.yellow}
+              homeCount={homeCount('yellow')}
+              isActiveTurn={gameState.turn === 'yellow' && gameState.phase !== 'READY'}
+              turnRemainingFrac={turnFrac}
+              align="right"
+              showMicMuted={yellowIsLocal ? micMuted : !isSolo && partnerMicMuted}
+              isSpeaking={yellowIsLocal ? localSpeaking : !isSolo && remoteSpeaking}
+              isBot={isSolo && !yellowIsLocal}
+            />
+          </div>
+        </div>
+
+        {/* 2. CENTER SQUARE WOODEN PARCHEESI BOARD */}
+        <div className="relative z-10 w-full flex-1 min-h-0 max-h-[min(100%,98vw)] flex items-center justify-center [container-type:size]">
+          <div className="relative w-[min(100cqw,100cqh)] h-[min(100cqw,100cqh)] flex items-center justify-center">
+            <ParchisiBoardSvg
+              state={gameState}
+              legalMoves={legalMoves}
+              canInteract={canInteractBoard}
+              selectedTokenId={selectedTokenId}
+              hoveredMove={activeHoveredMove}
+              pendingMoveAnim={pendingMoveAnim}
+              onMoveAnimComplete={handleMoveAnimComplete}
+              onTriggerCelebration={handleTriggerCelebration}
+              floatingReactions={floatingReactions}
+              onTokenClick={handleTokenClick}
+              onTokenHover={setHoveredTokenId}
+              onSelectMoveOption={handleExecuteMove}
+              onHoverMoveOption={setHoveredOption}
+              onDismissPicker={() => setSelectedTokenId(null)}
+            />
+
+            {/* Compact "No legal moves" toast over center hub when auto-skipping */}
+            {noMovesBanner && (
               <div
-                data-testid="parchisi-victory-modal"
-                className="w-full max-w-[336px] rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_20px_54px_rgba(31,36,45,0.2)] p-5 text-center space-y-4"
+                role="status"
+                data-testid="parchisi-no-moves-toast"
+                className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 z-30 px-4 py-1.5 rounded-full bg-white/95 border border-[#EAE4DC] text-xs sm:text-sm font-extrabold text-[#1F242D] shadow-lg whitespace-nowrap"
               >
-                <div className="flex flex-col items-center gap-1.5">
-                  <span
-                    style={{ backgroundColor: COLOR_PALETTE[gameState.winner].fill }}
-                    className="inline-flex items-center justify-center w-12 h-12 rounded-full border-2 border-white text-white shadow-md"
+                No legal moves
+              </div>
+            )}
+
+            {/* Setup / Match Options Modal Overlay (Host-only switch 1v1 / 4P & 1 Dé / 2 Dés) */}
+            {showSetupOverlay && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center p-3 bg-[#1F242D]/35 backdrop-blur-xs rounded-2xl">
+                <div
+                  data-testid="parchisi-setup-modal"
+                  className="w-full max-w-[336px] rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_18px_48px_rgba(31,36,45,0.18)] p-5 text-center space-y-3.5"
+                >
+                  <div className="flex flex-col items-center gap-1">
+                    <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-[#FEF6DC] border border-[#F3E3BE] text-[#D97706] shadow-xs">
+                      <Crown className="w-5 h-5" />
+                    </span>
+                    <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight text-[#1F242D]">
+                      Official Parcheesi
+                    </h2>
+                    <p className="text-xs text-[#6B7280] font-medium">
+                      {selectedDiceCount === 1
+                        ? '1 Dé · Sortie sur 5 · Rejoue sur 6 · +20 / +10'
+                        : '2 Dés · Sortie sur 5 · Capture +20 · Centre +10'}
+                    </p>
+                  </div>
+
+                  {/* 1 Dé / 2 Dés Pill Selector */}
+                  <div
+                    role="group"
+                    aria-label="Nombre de dés"
+                    className="grid grid-cols-2 gap-2 p-1 rounded-full bg-[#FAF7F2] border border-[#EAE4DC]"
                   >
-                    <Crown className="w-6 h-6" />
-                  </span>
-                  <h2 className="text-2xl font-extrabold text-[#1F242D]">
-                    {colorNames[gameState.winner]} Wins!
-                  </h2>
-                  <p className="text-xs text-[#6B7280] font-medium">
-                    All 4 tokens reached the Center Goal
-                  </p>
-                </div>
+                    <button
+                      type="button"
+                      data-testid="parchisi-dice-count-1"
+                      aria-pressed={selectedDiceCount === 1}
+                      disabled={!isHost}
+                      onClick={() => handleSelectSetupConfig(selectedMode, 1)}
+                      className={`min-h-[40px] px-3 py-1.5 rounded-full text-xs sm:text-sm font-extrabold transition-all whitespace-nowrap cursor-pointer ${
+                        selectedDiceCount === 1
+                          ? 'bg-[#FF6B57] text-white shadow-[0_4px_12px_rgba(255,107,87,0.32)]'
+                          : 'text-[#6B7280] hover:text-[#1F242D]'
+                      }`}
+                    >
+                      🎲 1 Dé
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="parchisi-dice-count-2"
+                      aria-pressed={selectedDiceCount === 2}
+                      disabled={!isHost}
+                      onClick={() => handleSelectSetupConfig(selectedMode, 2)}
+                      className={`min-h-[40px] px-3 py-1.5 rounded-full text-xs sm:text-sm font-extrabold transition-all whitespace-nowrap cursor-pointer ${
+                        selectedDiceCount === 2
+                          ? 'bg-[#FF6B57] text-white shadow-[0_4px_12px_rgba(255,107,87,0.32)]'
+                          : 'text-[#6B7280] hover:text-[#1F242D]'
+                      }`}
+                    >
+                      🎲🎲 2 Dés
+                    </button>
+                  </div>
 
-                {/* 3 Tabular Stats */}
-                <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-[#EAE4DC]">
-                  <div>
-                    <p className="text-lg font-extrabold text-[#FF6B57] tabular-nums">
-                      {gameState.stats[gameState.winner].captures}
-                    </p>
-                    <p className="text-[11px] text-[#6B7280] font-semibold">Captures</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-extrabold text-[#7C5CFC] tabular-nums">
-                      {gameState.stats[gameState.winner].doublesRolled}
-                    </p>
-                    <p className="text-[11px] text-[#6B7280] font-semibold">Doubles</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-extrabold text-[#16A34A] tabular-nums">
-                      {gameState.stats[gameState.winner].homeEntries}/4
-                    </p>
-                    <p className="text-[11px] text-[#6B7280] font-semibold">Home</p>
-                  </div>
-                </div>
+                  {/* Mode selector */}
+                  <div className="grid grid-cols-1 gap-2 text-left">
+                    <button
+                      type="button"
+                      data-testid="parchisi-mode-1v1"
+                      disabled={!isHost}
+                      onClick={() => handleSelectSetupConfig('1v1', selectedDiceCount)}
+                      className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                        selectedMode === '1v1'
+                          ? 'bg-[#FFE8E2]/65 border-[#FF6B57] text-[#1F242D] shadow-xs'
+                          : 'bg-[#FAF7F2] border-[#EAE4DC] text-[#6B7280] hover:border-[#FF6B57]/40'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#1F242D] leading-tight flex items-center gap-1.5">
+                          <Users className="w-4 h-4 text-[#FF6B57] shrink-0" />
+                          <span>1v1 Classic</span>
+                        </p>
+                        <p className="text-[11px] text-[#6B7280] mt-0.5">
+                          Red vs Yellow · Opposite corners
+                        </p>
+                      </div>
+                      <span className="text-[11px] font-bold text-[#FF6B57] shrink-0">Default</span>
+                    </button>
 
-                <div className="flex items-center gap-2">
-                  {isHost && (
+                    <button
+                      type="button"
+                      data-testid="parchisi-mode-4p"
+                      disabled={!isHost}
+                      onClick={() => handleSelectSetupConfig('4p', selectedDiceCount)}
+                      className={`w-full px-3.5 py-2.5 rounded-2xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                        selectedMode === '4p'
+                          ? 'bg-[#EFE9FB] border-[#7C5CFC] text-[#1F242D] shadow-xs'
+                          : 'bg-[#FAF7F2] border-[#EAE4DC] text-[#6B7280] hover:border-[#7C5CFC]/40'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#1F242D] leading-tight flex items-center gap-1.5">
+                          <Crown className="w-4 h-4 text-[#7C5CFC] shrink-0" />
+                          <span>4-Player Classic</span>
+                        </p>
+                        <p className="text-[11px] text-[#6B7280] mt-0.5">
+                          Red, Yellow + Blue & Green AI Bots
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {gameState.phase !== 'READY' && (
+                      <button
+                        type="button"
+                        onClick={() => setSetupModalOpen(false)}
+                        className="min-h-[46px] px-4 py-2 rounded-2xl text-xs sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F1ECE3] text-[#1F242D] border border-[#EAE4DC] cursor-pointer"
+                      >
+                        {t.cancelBtn}
+                      </button>
+                    )}
                     <button
                       type="button"
                       data-start="true"
-                      data-testid="parchisi-play-again-btn"
-                      onClick={() => handleStartMatch(gameState.mode, gameState.diceCount)}
-                      className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] shadow-sm whitespace-nowrap"
+                      data-testid="parchisi-start-btn"
+                      onClick={() => handleStartMatch(selectedMode, selectedDiceCount)}
+                      className="flex-1 min-h-[46px] px-5 py-2.5 rounded-2xl text-sm sm:text-base font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] active:scale-[0.98] shadow-[0_6px_18px_rgba(255,107,87,0.35)] transition-all whitespace-nowrap cursor-pointer"
                     >
-                      <RotateCcw className="w-4 h-4 shrink-0" />
-                      <span>Play Again</span>
+                      Start Match
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={onReturnToHub}
-                    className="flex-1 min-h-[44px] px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F1ECE3] text-[#1F242D] border border-[#EAE4DC] whitespace-nowrap"
-                  >
-                    Switch Game
-                  </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      </div>
+            )}
 
-      {/* 3. CLASSIC BOTTOM PLAYER HUD BAR (Red BL + Active Bottom Dice Tray · Green BR in 4P) */}
-      <div className="relative z-20 w-full max-w-[660px] flex items-center justify-between gap-2 px-1 shrink-0 min-h-[48px]">
-        {/* Bottom-Left: Red Avatar Badge + 2-Dice Tray right beside it when Red is active (or Ready) */}
-        <div className="flex items-center gap-2 min-w-0">
-          <PlayerAvatarBadge
-            color="red"
-            name={colorNames.red}
-            homeCount={homeCount('red')}
-            isActiveTurn={gameState.turn === 'red' && gameState.phase !== 'READY'}
-            turnRemainingFrac={turnFrac}
-            align="left"
-            videoRef={localColor === 'red' ? localVideoRef : remoteVideoRef}
-            showLiveVideo={localColor === 'red' ? showLocalLiveVideo : showRemoteLiveVideo}
-            mirrorVideo={localColor === 'red'}
-            showMicMuted={localColor === 'red' && micMuted}
-            faceMetricsRef={localColor === 'red' ? localFaceMetricsRef : partnerFaceMetricsRef}
-          />
-          {(gameState.turn === 'red' || gameState.phase === 'READY') && (
-            <ParchisiDice3D
-              dice={
-                gameState.phase === 'READY'
-                  ? gameState.diceCount === 1
-                    ? [5]
-                    : [5, 6]
-                  : displayedDice
-              }
-              usedDice={gameState.usedDice}
-              diceCount={gameState.diceCount}
-              pendingBonus={activeBonus}
-              rollSeq={gameState.rollSeq}
-              rolling={isRollingAnim}
-              shakeIntensity={localColor === 'red' ? shakeIntensity : 0}
-              canRoll={localColor === 'red' && canRollNow}
-              isActiveTray={gameState.turn === 'red' && gameState.phase !== 'READY'}
-              compact={gameState.mode === '4p'}
-              accentColor={COLOR_PALETTE.red.fill}
-              onRoll={handleRollDice}
-              ariaLabel={gameState.diceCount === 1 ? 'Roll die for Red' : 'Roll both dice for Red'}
+            {/* Victory Modal Overlay (GAME_OVER phase) */}
+            {gameState.phase === 'GAME_OVER' && gameState.winner && (
+              <div className="absolute inset-0 z-40 flex items-center justify-center p-3 bg-[#1F242D]/40 backdrop-blur-xs rounded-2xl">
+                <div
+                  data-testid="parchisi-victory-modal"
+                  className="w-full max-w-[336px] rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_20px_54px_rgba(31,36,45,0.2)] p-5 text-center space-y-4"
+                >
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span
+                      style={{ backgroundColor: COLOR_PALETTE[gameState.winner].fill }}
+                      className="inline-flex items-center justify-center w-12 h-12 rounded-full border-2 border-white text-white shadow-md"
+                    >
+                      <Crown className="w-6 h-6" />
+                    </span>
+                    <h2 className="text-2xl font-extrabold text-[#1F242D]">
+                      {colorNames[gameState.winner]} Wins!
+                    </h2>
+                    <p className="text-xs text-[#6B7280] font-medium">
+                      All 4 tokens reached the Center Goal
+                    </p>
+                  </div>
+
+                  {/* 3 Tabular Stats */}
+                  <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-[#EAE4DC]">
+                    <div>
+                      <p className="text-lg font-extrabold text-[#FF6B57] tabular-nums">
+                        {gameState.stats[gameState.winner].captures}
+                      </p>
+                      <p className="text-[11px] text-[#6B7280] font-semibold">Captures</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-extrabold text-[#7C5CFC] tabular-nums">
+                        {gameState.stats[gameState.winner].doublesRolled}
+                      </p>
+                      <p className="text-[11px] text-[#6B7280] font-semibold">Doubles</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-extrabold text-[#16A34A] tabular-nums">
+                        {gameState.stats[gameState.winner].homeEntries}/4
+                      </p>
+                      <p className="text-[11px] text-[#6B7280] font-semibold">Home</p>
+                    </div>
+                  </div>
+
+                  {isHost ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        data-start="true"
+                        data-testid="parchisi-play-again-btn"
+                        onClick={() => handleStartMatch(gameState.mode, gameState.diceCount)}
+                        className="flex-1 min-h-[44px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-2xl text-sm font-extrabold text-white bg-[#FF6B57] hover:bg-[#F25743] shadow-sm whitespace-nowrap cursor-pointer"
+                      >
+                        <RotateCcw className="w-4 h-4 shrink-0" />
+                        <span>Play Again</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onReturnToRoomMenu}
+                        className="flex-1 min-h-[44px] px-3 py-2 rounded-2xl text-xs sm:text-sm font-bold bg-[#FAF7F2] hover:bg-[#F1ECE3] text-[#1F242D] border border-[#EAE4DC] whitespace-nowrap cursor-pointer"
+                      >
+                        {t.backToRoomMenu}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs font-bold text-[#7C5CFC] py-1">
+                      {t.roomMenuGuestWaitingBadge}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 3. CLASSIC BOTTOM PLAYER HUD BAR (Red BL + Active Bottom Dice Tray · Green BR in 4P) */}
+        <div className="relative z-20 w-full max-w-[660px] flex items-center justify-between gap-2 px-1 shrink-0 min-h-[48px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <PlayerAvatarBadge
+              color="red"
+              name={colorNames.red}
+              homeCount={homeCount('red')}
+              isActiveTurn={gameState.turn === 'red' && gameState.phase !== 'READY'}
+              turnRemainingFrac={turnFrac}
+              align="left"
+              showMicMuted={redIsLocal ? micMuted : partnerMicMuted}
+              isSpeaking={redIsLocal ? localSpeaking : remoteSpeaking}
             />
-          )}
-        </div>
-
-        {/* Bottom-Right: Green AI (4P) or clean inline turn status (4P/1v1) */}
-        <div className="flex items-center gap-2 shrink-0">
-          {gameState.mode === '4p' ? (
-            <>
-              {isBottomTurn && gameState.turn === 'green' && gameState.phase !== 'READY' && (
-                <ParchisiDice3D
-                  dice={displayedDice}
-                  usedDice={gameState.usedDice}
-                  diceCount={gameState.diceCount}
-                  pendingBonus={activeBonus}
-                  rollSeq={gameState.rollSeq}
-                  rolling={isRollingAnim}
-                  shakeIntensity={0}
-                  canRoll={false}
-                  isActiveTray
-                  compact
-                  accentColor={COLOR_PALETTE.green.fill}
-                  onRoll={handleRollDice}
-                  ariaLabel="Green AI dice"
-                />
-              )}
-              <PlayerAvatarBadge
-                color="green"
-                name={colorNames.green}
-                homeCount={homeCount('green')}
-                isActiveTurn={gameState.turn === 'green' && gameState.phase !== 'READY'}
-                turnRemainingFrac={turnFrac}
-                align="right"
-                isBot
+            {(gameState.turn === 'red' || gameState.phase === 'READY') && (
+              <ParchisiDice3D
+                dice={
+                  gameState.phase === 'READY'
+                    ? gameState.diceCount === 1
+                      ? [5]
+                      : [5, 6]
+                    : displayedDice
+                }
+                usedDice={gameState.usedDice}
+                diceCount={gameState.diceCount}
+                pendingBonus={activeBonus}
+                rollSeq={gameState.rollSeq}
+                rolling={isRollingAnim}
+                shakeIntensity={0}
+                canRoll={localColor === 'red' && canRollNow}
+                isActiveTray={gameState.turn === 'red' && gameState.phase !== 'READY'}
+                compact={gameState.mode === '4p'}
+                accentColor={COLOR_PALETTE.red.fill}
+                onRoll={handleRollDice}
+                ariaLabel={gameState.diceCount === 1 ? 'Roll die for Red' : 'Roll both dice for Red'}
               />
-            </>
-          ) : (
-            <div className="text-right text-[11px] sm:text-xs font-bold text-[#6B7280] tabular-nums">
-              {gameState.phase === 'WAIT_ROLL' || gameState.phase === 'WAIT_MOVE' ? (
-                <span>
-                  {Math.ceil(turnSecondsLeft)}s · {COLOR_PALETTE[gameState.turn].label}
-                </span>
-              ) : (
-                <span>1v1 Classic</span>
-              )}
-            </div>
-          )}
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {gameState.mode === '4p' ? (
+              <>
+                {isBottomTurn && gameState.turn === 'green' && gameState.phase !== 'READY' && (
+                  <ParchisiDice3D
+                    dice={displayedDice}
+                    usedDice={gameState.usedDice}
+                    diceCount={gameState.diceCount}
+                    pendingBonus={activeBonus}
+                    rollSeq={gameState.rollSeq}
+                    rolling={isRollingAnim}
+                    shakeIntensity={0}
+                    canRoll={false}
+                    isActiveTray
+                    compact
+                    accentColor={COLOR_PALETTE.green.fill}
+                    onRoll={handleRollDice}
+                    ariaLabel="Green AI dice"
+                  />
+                )}
+                <PlayerAvatarBadge
+                  color="green"
+                  name={colorNames.green}
+                  homeCount={homeCount('green')}
+                  isActiveTurn={gameState.turn === 'green' && gameState.phase !== 'READY'}
+                  turnRemainingFrac={turnFrac}
+                  align="right"
+                  isBot
+                />
+              </>
+            ) : (
+              <div className="text-right text-[11px] sm:text-xs font-bold text-[#6B7280] tabular-nums">
+                {gameState.phase === 'WAIT_ROLL' || gameState.phase === 'WAIT_MOVE' ? (
+                  <span>
+                    {Math.ceil(turnSecondsLeft)}s · {gameState.diceCount === 1 ? '1 Dé' : '2 Dés'}
+                  </span>
+                ) : (
+                  <span>1v1 Classic</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-      </div>
 
-      {/* 4. BOTTOM QUICK BAR (EMOJI · CHAT · Base Cameras Toggle · Hand · Mute · Hot Camera Enable) */}
-      <div className="relative z-30 w-full max-w-[660px] flex items-center justify-center gap-1 sm:gap-2 pt-1 shrink-0 touch-manipulation select-none">
-        {/* Inline Popover Drawer for EMOJI or CHAT */}
+      {/* 4. BOTTOM QUICK BAR (EMOJI · QUICK TAUNTS · LIVE CHAT DRAWER · MODE OPTIONS · SFX) */}
+      <div className="relative z-30 w-full max-w-[660px] flex items-center justify-center gap-1.5 sm:gap-2 pt-1 shrink-0 touch-manipulation select-none">
         {openDrawer !== 'none' && (
           <div
             data-testid={`parchisi-${openDrawer}-drawer`}
@@ -1329,7 +1217,7 @@ export function ParchisiDuoGameView({
                     type="button"
                     onClick={() => handleSendEmoji(em)}
                     aria-label={`Send ${em} reaction`}
-                    className="w-11 h-11 rounded-full bg-[#FAF7F2] hover:bg-[#FFE8E2] active:scale-90 text-xl flex items-center justify-center transition-transform"
+                    className="w-11 h-11 rounded-full bg-[#FAF7F2] hover:bg-[#FFE8E2] active:scale-90 text-xl flex items-center justify-center transition-transform cursor-pointer"
                   >
                     {em}
                   </button>
@@ -1339,7 +1227,7 @@ export function ParchisiDuoGameView({
                     key={phrase}
                     type="button"
                     onClick={() => handleSendQuickChat(phrase)}
-                    className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-[#FAF7F2] hover:bg-[#FFE8E2] border border-[#EAE4DC] text-xs font-bold text-[#1F242D] whitespace-nowrap transition-colors"
+                    className="min-h-[40px] px-3.5 py-1.5 rounded-full bg-[#FAF7F2] hover:bg-[#FFE8E2] border border-[#EAE4DC] text-xs font-bold text-[#1F242D] whitespace-nowrap transition-colors cursor-pointer"
                   >
                     {phrase}
                   </button>
@@ -1352,7 +1240,7 @@ export function ParchisiDuoGameView({
           data-testid="parchisi-emoji-btn"
           aria-expanded={openDrawer === 'emoji'}
           onClick={() => setOpenDrawer((prev) => (prev === 'emoji' ? 'none' : 'emoji'))}
-          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap shadow-xs ${
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap shadow-xs cursor-pointer ${
             openDrawer === 'emoji'
               ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
               : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
@@ -1367,67 +1255,50 @@ export function ParchisiDuoGameView({
           data-testid="parchisi-chat-btn"
           aria-expanded={openDrawer === 'chat'}
           onClick={() => setOpenDrawer((prev) => (prev === 'chat' ? 'none' : 'chat'))}
-          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap shadow-xs ${
+          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold tracking-wide border transition-colors whitespace-nowrap shadow-xs cursor-pointer ${
             openDrawer === 'chat'
               ? 'bg-[#FF6B57] text-white border-[#FF6B57]'
               : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
           }`}
         >
           <MessageSquare className="w-3.5 h-3.5 shrink-0" />
-          <span>CHAT</span>
+          <span>TAUNT</span>
         </button>
 
-        {/* Base Cameras Mode Toggle (persisted in localStorage 'parchisi_base_cams') */}
         <button
           type="button"
-          data-testid="parchisi-base-cams-toggle"
-          aria-pressed={baseCamsEnabled}
-          onClick={handleToggleBaseCams}
-          title={baseCamsEnabled ? 'Caméras dans les bases activées' : 'Tapis Classique opaque'}
-          className={`min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold border transition-colors whitespace-nowrap shadow-xs ${
-            baseCamsEnabled
-              ? 'bg-[#FFE8E2] text-[#1F242D] border-[#FF6B57]/50 hover:bg-[#FFDAD0]'
-              : 'bg-white text-[#6B7280] border-[#EAE4DC] hover:text-[#1F242D]'
-          }`}
+          data-testid="parchisi-live-chat-btn"
+          onClick={() => {
+            setOpenDrawer('none');
+            onOpenLiveChat();
+          }}
+          className="relative min-h-[40px] inline-flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-extrabold bg-[#FFE8E2] text-[#C8412F] border border-[#FFD1C7] hover:bg-[#FFDAD0] transition-colors whitespace-nowrap shadow-xs cursor-pointer"
         >
-          {baseCamsEnabled ? (
-            <>
-              <span className="sm:hidden">🎥 Cam : ON</span>
-              <span className="hidden sm:inline">🎥 Caméras : ON</span>
-            </>
-          ) : (
-            <>
-              <span className="sm:hidden">🎨 Classique</span>
-              <span className="hidden sm:inline">🎨 Tapis Classique</span>
-            </>
+          <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+          <span>{t.chatToggleLabel}</span>
+          {unreadChatCount > 0 && (
+            <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-[#FF6B57] text-white text-[10px] font-extrabold flex items-center justify-center tabular-nums">
+              {unreadChatCount > 9 ? '9+' : unreadChatCount}
+            </span>
           )}
         </button>
 
-        <button
-          type="button"
-          data-testid="parchisi-hand-toggle"
-          aria-pressed={handDiceEnabled}
-          onClick={() => {
-            soundFx.click();
-            onToggleHandDice(!handDiceEnabled);
-          }}
-          title="Hand-Shake Dice Roll (MediaPipe)"
-          aria-label="Hand-Shake Dice Roll"
-          className={`min-h-[40px] min-w-[40px] inline-flex items-center justify-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-xs font-bold border transition-colors whitespace-nowrap shrink-0 shadow-xs ${
-            handDiceEnabled
-              ? 'bg-[#E6F6EF] text-[#15803D] border-[#86EFAC]'
-              : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
-          }`}
-        >
-          <Hand className="w-4 h-4 shrink-0" />
-          <span className="hidden sm:inline">
-            {handDiceEnabled
-              ? handTrackerStatus === 'loading'
-                ? 'Hand…'
-                : 'Hand On'
-              : 'Hand'}
-          </span>
-        </button>
+        {isHost && (
+          <button
+            type="button"
+            data-testid="parchisi-mode-btn"
+            onClick={() => {
+              soundFx.click();
+              setOpenDrawer('none');
+              setSetupModalOpen(true);
+            }}
+            title="1v1 / 4P · 1 Dé / 2 Dés"
+            className="min-h-[40px] inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-full text-[11px] sm:text-xs font-bold bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] transition-colors whitespace-nowrap shadow-xs cursor-pointer"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 text-[#7C5CFC] shrink-0" />
+            <span>{gameState.mode === '4p' ? '4P' : '1v1'}</span>
+          </button>
+        )}
 
         <button
           type="button"
@@ -1435,23 +1306,14 @@ export function ParchisiDuoGameView({
           aria-label={sfxMutedLocal ? 'Unmute sound' : 'Mute sound'}
           aria-pressed={sfxMutedLocal}
           onClick={handleToggleSoundMute}
-          className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] transition-colors shrink-0 shadow-xs"
+          className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] transition-colors shrink-0 shadow-xs cursor-pointer"
         >
-          {sfxMutedLocal ? <VolumeX className="w-4 h-4 text-[#6B7280]" /> : <Volume2 className="w-4 h-4 text-[#FF6B57]" />}
+          {sfxMutedLocal ? (
+            <VolumeX className="w-4 h-4 text-[#6B7280]" />
+          ) : (
+            <Volume2 className="w-4 h-4 text-[#FF6B57]" />
+          )}
         </button>
-
-        {!showLocalLiveVideo && (
-          <button
-            type="button"
-            data-testid="parchisi-enable-cam-btn"
-            onClick={onRequestCamera}
-            title="Activer la caméra en direct"
-            aria-label="Activer la caméra"
-            className="min-h-[40px] min-w-[40px] inline-flex items-center justify-center rounded-full bg-[#FFE8E2] text-[#FF6B57] border border-[#FF6B57]/40 hover:bg-[#FFDAD0] transition-colors shrink-0 shadow-xs"
-          >
-            <Camera className="w-4 h-4" />
-          </button>
-        )}
       </div>
 
       {/* Celebratory Confetti Burst on Center Home Entry & Victory */}
@@ -1462,7 +1324,7 @@ export function ParchisiDuoGameView({
           className="pointer-events-none fixed inset-0 z-50 overflow-hidden"
         >
           {Array.from({ length: 24 }, (_, idx) => {
-            const left = (idx * 4.3 + (confettiSeed * 13) % 9) % 100;
+            const left = (idx * 4.3 + ((confettiSeed * 13) % 9)) % 100;
             const delay = (idx % 6) * 0.08;
             const color = CONFETTI_COLORS[idx % CONFETTI_COLORS.length];
             return (

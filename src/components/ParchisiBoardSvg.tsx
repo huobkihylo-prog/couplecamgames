@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ParchisiColor,
   ParchisiMoveAnimation,
@@ -53,12 +53,6 @@ interface ParchisiBoardSvgProps {
   onMoveAnimComplete: (seq: number) => void;
   onTriggerCelebration: () => void;
   floatingReactions: FloatingReactionItem[];
-  /** Base Camera Mode props (zero <foreignObject>, pure HTML z-0 layer behind SVG z-10) */
-  baseCamsEnabled: boolean;
-  redBaseStream: MediaStream | null;
-  yellowBaseStream: MediaStream | null;
-  mirrorRedBase: boolean;
-  mirrorYellowBase: boolean;
   onTokenClick: (tokenId: number) => void;
   onTokenHover: (tokenId: number | null) => void;
   onSelectMoveOption: (move: ParchisiMoveOption) => void;
@@ -71,22 +65,6 @@ const STAR_POINTS =
 
 /** Classic 5-point crown emblem centered on glossy 3D game tokens */
 const CROWN_PATH = 'M -7,5 L -8.5,-4 L -3.5,0.5 L 0,-6 L 3.5,0.5 L 8.5,-4 L 7,5 Z';
-
-/** Pure percentage CSS bounds aligned identically to the 780x780 SVG viewBox corner bases */
-const BASE_VIDEO_BOUNDS = {
-  red: {
-    left: `${(CORNER_BASES.red.x / PARCHISI_VIEWBOX) * 100}%`,
-    top: `${(CORNER_BASES.red.y / PARCHISI_VIEWBOX) * 100}%`,
-    width: `${(CORNER_BASES.red.size / PARCHISI_VIEWBOX) * 100}%`,
-    height: `${(CORNER_BASES.red.size / PARCHISI_VIEWBOX) * 100}%`,
-  },
-  yellow: {
-    left: `${(CORNER_BASES.yellow.x / PARCHISI_VIEWBOX) * 100}%`,
-    top: `${(CORNER_BASES.yellow.y / PARCHISI_VIEWBOX) * 100}%`,
-    width: `${(CORNER_BASES.yellow.size / PARCHISI_VIEWBOX) * 100}%`,
-    height: `${(CORNER_BASES.yellow.size / PARCHISI_VIEWBOX) * 100}%`,
-  },
-} as const;
 
 function tokenKey(color: ParchisiColor, id: number): string {
   return `${color}-${id}`;
@@ -199,11 +177,6 @@ export function ParchisiBoardSvg({
   onMoveAnimComplete,
   onTriggerCelebration,
   floatingReactions,
-  baseCamsEnabled,
-  redBaseStream,
-  yellowBaseStream,
-  mirrorRedBase,
-  mirrorYellowBase,
   onTokenClick,
   onTokenHover,
   onSelectMoveOption,
@@ -214,9 +187,6 @@ export function ParchisiBoardSvg({
   const B = PARCHISI_BOARD_SIZE; // 720
   const C = O + B / 2; // 390
 
-  const redVideoRef = useRef<HTMLVideoElement | null>(null);
-  const yellowVideoRef = useRef<HTMLVideoElement | null>(null);
-
   // Direct DOM refs for 60fps GPU-composited rAF token animation (ZERO 60Hz setState, ZERO DOM reorder)
   const tokenElRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [impactBursts, setImpactBursts] = useState<CaptureImpactBurst[]>([]);
@@ -226,70 +196,7 @@ export function ParchisiBoardSvg({
   const onTriggerCelebrationRef = useRef(onTriggerCelebration);
   onTriggerCelebrationRef.current = onTriggerCelebration;
 
-  const showRedBaseVideo = baseCamsEnabled && Boolean(redBaseStream);
-  const showYellowBaseVideo = baseCamsEnabled && Boolean(yellowBaseStream);
-
-  // Universal cross-browser video playback helper (Safari iOS, Android Chrome/Samsung/Firefox/Brave, Desktop)
-  const ensureBaseVideosPlaying = useCallback(() => {
-    const pairs: [HTMLVideoElement | null, boolean][] = [
-      [redVideoRef.current, showRedBaseVideo],
-      [yellowVideoRef.current, showYellowBaseVideo],
-    ];
-    for (const [el, active] of pairs) {
-      if (el && active && el.srcObject) {
-        el.muted = true;
-        el.playsInline = true;
-        el.play().catch(() => {});
-      }
-    }
-  }, [showRedBaseVideo, showYellowBaseVideo]);
-
-  // Attach/detach Red base <video> srcObject cleanly (NEVER stops MediaStreamTracks!)
-  useEffect(() => {
-    const el = redVideoRef.current;
-    if (!el) return;
-    el.setAttribute('webkit-playsinline', 'true');
-    el.setAttribute('playsinline', 'true');
-    el.muted = true;
-    if (showRedBaseVideo && redBaseStream) {
-      if (el.srcObject !== redBaseStream) {
-        el.srcObject = redBaseStream;
-      }
-      el.play().catch(() => {});
-    } else {
-      el.srcObject = null;
-    }
-  }, [showRedBaseVideo, redBaseStream]);
-
-  // Attach/detach Yellow base <video> srcObject cleanly (NEVER stops MediaStreamTracks!)
-  useEffect(() => {
-    const el = yellowVideoRef.current;
-    if (!el) return;
-    el.setAttribute('webkit-playsinline', 'true');
-    el.setAttribute('playsinline', 'true');
-    el.muted = true;
-    if (showYellowBaseVideo && yellowBaseStream) {
-      if (el.srcObject !== yellowBaseStream) {
-        el.srcObject = yellowBaseStream;
-      }
-      el.play().catch(() => {});
-    } else {
-      el.srcObject = null;
-    }
-  }, [showYellowBaseVideo, yellowBaseStream]);
-
-  // Automatically resume base videos when returning from background tab / WhatsApp on mobile
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        ensureBaseVideosPlaying();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [ensureBaseVideosPlaying]);
-
-  // Precompute frame paths with crisp 720x720 interior cutout so base videos shine through cleanly
+  // Classic beveled wooden frame paths
   const outerWoodFramePath = useMemo(
     () => buildFrameWithCutoutPath(2, 2, PARCHISI_VIEWBOX - 4, PARCHISI_VIEWBOX - 4, 28, O, O, B, B),
     [O, B],
@@ -677,48 +584,10 @@ export function ParchisiBoardSvg({
       data-testid="parchisi-board-wrapper"
       style={{ WebkitTapHighlightColor: 'transparent' }}
       className="relative aspect-square w-full h-full max-w-full max-h-full overflow-hidden rounded-[3.6%] select-none touch-manipulation flex items-center justify-center"
-      onPointerDown={ensureBaseVideosPlaying}
       onClick={(e) => {
         if (e.target === e.currentTarget) onDismissPicker();
       }}
     >
-      {/* LAYER z-0: Pure HTML Base Camera <video> Elements (ZERO <foreignObject>, 100% Safari iOS/Android/Desktop safe) */}
-      <div
-        data-testid="parchisi-base-video-red"
-        data-cam-active={showRedBaseVideo ? 'true' : 'false'}
-        style={BASE_VIDEO_BOUNDS.red}
-        className={`pointer-events-none absolute z-0 overflow-hidden transition-opacity duration-200 ${
-          showRedBaseVideo ? 'opacity-100' : 'opacity-0'
-        }`}
-      >
-        <video
-          ref={redVideoRef}
-          autoPlay
-          playsInline
-          muted
-          onLoadedMetadata={ensureBaseVideosPlaying}
-          className={`w-full h-full object-cover ${mirrorRedBase ? 'scale-x-[-1]' : ''}`}
-        />
-      </div>
-
-      <div
-        data-testid="parchisi-base-video-yellow"
-        data-cam-active={showYellowBaseVideo ? 'true' : 'false'}
-        style={BASE_VIDEO_BOUNDS.yellow}
-        className={`pointer-events-none absolute z-0 overflow-hidden transition-opacity duration-200 ${
-          showYellowBaseVideo ? 'opacity-100' : 'opacity-0'
-        }`}
-      >
-        <video
-          ref={yellowVideoRef}
-          autoPlay
-          playsInline
-          muted
-          onLoadedMetadata={ensureBaseVideosPlaying}
-          className={`w-full h-full object-cover ${mirrorYellowBase ? 'scale-x-[-1]' : ''}`}
-        />
-      </div>
-
       {/* LAYER z-10: Crisp Official 68-Tile Wooden Parcheesi SVG Board */}
       <svg
         viewBox={`0 0 ${PARCHISI_VIEWBOX} ${PARCHISI_VIEWBOX}`}
@@ -780,39 +649,24 @@ export function ParchisiBoardSvg({
           strokeWidth="3"
         />
 
-        {/* 2. Four Corner Home Bases (Blue TL, Yellow TR, Red BL, Green BR) */}
+        {/* 2. Four Classic Solid Corner Home Bases (Blue TL, Yellow TR, Red BL, Green BR) */}
         {ALL_PARCHISI_COLORS.map((color) => {
           const base = CORNER_BASES[color];
           const pal = COLOR_PALETTE[color];
           const isTurn = state.turn === color && state.phase !== 'READY';
           const isActiveColor = state.activeColors.includes(color);
-          const isLiveCamBase =
-            (color === 'red' && showRedBaseVideo) || (color === 'yellow' && showYellowBaseVideo);
-
-          let baseFill = pal.fill;
-          if (isLiveCamBase) {
-            if (color === 'red') {
-              baseFill = isTurn ? 'rgba(229, 57, 53, 0.28)' : 'rgba(229, 57, 53, 0.42)';
-            } else {
-              baseFill = isTurn ? 'rgba(251, 192, 45, 0.26)' : 'rgba(251, 192, 45, 0.40)';
-            }
-          }
 
           return (
-            <g
-              key={`base-${color}`}
-              data-testid={`parchisi-base-${color}`}
-              data-transparent={isLiveCamBase ? 'true' : 'false'}
-            >
+            <g key={`base-${color}`} data-testid={`parchisi-base-${color}`}>
               <rect
                 x={base.x}
                 y={base.y}
                 width={base.size}
                 height={base.size}
-                fill={baseFill}
+                fill={pal.fill}
                 stroke="#6E4422"
                 strokeWidth="1.5"
-                opacity={isLiveCamBase ? 1 : isActiveColor ? 1 : 0.92}
+                opacity={isActiveColor ? 1 : 0.92}
               />
               <rect
                 x={base.x + 12}
@@ -820,35 +674,21 @@ export function ParchisiBoardSvg({
                 width={base.size - 24}
                 height={base.size - 24}
                 rx="18"
-                fill={isLiveCamBase ? 'none' : 'rgba(255,255,255,0.12)'}
-                stroke={isTurn ? '#FEF08A' : isLiveCamBase ? 'rgba(255,255,255,0.68)' : 'rgba(255,255,255,0.45)'}
+                fill="rgba(255,255,255,0.12)"
+                stroke={isTurn ? '#FEF08A' : 'rgba(255,255,255,0.45)'}
                 strokeWidth={isTurn ? '4' : '2'}
               />
               {base.slots.map((slot, idx) => (
                 <g key={`slot-${color}-${idx}`}>
-                  {isLiveCamBase ? (
-                    <circle
-                      cx={slot.x}
-                      cy={slot.y}
-                      r="25"
-                      fill="rgba(0,0,0,0.14)"
-                      stroke="rgba(255,255,255,0.72)"
-                      strokeWidth="2"
-                      strokeDasharray="4 3"
-                    />
-                  ) : (
-                    <>
-                      <circle
-                        cx={slot.x}
-                        cy={slot.y}
-                        r="27"
-                        fill={pal.slot}
-                        stroke="rgba(255,255,255,0.52)"
-                        strokeWidth="2"
-                      />
-                      <circle cx={slot.x} cy={slot.y} r="25" fill="url(#slot-recess)" />
-                    </>
-                  )}
+                  <circle
+                    cx={slot.x}
+                    cy={slot.y}
+                    r="27"
+                    fill={pal.slot}
+                    stroke="rgba(255,255,255,0.52)"
+                    strokeWidth="2"
+                  />
+                  <circle cx={slot.x} cy={slot.y} r="25" fill="url(#slot-recess)" />
                 </g>
               ))}
             </g>

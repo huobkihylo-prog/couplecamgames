@@ -1,88 +1,64 @@
-import { useEffect, useRef, useState, type FormEvent, type MutableRefObject } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   ArrowRight,
-  Camera,
-  Check,
-  Copy,
-  FlipHorizontal2,
-  Link2,
+  Crown,
   Loader2,
+  MessageCircle,
   Mic,
   MicOff,
   Sparkles,
   Users,
-  Video,
-  VideoOff,
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import type { ConnectionStatus, FaceMetrics } from '../types/duoplay';
+import type { ConnectionStatus, MicAccessStatus } from '../types/duoplay';
 import { normalizeRoomCode } from '../utils/roomCode';
-import { buildRoomShareUrl, copyTextToClipboard } from '../utils/clipboard';
 import { useI18n } from '../i18n/LanguageContext';
-import { useMirror } from '../context/MirrorContext';
 import { CoupleCamLogo } from './CoupleCamLogo';
 import { LanguageSwitcher } from './LanguageSwitcher';
-import { AvatarCanvas } from './AvatarCanvas';
 
 interface LobbyViewProps {
   playerName: string;
   onPlayerNameChange: (name: string) => void;
-  roomCode: string;
   initialJoinCode?: string;
   connectionStatus: ConnectionStatus;
   statusMessage: string;
-  cameraHint: string | null;
-  localStream: MediaStream | null;
-  cameraEnabled: boolean;
   micMuted: boolean;
+  micStatus: MicAccessStatus;
+  micHint: string | null;
   sfxMuted: boolean;
-  localMetricsRef: MutableRefObject<FaceMetrics>;
-  onRequestCamera: () => void;
   onToggleMic: () => void;
-  onToggleCamera: () => void;
   onToggleSfx: () => void;
   onCreateRoom: () => void;
   onCancelRoom: () => void;
   onJoinRoom: (code: string) => void;
   onStartSoloMode: () => void;
-  onNotify: (message: string, tone?: 'success' | 'info' | 'accent') => void;
 }
 
 export function LobbyView({
   playerName,
   onPlayerNameChange,
-  roomCode,
   initialJoinCode = '',
   connectionStatus,
   statusMessage,
-  cameraHint,
-  localStream,
-  cameraEnabled,
   micMuted,
+  micStatus,
+  micHint,
   sfxMuted,
-  localMetricsRef,
-  onRequestCamera,
   onToggleMic,
-  onToggleCamera,
   onToggleSfx,
   onCreateRoom,
   onCancelRoom,
   onJoinRoom,
   onStartSoloMode,
-  onNotify,
 }: LobbyViewProps) {
   const { t } = useI18n();
-  const { isMirrored, toggleMirrored } = useMirror();
   const [joinCodeInput, setJoinCodeInput] = useState(() => normalizeRoomCode(initialJoinCode));
-  const [copiedMode, setCopiedMode] = useState<'none' | 'code' | 'link'>('none');
   const [formError, setFormError] = useState<string | null>(null);
-  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  const isWaitingHost = connectionStatus === 'creating' || connectionStatus === 'waiting';
+  const isCreating = connectionStatus === 'creating';
   const isJoining = connectionStatus === 'connecting';
-  const showLiveVideo = Boolean(localStream) && cameraEnabled;
+  const isBusy = isCreating || isJoining;
 
   useEffect(() => {
     const clean = normalizeRoomCode(initialJoinCode);
@@ -90,40 +66,6 @@ export function LobbyView({
       setJoinCodeInput(clean);
     }
   }, [initialJoinCode]);
-
-  useEffect(() => {
-    const video = previewVideoRef.current;
-    if (!video) return;
-    if (showLiveVideo && localStream) {
-      if (video.srcObject !== localStream) {
-        video.srcObject = localStream;
-      }
-      video.play().catch(() => {});
-    } else {
-      video.srcObject = null;
-    }
-  }, [localStream, showLiveVideo]);
-
-  const handleCopyCode = async () => {
-    if (!roomCode) return;
-    const ok = await copyTextToClipboard(roomCode);
-    if (ok) {
-      setCopiedMode('code');
-      onNotify(t.toastCodeCopied, 'success');
-      window.setTimeout(() => setCopiedMode((prev) => (prev === 'code' ? 'none' : prev)), 2200);
-    }
-  };
-
-  const handleCopyShareLink = async () => {
-    if (!roomCode) return;
-    const shareUrl = buildRoomShareUrl(roomCode);
-    const ok = await copyTextToClipboard(shareUrl);
-    if (ok) {
-      setCopiedMode('link');
-      onNotify(t.toastLinkCopied, 'success');
-      window.setTimeout(() => setCopiedMode((prev) => (prev === 'link' ? 'none' : prev)), 2200);
-    }
-  };
 
   const handleCreateSubmit = () => {
     const trimmed = playerName.trim();
@@ -151,19 +93,7 @@ export function LobbyView({
     onJoinRoom(cleanCode);
   };
 
-  const statusBadgeLabel =
-    connectionStatus === 'connected'
-      ? t.statusConnected
-      : isWaitingHost || isJoining
-        ? t.statusWaiting
-        : t.statusReady;
-
-  const statusDotColor =
-    connectionStatus === 'connected'
-      ? 'bg-[#16A34A]'
-      : isWaitingHost || isJoining
-        ? 'bg-[#F59E0B] animate-pulse'
-        : 'bg-[#FF6B57]';
+  const initials = (playerName.trim().slice(0, 2) || 'AL').toUpperCase();
 
   return (
     <main className="relative min-h-[100dvh] w-full overflow-x-hidden flex flex-col bg-[#FAF7F2] text-[#1F242D]">
@@ -177,49 +107,22 @@ export function LobbyView({
         }}
       />
 
-      {/* 1. Clean Warm Header */}
+      {/* 1. Clean Warm Header (Zero camera / mirror buttons) */}
       <header className="relative z-20 w-full border-b border-[#EAE4DC] bg-[#FAF7F2]/90 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-3.5 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2.5">
-            <CoupleCamLogo size="sm" />
-            <span
-              data-testid="lobby-status-badge"
-              className={`${
-                isWaitingHost || isJoining || connectionStatus === 'connected'
-                  ? 'inline-flex'
-                  : 'hidden sm:inline-flex'
-              } items-center gap-1.5 px-2.5 py-1 rounded-full bg-white border border-[#EAE4DC] text-xs font-semibold text-[#1F242D] shadow-xs whitespace-nowrap`}
-            >
-              <span className={`w-2 h-2 rounded-full ${statusDotColor}`} />
-              <span>{statusBadgeLabel}</span>
-            </span>
-          </div>
+        <div className="max-w-5xl mx-auto px-3.5 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
+          <CoupleCamLogo size="sm" />
 
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <LanguageSwitcher />
 
             <button
               type="button"
-              onClick={toggleMirrored}
-              title={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
-              aria-label={isMirrored ? 'Miroir activé' : 'Miroir désactivé'}
-              aria-pressed={isMirrored}
-              className={`w-10 h-10 inline-flex items-center justify-center rounded-full border transition-all shadow-xs ${
-                isMirrored
-                  ? 'bg-white text-[#7C5CFC] border-[#7C5CFC]/35'
-                  : 'bg-white text-[#6B7280] border-[#EAE4DC]'
-              }`}
-            >
-              <FlipHorizontal2 className="w-4 h-4 shrink-0" />
-            </button>
-
-            <button
-              type="button"
+              data-testid="lobby-mic-btn"
               onClick={onToggleMic}
               title={micMuted ? t.micMuted : t.micActive}
               aria-label={micMuted ? t.micMuted : t.micActive}
               aria-pressed={micMuted}
-              className={`w-10 h-10 inline-flex items-center justify-center rounded-full border transition-all shadow-xs ${
+              className={`w-10 h-10 inline-flex items-center justify-center rounded-full border transition-all shadow-xs cursor-pointer ${
                 micMuted
                   ? 'bg-[#FEE2E2] text-[#DC2626] border-[#FCA5A5]'
                   : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
@@ -230,26 +133,12 @@ export function LobbyView({
 
             <button
               type="button"
-              onClick={localStream ? onToggleCamera : onRequestCamera}
-              title={t.enableCamera}
-              aria-label={t.enableCamera}
-              aria-pressed={showLiveVideo}
-              className={`w-10 h-10 inline-flex items-center justify-center rounded-full border transition-all shadow-xs ${
-                showLiveVideo
-                  ? 'bg-[#E6F6EF] text-[#15803D] border-[#BBF7D0]'
-                  : 'bg-white text-[#1F242D] border-[#EAE4DC] hover:bg-[#FFFDF9]'
-              }`}
-            >
-              {showLiveVideo ? <Video className="w-4 h-4 shrink-0" /> : <VideoOff className="w-4 h-4 shrink-0" />}
-            </button>
-
-            <button
-              type="button"
+              data-testid="lobby-sfx-btn"
               onClick={onToggleSfx}
-              title="Audio SFX"
-              aria-label="Audio SFX"
+              title={t.toolbarSfxLabel}
+              aria-label={t.toolbarSfxLabel}
               aria-pressed={sfxMuted}
-              className="w-10 h-10 inline-flex items-center justify-center rounded-full bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] transition-all shadow-xs"
+              className="w-10 h-10 inline-flex items-center justify-center rounded-full bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FFFDF9] transition-all shadow-xs cursor-pointer"
             >
               {sfxMuted ? <VolumeX className="w-4 h-4 text-[#6B7280]" /> : <Volume2 className="w-4 h-4 text-[#FF6B57]" />}
             </button>
@@ -257,73 +146,53 @@ export function LobbyView({
         </div>
       </header>
 
-      {/* 2. Balanced Two-Column Hero (Stacked cleanly on mobile) */}
-      <div className="relative z-10 flex-1 w-full max-w-6xl mx-auto px-3.5 sm:px-6 py-5 sm:py-8 flex items-center">
+      {/* 2. Balanced Two-Column Home Hero */}
+      <div className="relative z-10 flex-1 w-full max-w-5xl mx-auto px-3.5 sm:px-6 py-6 sm:py-10 flex items-center">
         <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
-          {/* LEFT COLUMN: Polaroid Camera Preview + Name Field */}
-          <section className="lg:col-span-6 order-2 lg:order-1">
-            <div className="bg-white border border-[#EAE4DC] shadow-[0_4px_20px_rgba(31,36,45,0.06)] rounded-3xl p-4 sm:p-5 space-y-4">
-              {/* Soft Polaroid-inspired camera frame */}
-              <div className="relative rounded-[22px] p-1.5 bg-[#FFFDF9] border border-[#EAE4DC] shadow-sm">
-                <div className="relative w-full aspect-[4/3] sm:aspect-[16/11] rounded-[16px] overflow-hidden bg-[#FFE8E2]">
-                  {showLiveVideo ? (
-                    <video
-                      ref={previewVideoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className={`w-full h-full object-cover ${isMirrored ? 'mirror-video' : ''}`}
-                    />
-                  ) : (
-                    <AvatarCanvas
-                      name={playerName || 'Alex'}
-                      metricsRef={localMetricsRef}
-                      accentColor="#FF6B57"
-                      bgTop="#FFE8E2"
-                      bgBottom="#EFE9FB"
-                      isAi={false}
-                    />
-                  )}
+          {/* LEFT COLUMN: Pastel Parcheesi & Voice Profile Card */}
+          <section className="lg:col-span-5 order-2 lg:order-1">
+            <div className="bg-white border border-[#EAE4DC] shadow-[0_4px_20px_rgba(31,36,45,0.06)] rounded-3xl p-5 sm:p-6 space-y-5">
+              {/* Warm Pastel Parcheesi Showcase Banner */}
+              <div className="rounded-2xl bg-gradient-to-br from-[#FFE8E2] via-[#FFF8EC] to-[#EFE9FB] border border-[#EAE4DC] p-5 flex flex-col items-center text-center gap-3">
+                {/* Four Classic Parcheesi Color Tokens + Voice Avatar */}
+                <div className="relative flex items-center justify-center">
+                  <div className="w-18 h-18 rounded-full bg-white border-2 border-[#FF6B57]/50 shadow-[0_8px_24px_rgba(255,107,87,0.18)] flex items-center justify-center text-2xl font-extrabold text-[#FF6B57]">
+                    {initials}
+                  </div>
+                  <span
+                    aria-hidden="true"
+                    className="absolute -top-1 -end-1 w-7 h-7 rounded-full bg-[#FEF6DC] border-2 border-white text-[#D97706] flex items-center justify-center shadow-xs"
+                  >
+                    <Crown className="w-3.5 h-3.5" />
+                  </span>
+                </div>
 
-                  {/* Top status pill inside mirror frame */}
-                  <div className="absolute top-3 start-3 end-3 flex items-center justify-between gap-2">
-                    <span
-                      data-testid="lobby-camera-badge"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/88 backdrop-blur-md border border-[#EAE4DC] text-xs font-bold text-[#1F242D] shadow-xs"
-                    >
-                      <span
-                        className={`w-2 h-2 rounded-full ${
-                          showLiveVideo ? 'bg-[#16A34A]' : 'bg-[#FF6B57]'
-                        }`}
-                      />
-                      <span>{showLiveVideo ? t.cameraActiveBadge : t.cameraOffBadge}</span>
+                <div className="space-y-1">
+                  <p className="text-base font-extrabold text-[#1F242D]">
+                    {playerName.trim() || 'Alex'}
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2 text-xs font-bold text-[#6B7280]">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/90 border border-[#EAE4DC] text-[#1F242D]">
+                      <Mic className="w-3.5 h-3.5 text-[#FF6B57]" />
+                      <span>{micMuted ? t.micMuted : micStatus === 'denied' ? t.voiceNoMic : t.micActive}</span>
                     </span>
-
-                    {!showLiveVideo && (
-                      <button
-                        type="button"
-                        onClick={onRequestCamera}
-                        className="min-h-[40px] inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs sm:text-sm font-bold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-md shadow-[#FF6B57]/25 transition-all whitespace-nowrap"
-                      >
-                        <Camera className="w-4 h-4 shrink-0" />
-                        <span>{t.enableCamera}</span>
-                      </button>
-                    )}
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/90 border border-[#EAE4DC] text-[#1F242D]">
+                      <MessageCircle className="w-3.5 h-3.5 text-[#7C5CFC]" />
+                      <span>{t.chatTitle}</span>
+                    </span>
                   </div>
+                </div>
 
-                  {/* Frosted white name tag */}
-                  <div className="absolute start-3 bottom-3">
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/88 backdrop-blur-md border border-[#EAE4DC] shadow-xs">
-                      <p className="text-xs sm:text-sm font-bold text-[#1F242D] truncate max-w-[180px]">
-                        {playerName.trim() || 'Alex'}{' '}
-                        <span className="text-xs font-semibold text-[#6B7280]">{t.youTag}</span>
-                      </p>
-                    </div>
-                  </div>
+                {/* Mini 4-color classic Parcheesi pawn accent row */}
+                <div className="flex items-center gap-2 pt-1" aria-hidden="true">
+                  <span className="w-4 h-4 rounded-full bg-[#E53935] border-2 border-white shadow-xs" />
+                  <span className="w-4 h-4 rounded-full bg-[#FBC02D] border-2 border-white shadow-xs" />
+                  <span className="w-4 h-4 rounded-full bg-[#2E9E5B] border-2 border-white shadow-xs" />
+                  <span className="w-4 h-4 rounded-full bg-[#1E88E5] border-2 border-white shadow-xs" />
                 </div>
               </div>
 
-              {/* Prominent Name Input */}
+              {/* Prominent Nickname Input */}
               <div className="space-y-1.5">
                 <label
                   htmlFor="couplecam-player-name"
@@ -345,14 +214,14 @@ export function LobbyView({
                 />
               </div>
 
-              {cameraHint && (
-                <p className="text-xs text-[#6B7280] leading-relaxed">{cameraHint}</p>
+              {micHint && (
+                <p className="text-xs text-[#6B7280] leading-relaxed">{micHint}</p>
               )}
             </div>
           </section>
 
           {/* RIGHT COLUMN: Clean Warm Action Panel */}
-          <section className="lg:col-span-6 order-1 lg:order-2 space-y-5">
+          <section className="lg:col-span-7 order-1 lg:order-2 space-y-5">
             <div className="space-y-2">
               <h1 className="text-3xl sm:text-5xl font-extrabold leading-[1.08] tracking-tight text-[#1F242D]">
                 {t.lobbyHeadline}
@@ -365,83 +234,27 @@ export function LobbyView({
             </div>
 
             <div className="bg-white border border-[#EAE4DC] shadow-[0_4px_20px_rgba(31,36,45,0.06)] rounded-3xl p-4 sm:p-6 space-y-4">
-              {/* 1. Primary CTA: "Créer un salon" */}
-              {!isWaitingHost ? (
-                <button
-                  type="button"
-                  data-testid="lobby-create-btn"
-                  onClick={handleCreateSubmit}
-                  className="btn-shine w-full min-h-[56px] inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl text-base sm:text-lg font-extrabold bg-[#FF6B57] hover:bg-[#F25743] text-white shadow-[0_8px_22px_-4px_rgba(255,107,87,0.4)] transition-all hover:-translate-y-0.5 whitespace-nowrap"
-                >
-                  <Users className="w-5 h-5 shrink-0" />
-                  <span>{t.createBtn}</span>
-                  <ArrowRight className="w-5 h-5 shrink-0 rtl:rotate-180" />
-                </button>
-              ) : (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.97 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="rounded-2xl bg-[#FFFDF9] border border-[#FF6B57]/35 p-4 space-y-3.5 shadow-sm"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-[#6B7280]">
-                        {t.shareCodeLabel}
-                      </p>
-                      <p
-                        dir="ltr"
-                        data-testid="host-room-code"
-                        className="font-mono text-4xl sm:text-5xl font-extrabold tracking-[0.22em] text-[#FF6B57] tabular-nums mt-0.5"
-                      >
-                        {roomCode}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      data-testid="copy-room-code"
-                      onClick={handleCopyCode}
-                      className="min-h-[46px] inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-[#FF6B57] text-white hover:bg-[#F25743] shadow-sm transition-all whitespace-nowrap shrink-0"
-                    >
-                      {copiedMode === 'code' ? (
-                        <Check className="w-4 h-4" />
-                      ) : (
-                        <Copy className="w-4 h-4" />
-                      )}
-                      <span>{copiedMode === 'code' ? t.codeCopiedBtn : t.copyCodeBtn}</span>
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    data-testid="copy-share-link"
-                    onClick={handleCopyShareLink}
-                    className="w-full min-h-[46px] inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-[#EFE9FB] hover:bg-[#E5DCFA] text-[#1F242D] border border-[#DDD4F7] transition-all whitespace-nowrap"
-                  >
-                    {copiedMode === 'link' ? (
-                      <Check className="w-4 h-4 text-[#16A34A]" />
-                    ) : (
-                      <Link2 className="w-4 h-4 text-[#7C5CFC]" />
-                    )}
-                    <span>
-                      {copiedMode === 'link' ? t.linkCopiedBtn : `${t.copyLinkBtn} (?room=${roomCode})`}
-                    </span>
-                  </button>
-
-                  <div className="flex items-center justify-between gap-3 pt-1 text-xs sm:text-sm text-[#6B7280]">
-                    <span className="inline-flex items-center gap-2 font-medium">
-                      <Loader2 className="w-4 h-4 animate-spin text-[#FF6B57] shrink-0" />
-                      <span>{statusMessage || t.waitingPartner}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={onCancelRoom}
-                      className="min-h-[40px] px-3 text-xs font-bold text-[#6B7280] hover:text-[#1F242D] underline underline-offset-4 whitespace-nowrap shrink-0"
-                    >
-                      {t.cancelBtn}
-                    </button>
-                  </div>
-                </motion.div>
-              )}
+              {/* 1. Primary CTA: "Créer un salon" -> Enters Room Menu directly */}
+              <button
+                type="button"
+                data-testid="lobby-create-btn"
+                disabled={isBusy}
+                onClick={handleCreateSubmit}
+                className="btn-shine w-full min-h-[56px] inline-flex items-center justify-center gap-2.5 px-6 py-4 rounded-2xl text-base sm:text-lg font-extrabold bg-[#FF6B57] hover:bg-[#F25743] disabled:opacity-65 text-white shadow-[0_8px_22px_-4px_rgba(255,107,87,0.4)] transition-all hover:-translate-y-0.5 whitespace-nowrap cursor-pointer"
+              >
+                {isCreating ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin shrink-0" />
+                    <span>{t.creatingBtn}</span>
+                  </>
+                ) : (
+                  <>
+                    <Users className="w-5 h-5 shrink-0" />
+                    <span>{t.createBtn}</span>
+                    <ArrowRight className="w-5 h-5 shrink-0 rtl:rotate-180" />
+                  </>
+                )}
+              </button>
 
               {/* Divider */}
               <div className="flex items-center gap-3" aria-hidden="true">
@@ -474,7 +287,7 @@ export function LobbyView({
                     spellCheck={false}
                     autoComplete="off"
                     maxLength={120}
-                    disabled={isJoining}
+                    disabled={isBusy}
                     value={joinCodeInput}
                     onChange={(e) => {
                       setJoinCodeInput(normalizeRoomCode(e.target.value));
@@ -486,8 +299,8 @@ export function LobbyView({
                   <button
                     type="submit"
                     data-testid="lobby-join-btn"
-                    disabled={isJoining}
-                    className="min-h-[54px] px-5 sm:px-6 rounded-2xl text-sm sm:text-base font-extrabold bg-[#1F242D] text-white hover:bg-[#313846] disabled:opacity-60 inline-flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap shrink-0"
+                    disabled={isBusy}
+                    className="min-h-[54px] px-5 sm:px-6 rounded-2xl text-sm sm:text-base font-extrabold bg-[#1F242D] text-white hover:bg-[#313846] disabled:opacity-60 inline-flex items-center justify-center gap-1.5 shadow-sm transition-all whitespace-nowrap shrink-0 cursor-pointer"
                   >
                     {isJoining ? (
                       <>
@@ -507,14 +320,14 @@ export function LobbyView({
                   <div className="flex items-center justify-between gap-2 pt-1 text-xs text-[#6B7280]">
                     <span className="inline-flex items-center gap-1.5 min-w-0">
                       <Loader2 className="w-3.5 h-3.5 animate-spin text-[#FF6B57] shrink-0" />
-                      <span data-testid="lobby-join-step" className="truncate font-semibold text-[#1F242D]">
-                        {statusMessage || '1/3 Connexion au serveur...'}
+                      <span className="truncate font-semibold text-[#1F242D]">
+                        {statusMessage || t.joiningBtn}
                       </span>
                     </span>
                     <button
                       type="button"
                       onClick={onCancelRoom}
-                      className="text-xs font-bold text-[#6B7280] hover:text-[#1F242D] underline underline-offset-4 whitespace-nowrap shrink-0"
+                      className="text-xs font-bold text-[#6B7280] hover:text-[#1F242D] underline underline-offset-4 whitespace-nowrap shrink-0 cursor-pointer"
                     >
                       {t.cancelBtn}
                     </button>
@@ -522,7 +335,7 @@ export function LobbyView({
                 )}
               </form>
 
-              {/* Validation or Connection Error with explicit Retry & Back actions */}
+              {/* Validation or Connection Error */}
               {(formError ||
                 connectionStatus === 'error' ||
                 (connectionStatus === 'disconnected' && Boolean(statusMessage))) && (
@@ -544,7 +357,7 @@ export function LobbyView({
                             onCreateRoom();
                           }
                         }}
-                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] transition-all whitespace-nowrap"
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-extrabold bg-[#FF6B57] text-white hover:bg-[#F25743] transition-all whitespace-nowrap cursor-pointer"
                       >
                         🔄 Réessayer
                       </button>
@@ -555,7 +368,7 @@ export function LobbyView({
                           setFormError(null);
                           onCancelRoom();
                         }}
-                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FAF7F2] transition-all whitespace-nowrap"
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-[#1F242D] border border-[#EAE4DC] hover:bg-[#FAF7F2] transition-all whitespace-nowrap cursor-pointer"
                       >
                         ← Retour
                       </button>
@@ -570,11 +383,12 @@ export function LobbyView({
                   type="button"
                   data-start="true"
                   data-testid="lobby-solo-btn"
+                  disabled={isBusy}
                   onClick={() => {
                     setFormError(null);
                     onStartSoloMode();
                   }}
-                  className="w-full min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm sm:text-base font-bold bg-[#EFE9FB] hover:bg-[#E5DCFA] text-[#1F242D] border border-[#DDD4F7] transition-all whitespace-nowrap"
+                  className="w-full min-h-[52px] inline-flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm sm:text-base font-bold bg-[#EFE9FB] hover:bg-[#E5DCFA] text-[#1F242D] border border-[#DDD4F7] transition-all whitespace-nowrap cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4 text-[#7C5CFC] shrink-0" />
                   <span>🤖 {t.soloCta}</span>

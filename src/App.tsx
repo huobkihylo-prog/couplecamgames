@@ -1,59 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { MotionConfig, motion } from 'motion/react';
-import type {
-  ConnectionMode,
-  FaceMetrics,
-  FunambulesState,
-  GameId,
-  HandMetrics,
-  HubCategory,
-  LaughSensitivity,
-  PeerMessage,
-  ScreenView,
-  TrackerStatus,
-} from './types/duoplay';
-import { DuoFaceTracker, EMPTY_FACE_METRICS } from './services/faceTracker';
-import { DuoHandTracker, EMPTY_HAND_METRICS } from './services/handTracker';
-import {
-  createAiPartnerMemory,
-  resetAiForLaughRound,
-  stepAiFunambulesPartner,
-  stepAiLaughPartner,
-} from './game/aiPartner';
-import { createInitialFunambulesState } from './game/funambulesPhysics';
+import type { PeerMessage, ScreenView } from './types/duoplay';
 import { soundFx } from './utils/soundFx';
 import { extractRoomCodeFromSearch } from './utils/clipboard';
-import { CATEGORY_THEMES } from './theme/categoryThemes';
+import { loadPersistedRoomSession } from './utils/roomSessionStorage';
 import { LobbyView } from './components/LobbyView';
 import { SessionToolbar } from './components/SessionToolbar';
-import { HubView, type HubFloatingReaction } from './components/HubView';
-import { LaughGameView } from './components/LaughGameView';
-import { FunambulesGameView } from './components/FunambulesGameView';
-import { NinjaFruitsGameView } from './components/NinjaFruitsGameView';
-import { AirHockeyGameView } from './components/AirHockeyGameView';
-import { StareDuelGameView } from './components/StareDuelGameView';
-import { MiamManiaGameView } from './components/MiamManiaGameView';
-import { WhisperSecretsGameView } from './components/WhisperSecretsGameView';
-import { SlingshotDuoGameView } from './components/SlingshotDuoGameView';
-import { XoNeonGameView } from './components/XoNeonGameView';
+import { RoomMenuView } from './components/RoomMenuView';
 import { ParchisiDuoGameView } from './components/ParchisiDuoGameView';
-import { MusicQuizGameView } from './components/MusicQuizGameView';
-import { FreezeDanceGameView } from './components/FreezeDanceGameView';
+import { LiveChatPanel } from './components/LiveChatPanel';
+import { LeaveRoomModal } from './components/LeaveRoomModal';
 import { ToastStack, type AppToast } from './components/ToastStack';
-import { MediaPipeLoadingOverlay } from './components/MediaPipeLoadingOverlay';
 import { GameErrorBoundary } from './components/GameErrorBoundary';
 import { LanguageProvider, useI18n } from './i18n/LanguageContext';
-import { MirrorProvider } from './context/MirrorContext';
 import { RoomProvider, useRoom } from './context/RoomContext';
 
 export default function App() {
   return (
     <LanguageProvider>
-      <MirrorProvider>
-        <RoomProvider>
-          <CoupleCamApp />
-        </RoomProvider>
-      </MirrorProvider>
+      <RoomProvider>
+        <CoupleCamApp />
+      </RoomProvider>
     </LanguageProvider>
   );
 }
@@ -61,43 +29,65 @@ export default function App() {
 function CoupleCamApp() {
   const { t } = useI18n();
   const {
-    sendData,
-    sendRealtime,
-    onData,
-    localStream,
-    remoteStream,
+    roomCode,
+    role,
     connectionMode,
     connectionStatus,
     statusMessage,
-    roomCode,
+    inRoom,
+    isHost,
+    isGuest,
+    isAIMode,
+    isRestoringSession,
+    playerName,
+    setPlayerName,
+    hostName,
+    guestName,
+    guestConnected,
     partnerName,
-    cameraEnabled,
+    activeGame,
+    diceCount,
+    parcheesiWins,
+    recordParchisiVictory,
     micMuted,
-    cameraHint,
+    micStatus,
+    micHint,
+    hostHasAudio,
+    guestHasAudio,
+    hostMicMuted,
+    guestMicMuted,
+    localSpeaking,
+    remoteSpeaking,
+    chatMessages,
+    unreadChatCount,
+    chatOpen,
+    setChatOpen,
+    floatingReactions,
+    sendChatMessage,
+    sendQuickReaction,
     createRoom,
     joinRoom,
     cancelRoom,
     leaveRoom,
     startSoloMode,
-    requestLocalMedia,
-    toggleMic: handleToggleMic,
-    toggleCamera: handleToggleCamera,
-    setHostStateProvider,
+    startParcheesi,
+    returnToRoomMenu,
+    setDiceCount,
+    toggleMic,
+    sendData,
+    onData,
   } = useRoom();
 
-  const [screen, setScreen] = useState<ScreenView>('lobby');
-  const [activeHubCategory, setActiveHubCategory] = useState<HubCategory>('all');
-  const [toasts, setToasts] = useState<AppToast[]>([]);
-  const [hubReactions, setHubReactions] = useState<HubFloatingReaction[]>([]);
-  const [playerName, setPlayerName] = useState<string>('Alex');
   const [initialJoinCode] = useState<string>(() =>
     typeof window !== 'undefined' ? extractRoomCodeFromSearch(window.location.search) : '',
   );
-
-  // Audio SFX & MediaPipe tracking status
   const [sfxMuted, setSfxMuted] = useState(false);
-  const [trackerStatus, setTrackerStatus] = useState<TrackerStatus>('idle');
-  const [handTrackerStatus, setHandTrackerStatus] = useState<TrackerStatus>('idle');
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+  const [toasts, setToasts] = useState<AppToast[]>([]);
+
+  // Active Parcheesi message subscriber + short queue for messages arriving right during mount
+  const activeGamePeerHandlerRef = useRef<((msg: PeerMessage) => void) | null>(null);
+  const pendingGameMessagesRef = useRef<PeerMessage[]>([]);
 
   const pushToast = useCallback((message: string, tone: AppToast['tone'] = 'info') => {
     const id = Date.now() + Math.floor(Math.random() * 1000);
@@ -106,626 +96,52 @@ function CoupleCamApp() {
       setToasts((prev) => prev.filter((item) => item.id !== id));
     }, 2800);
   }, []);
-  const spawnHubReaction = useCallback((emoji: '❤️' | '😂' | '🔥') => {
-    const id = Date.now() + Math.floor(Math.random() * 10000);
-    const offsetX = Math.round((Math.random() - 0.5) * 140);
-    setHubReactions((prev) => [...prev.slice(-8), { id, emoji, offsetX }]);
-    window.setTimeout(() => {
-      setHubReactions((prev) => prev.filter((item) => item.id !== id));
-    }, 1250);
-  }, []);
-  const toastConnectedTextRef = useRef(t.toastPartnerConnected);
-  toastConnectedTextRef.current = t.toastPartnerConnected;
 
-  // Session counters
-  const [laughMatchCount, setLaughMatchCount] = useState(0);
-  const [stareBestSec, setStareBestSec] = useState(0);
-  const [miamBestScore, setMiamBestScore] = useState(0);
-  const [funambulesBestM, setFunambulesBestM] = useState(0);
-  const [ninjaBestScore, setNinjaBestScore] = useState(0);
-  const [airHockeyWins, setAirHockeyWins] = useState(0);
-  const [whisperBestHeat, setWhisperBestHeat] = useState(16);
-  const [slingshotBestScore, setSlingshotBestScore] = useState(0);
-  const [xoNeonWins, setXoNeonWins] = useState(0);
-  const [parchisiWins, setParchisiWins] = useState(0);
-  const [musicQuizBestScore, setMusicQuizBestScore] = useState(0);
-  const [freezeDanceWins, setFreezeDanceWins] = useState(0);
-  const [parchisiHandDiceEnabled, setParchisiHandDiceEnabled] = useState(false);
-  const parchisiHandDiceEnabledRef = useRef(false);
-  parchisiHandDiceEnabledRef.current = parchisiHandDiceEnabled;
+  // Derive the 3 persistent screens directly from RoomContext (RoomProvider NEVER unmounts!)
+  const screen: ScreenView = !inRoom
+    ? 'lobby'
+    : activeGame === 'parcheesi'
+      ? 'parcheesi'
+      : 'room-menu';
 
-  const hostScoresRef = useRef<Record<string, number>>({});
-  hostScoresRef.current = {
-    laugh: laughMatchCount,
-    stareBestSec,
-    miamBestScore,
-    funambulesBestM,
-    ninjaBestScore,
-    airHockeyWins,
-    whisperBestHeat,
-    slingshotBestScore,
-    xoNeonWins,
-    parchisiWins,
-    musicQuizBestScore,
-    freezeDanceWins,
-  };
-
-  // Refs shared across 60fps loops without triggering React re-renders
-  const trackerVideoElRef = useRef<HTMLVideoElement | null>(null);
-  const localVideoElRef = useRef<HTMLVideoElement | null>(null);
-  const lastFaceSeenMsRef = useRef(0);
-  const lastHandSeenMsRef = useRef(0);
-  const localMetricsRef = useRef<FaceMetrics>({ ...EMPTY_FACE_METRICS });
-  const partnerMetricsRef = useRef<FaceMetrics>({ ...EMPTY_FACE_METRICS });
-  const localHandMetricsRef = useRef<HandMetrics>({ ...EMPTY_HAND_METRICS });
-  const partnerHandMetricsRef = useRef<HandMetrics>({ ...EMPTY_HAND_METRICS });
-  const manualSmileActiveRef = useRef(false);
-  const manualTiltRadRef = useRef(0);
-  const localPointerHandRef = useRef<{ normX: number; normY: number; active: boolean }>({
-    normX: 0.5,
-    normY: 0.5,
-    active: false,
-  });
-
-  // Services
-  const faceTrackerRef = useRef<DuoFaceTracker | null>(null);
-  const handTrackerRef = useRef<DuoHandTracker | null>(null);
-  const activeGamePeerHandlerRef = useRef<((msg: PeerMessage) => void) | null>(null);
-  const pendingGameMessagesRef = useRef<PeerMessage[]>([]);
-  const sendRealtimeRef = useRef(sendRealtime);
-  sendRealtimeRef.current = sendRealtime;
-
-  // Solo AI Partner memory & active context
-  const aiMemoryRef = useRef(createAiPartnerMemory());
-  const aiLaughCtxRef = useRef<{ isPlaying: boolean; sensitivity: LaughSensitivity; pendingImpulse: number }>({
-    isPlaying: false,
-    sensitivity: 'normal',
-    pendingImpulse: 0,
-  });
-  const aiFunambulesStateRef = useRef<FunambulesState>(createInitialFunambulesState(0));
-  const screenRef = useRef<ScreenView>(screen);
-  screenRef.current = screen;
-  const connectionModeRef = useRef<ConnectionMode>(connectionMode);
-  connectionModeRef.current = connectionMode;
-
-  // Bind localStream to the single dedicated persistent tracker <video> element
-  useEffect(() => {
-    const video = trackerVideoElRef.current;
-    if (!video) return;
-    if (localStream) {
-      if (video.srcObject !== localStream) {
-        video.srcObject = localStream;
-      }
-      video.play().catch(() => {});
-    } else {
-      video.srcObject = null;
-    }
-  }, [localStream]);
-
-  // Lazy-load MediaPipe FaceLandmarker when on Hub or face-tracked games
-  useEffect(() => {
-    if (
-      screen === 'lobby' ||
-      screen === 'ninja-fruits' ||
-      screen === 'air-hockey' ||
-      screen === 'slingshot-duo' ||
-      screen === 'xo-neon' ||
-      screen === 'parchisi-duo' ||
-      screen === 'music-quiz'
-    ) {
-      return;
-    }
-    if (!localStream) {
-      setTrackerStatus('fallback');
-      return;
-    }
-    if (!faceTrackerRef.current) {
-      faceTrackerRef.current = new DuoFaceTracker();
-    }
-    const tracker = faceTrackerRef.current;
-    const currentStatus = tracker.getStatus();
-    if (currentStatus === 'ready') {
-      setTrackerStatus('ready');
-      return;
-    }
-    let cancelled = false;
-    setTrackerStatus('loading');
-    tracker.ensureInitialized(true).then((status) => {
-      if (!cancelled) {
-        setTrackerStatus(status);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [screen, localStream]);
-
-  // Strict lazy-load of MediaPipe HandLandmarker ONLY when a hand-tracked game is opened,
-  // and cleanly release the tracker whenever leaving hand-tracked games (e.g. "← Changer de jeu").
-  useEffect(() => {
-    const isHandGame =
-      screen === 'ninja-fruits' ||
-      screen === 'air-hockey' ||
-      screen === 'slingshot-duo' ||
-      screen === 'xo-neon' ||
-      (screen === 'parchisi-duo' && parchisiHandDiceEnabled);
-
-    if (!isHandGame) {
-      if (handTrackerRef.current) {
-        handTrackerRef.current.dispose();
-        handTrackerRef.current = null;
-      }
-      localHandMetricsRef.current = { ...EMPTY_HAND_METRICS };
-      setHandTrackerStatus('idle');
-      return;
-    }
-    if (!localStream) {
-      setHandTrackerStatus('fallback');
-      return;
-    }
-    if (!handTrackerRef.current) {
-      handTrackerRef.current = new DuoHandTracker();
-    }
-    const tracker = handTrackerRef.current;
-    const currentStatus = tracker.getStatus();
-    if (currentStatus === 'ready') {
-      setHandTrackerStatus('ready');
-      return;
-    }
-    let cancelled = false;
-    setHandTrackerStatus('loading');
-    tracker.ensureInitialized(true).then((status) => {
-      if (!cancelled) {
-        setHandTrackerStatus(status);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [screen, localStream, parchisiHandDiceEnabled]);
-
-  // Cleanup MediaPipe trackers on unmount
-  useEffect(() => {
-    return () => {
-      faceTrackerRef.current?.dispose();
-      handTrackerRef.current?.dispose();
-    };
-  }, []);
-
-  // Dedicated 30fps FaceLandmarker + Solo AI Partner + PeerJS frame sync loop
+  // Mirror current top-level screen to document.body.dataset.state for testability
   useEffect(() => {
     if (screen === 'lobby') {
       document.body.dataset.state = 'lobby';
-      return;
+    } else if (screen === 'room-menu') {
+      document.body.dataset.state = 'room-menu';
     }
-    if (screen === 'hub') {
-      document.body.dataset.state = 'hub';
-    }
-
-    let rafId = 0;
-    let lastTickMs = performance.now();
-
-    const loop = (now: number) => {
-      rafId = requestAnimationFrame(loop);
-      const dt = Math.min(0.05, Math.max(0.001, (now - lastTickMs) * 0.001));
-      if (now - lastTickMs < 30) return;
-      lastTickMs = now;
-
-      // 1. Run ONLY the active MediaPipe sensor for the current screen (FaceLandmarker OR HandLandmarker)
-      const sourceVideo =
-        trackerVideoElRef.current &&
-        trackerVideoElRef.current.readyState >= 2 &&
-        trackerVideoElRef.current.videoWidth > 0
-          ? trackerVideoElRef.current
-          : localVideoElRef.current;
-
-      const activeScreen = screenRef.current;
-      const needsHand =
-        activeScreen === 'ninja-fruits' ||
-        activeScreen === 'air-hockey' ||
-        activeScreen === 'slingshot-duo' ||
-        activeScreen === 'xo-neon' ||
-        (activeScreen === 'parchisi-duo' && parchisiHandDiceEnabledRef.current);
-      const needsFace =
-        activeScreen !== 'ninja-fruits' &&
-        activeScreen !== 'air-hockey' &&
-        activeScreen !== 'slingshot-duo' &&
-        activeScreen !== 'xo-neon' &&
-        activeScreen !== 'parchisi-duo' &&
-        activeScreen !== 'music-quiz';
-
-      if (needsHand) {
-        const handTracker = handTrackerRef.current;
-        const handDetection = handTracker?.detectFrame(sourceVideo, now) ?? {
-          kind: 'not-ready' as const,
-        };
-
-        if (handDetection.kind === 'frame') {
-          if (handDetection.metrics.handDetected) {
-            lastHandSeenMsRef.current = now;
-            localHandMetricsRef.current = handDetection.metrics;
-          } else if (now - lastHandSeenMsRef.current > 240) {
-            localHandMetricsRef.current = {
-              ...localHandMetricsRef.current,
-              isPinching: false,
-              pinchRatio: 1,
-              handDetected: false,
-              timestamp: now,
-            };
-          }
-        } else if (handDetection.kind === 'not-ready') {
-          localHandMetricsRef.current = {
-            ...localHandMetricsRef.current,
-            isPinching: false,
-            pinchRatio: 1,
-            handDetected: false,
-            timestamp: now,
-          };
-        }
-
-        // Broadcast lightweight hand coordinates (≤30fps) for games using HAND_FRAME
-        if (
-          (connectionModeRef.current === 'p2p-host' || connectionModeRef.current === 'p2p-guest') &&
-          activeScreen !== 'slingshot-duo' &&
-          activeScreen !== 'xo-neon' &&
-          activeScreen !== 'parchisi-duo'
-        ) {
-          const hm = localHandMetricsRef.current;
-          const ptr = localPointerHandRef.current;
-          const activeGame = activeScreen as 'ninja-fruits' | 'air-hockey';
-          const useCam = hm.handDetected;
-          const useIndex = activeGame === 'ninja-fruits';
-          const tx = useCam ? (useIndex ? hm.indexX : hm.palmX) : ptr.normX;
-          const ty = useCam ? (useIndex ? hm.indexY : hm.palmY) : ptr.normY;
-          sendRealtimeRef.current({
-            type: 'HAND_FRAME',
-            game: activeGame,
-            x: tx,
-            y: ty,
-            detected: useCam || ptr.active,
-            ts: now,
-          });
-        }
-      }
-
-      if (needsFace) {
-        const tracker = faceTrackerRef.current;
-        const detection = tracker?.detectFrame(sourceVideo, now) ?? { kind: 'not-ready' as const };
-
-        if (detection.kind === 'frame') {
-          const detected = detection.metrics;
-          if (detected.faceDetected) {
-            lastFaceSeenMsRef.current = now;
-            const manualBoost = manualSmileActiveRef.current ? 84 : 0;
-            const effectiveTilt =
-              manualTiltRadRef.current !== 0 ? manualTiltRadRef.current : detected.headTiltRad;
-            localMetricsRef.current = {
-              ...detected,
-              smileScore: Math.max(detected.smileScore, manualBoost),
-              headTiltRad: effectiveTilt,
-            };
-          } else if (now - lastFaceSeenMsRef.current > 350) {
-            const prev = localMetricsRef.current;
-            const targetSmile = manualSmileActiveRef.current ? 86 : detected.smileScore;
-            const targetTilt = manualTiltRadRef.current !== 0 ? manualTiltRadRef.current : detected.headTiltRad;
-            localMetricsRef.current = {
-              ...EMPTY_FACE_METRICS,
-              smileScore: Math.round(prev.smileScore + (targetSmile - prev.smileScore) * 0.35),
-              grimaceScore: Math.round(prev.grimaceScore * 0.75),
-              laughBurst: manualSmileActiveRef.current ? 60 : 0,
-              headTiltRad: prev.headTiltRad + (targetTilt - prev.headTiltRad) * 0.35,
-              noseOffsetX: 0,
-              faceDetected: false,
-              timestamp: now,
-            };
-          }
-        } else if (detection.kind === 'same-frame') {
-          const prev = localMetricsRef.current;
-          if (manualSmileActiveRef.current || manualTiltRadRef.current !== 0) {
-            localMetricsRef.current = {
-              ...prev,
-              smileScore: manualSmileActiveRef.current ? Math.max(prev.smileScore, 86) : prev.smileScore,
-              laughBurst: manualSmileActiveRef.current ? 60 : prev.laughBurst,
-              headTiltRad: manualTiltRadRef.current !== 0 ? manualTiltRadRef.current : prev.headTiltRad,
-              timestamp: now,
-            };
-          }
-        } else {
-          const prev = localMetricsRef.current;
-          const targetSmile = manualSmileActiveRef.current ? 86 : 6;
-          const targetTilt = manualTiltRadRef.current;
-          localMetricsRef.current = {
-            ...EMPTY_FACE_METRICS,
-            smileScore: Math.round(prev.smileScore + (targetSmile - prev.smileScore) * 0.35),
-            grimaceScore: manualSmileActiveRef.current ? 55 : 0,
-            laughBurst: manualSmileActiveRef.current ? 60 : 0,
-            headTiltRad: prev.headTiltRad + (targetTilt - prev.headTiltRad) * 0.35,
-            noseOffsetX: 0,
-            faceDetected: false,
-            timestamp: now,
-          };
-        }
-
-        // 2. Broadcast face metrics at 30fps when in P2P mode
-        if (connectionModeRef.current === 'p2p-host' || connectionModeRef.current === 'p2p-guest') {
-          const m = localMetricsRef.current;
-          sendRealtimeRef.current({
-            type: 'FACE_FRAME',
-            smileScore: m.smileScore,
-            grimaceScore: m.grimaceScore,
-            headTiltRad: m.headTiltRad,
-            mouthPucker: m.mouthPucker,
-            faceDetected: m.faceDetected,
-            ts: now,
-          });
-        }
-      }
-
-      // 3. Step Solo AI Partner ("Camille IA") when in Solo Test Mode
-      if (connectionModeRef.current === 'solo') {
-        const currentScreen = screenRef.current;
-        if (currentScreen === 'funambules') {
-          const res = stepAiFunambulesPartner(aiMemoryRef.current, aiFunambulesStateRef.current, dt);
-          aiMemoryRef.current = res.nextMemory;
-          partnerMetricsRef.current = {
-            ...EMPTY_FACE_METRICS,
-            smileScore: 18,
-            grimaceScore: 12,
-            laughBurst: 0,
-            headTiltRad: res.headTiltRad,
-            noseOffsetX: 0,
-            faceDetected: true,
-            timestamp: now,
-          };
-        } else {
-          const ctx = aiLaughCtxRef.current;
-          const impulse = ctx.pendingImpulse;
-          ctx.pendingImpulse = 0;
-          const res = stepAiLaughPartner(
-            aiMemoryRef.current,
-            currentScreen === 'laugh' && ctx.isPlaying,
-            ctx.sensitivity,
-            impulse,
-            dt,
-          );
-          aiMemoryRef.current = res.nextMemory;
-          partnerMetricsRef.current = {
-            ...EMPTY_FACE_METRICS,
-            smileScore: res.smileScore,
-            grimaceScore: Math.round(res.smileScore * 0.7),
-            laughBurst: res.smileScore > 55 ? 45 : 0,
-            headTiltRad: Math.sin(now * 0.0012) * 0.05,
-            noseOffsetX: 0,
-            faceDetected: true,
-            timestamp: now,
-          };
-        }
-      }
-    };
-
-    rafId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(rafId);
   }, [screen]);
 
-  // Supply current room snapshot (active game & scores) to RoomContext when Host creates a room
+  // Toast once when a Duo guest joins the room
+  const prevGuestConnectedRef = useRef(guestConnected);
   useEffect(() => {
-    setHostStateProvider(() => ({
-      currentGame: screenRef.current === 'lobby' ? 'hub' : screenRef.current,
-      scores: { ...hostScoresRef.current },
-    }));
-    return () => setHostStateProvider(null);
-  }, [setHostStateProvider]);
-
-  // React to Duo Firestore room connection & explicit close transitions only
-  const prevConnectionStatusRef = useRef(connectionStatus);
-  useEffect(() => {
-    const prev = prevConnectionStatusRef.current;
-    prevConnectionStatusRef.current = connectionStatus;
-
-    if (connectionMode === 'solo') return;
-
-    if (connectionStatus === 'connected' && prev !== 'connected') {
-      if (screenRef.current === 'lobby') {
-        setScreen('hub');
-      }
+    const prev = prevGuestConnectedRef.current;
+    prevGuestConnectedRef.current = guestConnected;
+    if (!isAIMode && inRoom && guestConnected && !prev) {
       soundFx.roundWin();
-      pushToast(toastConnectedTextRef.current, 'success');
-    } else if (
-      connectionStatus === 'disconnected' &&
-      prev === 'connected' &&
-      screenRef.current !== 'lobby'
-    ) {
-      // Only return to Lobby when the room was explicitly closed (status === 'closed' or voluntary Leave)
-      setScreen('lobby');
+      pushToast(t.toastPartnerConnected, 'success');
     }
-  }, [connectionStatus, connectionMode, pushToast]);
+  }, [guestConnected, isAIMode, inRoom, pushToast, t.toastPartnerConnected]);
 
-  // Subscribe to all incoming Cloud Firestore / WebRTC messages across Hub & all 12 games
+  // Forward incoming Parcheesi PeerMessages cleanly to ParchisiDuoGameView
   useEffect(() => {
     return onData((msg) => {
       if (!msg || typeof msg !== 'object' || !('type' in msg)) return;
-      try {
-        if (msg.type === 'HELLO') {
-          // Partner name already synced in RoomContext
-        } else if (
-          msg.type === 'JOIN_ACCEPTED' ||
-          msg.type === 'JOIN_CONFIRMED' ||
-          msg.type === 'JOIN_WELCOME'
-        ) {
-          if (
-            msg.type === 'JOIN_ACCEPTED' &&
-            msg.currentGame &&
-            msg.currentGame !== 'lobby' &&
-            msg.currentGame !== 'hub'
-          ) {
-            pendingGameMessagesRef.current = [];
-            setScreen(msg.currentGame);
-          }
-        } else if (msg.type === 'SELECT_GAME') {
-          soundFx.click();
-          pendingGameMessagesRef.current = [];
-          setScreen(msg.game);
-        } else if (msg.type === 'RETURN_HUB') {
-          soundFx.click();
-          pendingGameMessagesRef.current = [];
-          setScreen('hub');
-        } else if (msg.type === 'HUB_REACTION') {
-          spawnHubReaction(msg.emoji);
-        } else if (msg.type === 'FACE_FRAME') {
-          partnerMetricsRef.current = {
-            ...EMPTY_FACE_METRICS,
-            smileScore: msg.smileScore,
-            grimaceScore: msg.grimaceScore ?? 0,
-            laughBurst: 0,
-            headTiltRad: msg.headTiltRad,
-            noseOffsetX: 0,
-            faceDetected: msg.faceDetected,
-            timestamp: msg.ts,
-          };
-        } else if (msg.type === 'HAND_FRAME') {
-          const prev = partnerHandMetricsRef.current;
-          const isIndexGame = msg.game === 'ninja-fruits';
-          const isPalmGame = msg.game === 'air-hockey';
-          partnerHandMetricsRef.current = {
-            ...prev,
-            indexX: isIndexGame ? msg.x : prev.indexX,
-            indexY: isIndexGame ? msg.y : prev.indexY,
-            palmX: isPalmGame ? msg.x : prev.palmX,
-            palmY: isPalmGame ? msg.y : prev.palmY,
-            handDetected: msg.detected,
-            timestamp: msg.ts,
-          };
-        } else {
-          if (activeGamePeerHandlerRef.current) {
-            activeGamePeerHandlerRef.current(msg);
-          } else {
-            // Buffer game messages arriving during the 200ms AnimatePresence screen switch
-            pendingGameMessagesRef.current.push(msg);
-            if (pendingGameMessagesRef.current.length > 24) {
-              pendingGameMessagesRef.current.shift();
-            }
-          }
+      if (activeGamePeerHandlerRef.current) {
+        try {
+          activeGamePeerHandlerRef.current(msg);
+        } catch (err) {
+          console.warn('[Parcheesi App] Safe message handler guard caught error:', err);
         }
-      } catch (err) {
-        console.warn('[CoupleCam] Safe message handler guard caught error:', err);
+      } else {
+        pendingGameMessagesRef.current.push(msg);
+        if (pendingGameMessagesRef.current.length > 24) {
+          pendingGameMessagesRef.current.shift();
+        }
       }
     });
-  }, [onData, spawnHubReaction]);
-
-  const handleCreateRoom = useCallback(() => {
-    const cleanName = playerName.trim() || 'Hôte';
-    setPlayerName(cleanName);
-    createRoom(cleanName);
-  }, [playerName, createRoom]);
-
-  const handleCancelRoom = useCallback(() => {
-    cancelRoom();
-  }, [cancelRoom]);
-
-  const handleJoinRoom = useCallback(
-    (code: string) => {
-      const cleanName = playerName.trim() || 'Invité';
-      setPlayerName(cleanName);
-      joinRoom(code, cleanName);
-    },
-    [playerName, joinRoom],
-  );
-
-  const handleStartSoloMode = useCallback(
-    (targetScreen: ScreenView = 'hub') => {
-      const cleanName = playerName.trim() || 'Alex';
-      setPlayerName(cleanName);
-      startSoloMode();
-      setScreen(targetScreen);
-      soundFx.click();
-      if (targetScreen === 'hub') {
-        pushToast(t.toastSoloStarted, 'accent');
-      }
-    },
-    [playerName, pushToast, startSoloMode, t.toastSoloStarted],
-  );
-
-  // Support ?autostart=1|hub|laugh|stare-duel|miam-mania|funambules|ninja-fruits|air-hockey|whisper-secrets|slingshot-duo|xo-neon|parchisi-duo|music-quiz|freeze-dance
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const auto = params.get('autostart');
-    if (auto === '1' || auto === 'hub') {
-      handleStartSoloMode('hub');
-    } else if (
-      auto === 'laugh' ||
-      auto === 'stare-duel' ||
-      auto === 'miam-mania' ||
-      auto === 'funambules' ||
-      auto === 'ninja-fruits' ||
-      auto === 'air-hockey' ||
-      auto === 'whisper-secrets' ||
-      auto === 'slingshot-duo' ||
-      auto === 'xo-neon' ||
-      auto === 'parchisi-duo' ||
-      auto === 'music-quiz' ||
-      auto === 'freeze-dance'
-    ) {
-      handleStartSoloMode(auto);
-    } else if (initialJoinCode.length === 4) {
-      // Direct invite link (?room=XXXX): pre-fill code and launch room connection automatically
-      handleJoinRoom(initialJoinCode);
-    }
-    // Run only once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleSelectGame = useCallback(
-    (game: GameId) => {
-      soundFx.click();
-      setScreen(game);
-      sendData({ type: 'SELECT_GAME', game });
-    },
-    [sendData],
-  );
-
-  const handleReturnToHub = useCallback(() => {
-    soundFx.click();
-    setParchisiHandDiceEnabled(false);
-    setScreen('hub');
-    sendData({ type: 'RETURN_HUB' });
-  }, [sendData]);
-
-  const handleSendHubReaction = useCallback(
-    (emoji: '❤️' | '😂' | '🔥') => {
-      soundFx.click();
-      spawnHubReaction(emoji);
-      sendData({ type: 'HUB_REACTION', emoji });
-    },
-    [spawnHubReaction, sendData],
-  );
-
-  const handleLeaveRoom = useCallback(() => {
-    soundFx.click();
-    leaveRoom();
-    setScreen('lobby');
-  }, [leaveRoom]);
-
-  const handleToggleSfx = useCallback(() => {
-    setSfxMuted((prev) => {
-      const next = !prev;
-      soundFx.muted = next;
-      return next;
-    });
-  }, []);
-
-  const handleSendPeerMessage = useCallback(
-    (msg: PeerMessage) => {
-      sendData(msg);
-    },
-    [sendData],
-  );
-
-  const handleSendPeerRealtime = useCallback(
-    (msg: PeerMessage) => {
-      sendRealtime(msg);
-    },
-    [sendRealtime],
-  );
+  }, [onData]);
 
   const registerPeerHandler = useCallback((handler: ((msg: PeerMessage) => void) | null) => {
     activeGamePeerHandlerRef.current = handler;
@@ -736,615 +152,268 @@ function CoupleCamApp() {
         try {
           handler(queuedMsg);
         } catch (err) {
-          console.warn('[CoupleCam] Buffered game message failed safely:', err);
+          console.warn('[Parcheesi App] Buffered message failed safely:', err);
         }
       }
     }
   }, []);
 
-  const handleAiLaughContextChange = useCallback(
-    (ctx: { isPlaying: boolean; sensitivity: LaughSensitivity; promptImpulse: number }) => {
-      aiLaughCtxRef.current.isPlaying = ctx.isPlaying;
-      aiLaughCtxRef.current.sensitivity = ctx.sensitivity;
-      if (ctx.promptImpulse > 0) {
-        aiLaughCtxRef.current.pendingImpulse += ctx.promptImpulse;
+  // Support invite links (?room=XXXX) and fast testing (?autostart=1|parcheesi)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const auto = params.get('autostart');
+    if (auto === '1' || auto === 'room-menu') {
+      startSoloMode(playerName || 'Alex');
+      return;
+    }
+    if (auto === 'parcheesi' || auto === 'parchisi-duo') {
+      startSoloMode(playerName || 'Alex');
+      void startParcheesi();
+      return;
+    }
+    if (initialJoinCode.length === 4) {
+      const saved = loadPersistedRoomSession();
+      if (saved && saved.roomCode === initialJoinCode) {
+        // RoomContext auto-reconnect handles restoring the exact room & active game
+        return;
       }
+      void joinRoom(initialJoinCode, playerName || 'Invité');
+    }
+    // Run once on root mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleCreateRoom = useCallback(() => {
+    soundFx.click();
+    void createRoom(playerName);
+  }, [createRoom, playerName]);
+
+  const handleJoinRoom = useCallback(
+    (code: string) => {
+      soundFx.click();
+      void joinRoom(code, playerName);
     },
-    [],
+    [joinRoom, playerName],
   );
 
-  const handleAiResetRound = useCallback(() => {
-    aiMemoryRef.current = resetAiForLaughRound(aiMemoryRef.current);
+  const handleStartSoloMode = useCallback(() => {
+    soundFx.click();
+    startSoloMode(playerName);
+    pushToast(t.toastSoloStarted, 'accent');
+  }, [playerName, startSoloMode, pushToast, t.toastSoloStarted]);
+
+  const handleStartParcheesi = useCallback(() => {
+    soundFx.click();
+    pendingGameMessagesRef.current = [];
+    void startParcheesi();
+  }, [startParcheesi]);
+
+  const handleReturnToRoomMenu = useCallback(() => {
+    soundFx.click();
+    setChatOpen(false);
+    pendingGameMessagesRef.current = [];
+    void returnToRoomMenu();
+  }, [returnToRoomMenu, setChatOpen]);
+
+  const handleConfirmLeaveRoom = useCallback(() => {
+    soundFx.click();
+    setLeaveModalOpen(false);
+    leaveRoom();
+  }, [leaveRoom]);
+
+  const handleToggleSfx = useCallback(() => {
+    setSfxMuted((prev) => {
+      const next = !prev;
+      soundFx.muted = next;
+      return next;
+    });
   }, []);
 
-  const handleStateForAiChange = useCallback((st: FunambulesState) => {
-    aiFunambulesStateRef.current = st;
-  }, []);
+  const partnerMicMuted = isHost ? guestMicMuted : hostMicMuted;
 
-  const handleVideoRef = useCallback((el: HTMLVideoElement | null) => {
-    localVideoElRef.current = el;
-  }, []);
+  return (
+    <MotionConfig reducedMotion="user">
+      {/* Subtle non-blocking overlay while restoring saved sessionStorage room on page refresh */}
+      {isRestoringSession && !inRoom && (
+        <div
+          data-testid="reconnecting-overlay"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#FAF7F2]/90 backdrop-blur-xs p-4"
+        >
+          <div className="rounded-3xl bg-white border border-[#EAE4DC] shadow-[0_12px_32px_rgba(31,36,45,0.10)] px-6 py-5 flex items-center gap-3">
+            <Loader2 className="w-5 h-5 animate-spin text-[#FF6B57]" />
+            <span className="text-sm font-extrabold text-[#1F242D]">{t.reconnectingTitle}</span>
+          </div>
+        </div>
+      )}
 
-  const handleManualSmileChange = useCallback((active: boolean) => {
-    manualSmileActiveRef.current = active;
-  }, []);
-
-  const handleManualTiltChange = useCallback((tiltRad: number) => {
-    manualTiltRadRef.current = tiltRad;
-  }, []);
-
-  const handleMatchProgress = useCallback(() => {
-    setLaughMatchCount((c) => c + 1);
-  }, []);
-
-  const handleUpdateBestStare = useCallback((sec: number) => {
-    setStareBestSec((prev) => Math.max(prev, sec));
-  }, []);
-
-  const handleUpdateMiamBestScore = useCallback((score: number) => {
-    setMiamBestScore((prev) => Math.max(prev, score));
-  }, []);
-
-  const handleUpdateBestDistance = useCallback((m: number) => {
-    setFunambulesBestM((prev) => Math.max(prev, Math.round(m)));
-  }, []);
-
-  const handleUpdateNinjaBestScore = useCallback((score: number) => {
-    setNinjaBestScore((prev) => Math.max(prev, score));
-  }, []);
-
-  const handleRecordAirHockeyVictory = useCallback(() => {
-    setAirHockeyWins((w) => w + 1);
-  }, []);
-
-  const handleUpdateWhisperBestHeat = useCallback((heat: number) => {
-    setWhisperBestHeat((prev) => Math.max(prev, heat));
-  }, []);
-
-  const handleUpdateSlingshotBestScore = useCallback((score: number) => {
-    setSlingshotBestScore((prev) => Math.max(prev, score));
-  }, []);
-
-  const handleRecordXoVictory = useCallback(() => {
-    setXoNeonWins((w) => w + 1);
-  }, []);
-
-  const handleRecordParchisiVictory = useCallback(() => {
-    setParchisiWins((w) => w + 1);
-  }, []);
-
-  const handleRecordMusicQuizScore = useCallback((score: number) => {
-    setMusicQuizBestScore((prev) => Math.max(prev, score));
-  }, []);
-
-  const handleRecordFreezeDanceVictory = useCallback(() => {
-    setFreezeDanceWins((w) => w + 1);
-  }, []);
-
-  const handleLocalPointerHandChange = useCallback((normX: number, normY: number, active: boolean) => {
-    localPointerHandRef.current = { normX, normY, active };
-  }, []);
-
-  const persistentTrackerVideo = (
-    <video
-      ref={trackerVideoElRef}
-      data-testid="mediapipe-tracker-video"
-      muted
-      playsInline
-      autoPlay
-      aria-hidden="true"
-      className="fixed top-0 left-0 w-32 h-24 opacity-[0.001] pointer-events-none -z-50"
-    />
-  );
-
-  const isGameScreen = screen !== 'lobby' && screen !== 'hub';
-  const isMediaPipeWarming =
-    isGameScreen &&
-    Boolean(localStream) &&
-    (trackerStatus === 'loading' || handTrackerStatus === 'loading');
-
-  if (screen === 'lobby') {
-    return (
-      <MotionConfig reducedMotion="user">
-        {persistentTrackerVideo}
+      {screen === 'lobby' ? (
         <motion.div
           key="lobby-screen"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
         >
           <LobbyView
             playerName={playerName}
             onPlayerNameChange={setPlayerName}
-            roomCode={roomCode}
             initialJoinCode={initialJoinCode}
             connectionStatus={connectionStatus}
             statusMessage={statusMessage}
-            cameraHint={cameraHint}
-            localStream={localStream}
-            cameraEnabled={cameraEnabled}
             micMuted={micMuted}
+            micStatus={micStatus}
+            micHint={micHint}
             sfxMuted={sfxMuted}
-            localMetricsRef={localMetricsRef}
-            onRequestCamera={requestLocalMedia}
-            onToggleMic={handleToggleMic}
-            onToggleCamera={handleToggleCamera}
+            onToggleMic={toggleMic}
             onToggleSfx={handleToggleSfx}
             onCreateRoom={handleCreateRoom}
-            onCancelRoom={handleCancelRoom}
+            onCancelRoom={cancelRoom}
             onJoinRoom={handleJoinRoom}
-            onStartSoloMode={() => handleStartSoloMode('hub')}
-            onNotify={pushToast}
+            onStartSoloMode={handleStartSoloMode}
           />
         </motion.div>
-        <ToastStack toasts={toasts} />
-      </MotionConfig>
-    );
-  }
+      ) : (
+        <div className="h-[100dvh] overflow-hidden flex flex-col bg-[#FAF7F2] text-[#1F242D]">
+          <SessionToolbar
+            screen={screen}
+            connectionMode={connectionMode}
+            roomCode={roomCode}
+            isHostOrAi={isHost || isAIMode}
+            micMuted={micMuted}
+            sfxMuted={sfxMuted}
+            chatOpen={chatOpen}
+            unreadChatCount={unreadChatCount}
+            onToggleMic={toggleMic}
+            onToggleSfx={handleToggleSfx}
+            onToggleChat={() => setChatOpen(!chatOpen)}
+            onReturnToRoomMenu={handleReturnToRoomMenu}
+            onRequestLeaveRoom={() => setLeaveModalOpen(true)}
+            onNotify={pushToast}
+          />
 
-  const activeTheme = CATEGORY_THEMES[activeHubCategory];
-
-  return (
-    <MotionConfig reducedMotion="user">
-      {persistentTrackerVideo}
-      <div
-        className={
-          screen === 'hub' ||
-          screen === 'parchisi-duo' ||
-          screen === 'music-quiz' ||
-          screen === 'freeze-dance'
-            ? 'h-[100dvh] overflow-hidden flex flex-col bg-[#FAF7F2] text-[#1F242D] transition-all duration-300'
-            : 'min-h-[100dvh] flex flex-col bg-[#FAF7F2] text-[#1F242D] overflow-x-hidden transition-all duration-300'
-        }
-        style={{ backgroundColor: activeTheme.pageBg }}
-      >
-        <SessionToolbar
-          screen={screen}
-          connectionMode={connectionMode}
-          roomCode={roomCode}
-          micMuted={micMuted}
-          cameraEnabled={cameraEnabled}
-          hasPhysicalCamera={Boolean(localStream)}
-          sfxMuted={sfxMuted}
-          onToggleMic={handleToggleMic}
-          onToggleCamera={handleToggleCamera}
-          onToggleSfx={handleToggleSfx}
-          onReturnToHub={handleReturnToHub}
-          onLeaveRoom={handleLeaveRoom}
-          onNotify={pushToast}
-        />
-
-        <GameErrorBoundary resetKey={screen} onReturnToHub={handleReturnToHub}>
-          {screen === 'hub' && (
+          {screen === 'room-menu' && (
             <motion.div
-              key="hub-view"
-              initial={{ opacity: 0, y: 10 }}
+              key="room-menu-screen"
+              initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
               className="flex-1 min-h-0 flex flex-col overflow-hidden"
             >
-              <HubView
-                activeCategory={activeHubCategory}
-                onCategoryChange={setActiveHubCategory}
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
+              <RoomMenuView
+                roomCode={roomCode}
+                isHost={isHost}
+                isGuest={isGuest}
+                isAIMode={isAIMode}
+                localRole={role}
+                hostName={hostName}
+                guestName={guestName}
+                guestConnected={guestConnected}
+                diceCount={diceCount}
+                parcheesiWins={parcheesiWins}
                 micMuted={micMuted}
-                trackerStatus={trackerStatus}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                laughMatchCount={laughMatchCount}
-                stareBestSec={stareBestSec}
-                miamBestScore={miamBestScore}
-                funambulesBestM={funambulesBestM}
-                ninjaBestScore={ninjaBestScore}
-                airHockeyWins={airHockeyWins}
-                whisperBestHeat={whisperBestHeat}
-                slingshotBestScore={slingshotBestScore}
-                xoNeonWins={xoNeonWins}
-                parchisiWins={parchisiWins}
-                musicQuizBestScore={musicQuizBestScore}
-                freezeDanceWins={freezeDanceWins}
-                floatingReactions={hubReactions}
-                onSendReaction={handleSendHubReaction}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSelectGame={handleSelectGame}
+                micStatus={micStatus}
+                micHint={micHint}
+                hostHasAudio={hostHasAudio}
+                guestHasAudio={guestHasAudio}
+                hostMicMuted={hostMicMuted}
+                guestMicMuted={guestMicMuted}
+                localSpeaking={localSpeaking}
+                remoteSpeaking={remoteSpeaking}
+                chatMessages={chatMessages}
+                floatingReactions={floatingReactions}
+                onSetDiceCount={setDiceCount}
+                onStartParcheesi={handleStartParcheesi}
+                onToggleMic={toggleMic}
+                onRequestLeaveRoom={() => setLeaveModalOpen(true)}
+                onSendChatMessage={sendChatMessage}
+                onSendQuickReaction={sendQuickReaction}
+                onNotify={pushToast}
               />
             </motion.div>
           )}
 
-          {screen === 'laugh' && (
-            <motion.div
-              key="laugh-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
+          {screen === 'parcheesi' && (
+            <GameErrorBoundary
+              resetKey={`${roomCode}-${screen}`}
+              canReturnToRoomMenu={isHost || isAIMode}
+              onReturnToRoomMenu={handleReturnToRoomMenu}
+              title={t.errorBoundaryTitle}
+              subtitle={t.errorBoundarySub}
+              returnLabel={t.backToRoomMenu}
             >
-              <LaughGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                trackerStatus={trackerStatus}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                registerPeerHandler={registerPeerHandler}
-                onAiContextChange={handleAiLaughContextChange}
-                onAiResetRound={handleAiResetRound}
-                onMatchProgress={handleMatchProgress}
-                onReturnToHub={handleReturnToHub}
-                onManualSmileChange={handleManualSmileChange}
-              />
-            </motion.div>
-          )}
+              <motion.div
+                key="parcheesi-screen"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className="relative flex-1 min-h-0 flex flex-col overflow-hidden"
+              >
+                <ParchisiDuoGameView
+                  localName={playerName}
+                  partnerName={partnerName}
+                  connectionMode={connectionMode}
+                  initialDiceCount={diceCount}
+                  onSyncDiceCount={setDiceCount}
+                  micMuted={micMuted}
+                  partnerMicMuted={partnerMicMuted}
+                  localSpeaking={localSpeaking}
+                  remoteSpeaking={remoteSpeaking}
+                  unreadChatCount={unreadChatCount}
+                  onOpenLiveChat={() => setChatOpen(true)}
+                  onRecordVictory={recordParchisiVictory}
+                  onSendPeerMessage={sendData}
+                  registerPeerHandler={registerPeerHandler}
+                  onReturnToRoomMenu={handleReturnToRoomMenu}
+                />
 
-          {screen === 'funambules' && (
-            <motion.div
-              key="funambules-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <FunambulesGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                trackerStatus={trackerStatus}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                funambulesBestM={funambulesBestM}
-                onUpdateBestDistance={handleUpdateBestDistance}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
-                registerPeerHandler={registerPeerHandler}
-                onStateForAiChange={handleStateForAiChange}
-                onReturnToHub={handleReturnToHub}
-                onManualTiltChange={handleManualTiltChange}
-              />
-            </motion.div>
-          )}
+                {/* Floating Quick Reactions during Parcheesi */}
+                {floatingReactions.length > 0 && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center overflow-hidden"
+                  >
+                    <div className="relative w-72 h-36">
+                      {floatingReactions.map((r) => (
+                        <div
+                          key={r.id}
+                          style={{ left: `calc(50% + ${r.offsetX}px)` }}
+                          className="absolute bottom-0 -translate-x-1/2 flex flex-col items-center animate-bounce"
+                        >
+                          <span className="text-3xl drop-shadow-sm">{r.emoji}</span>
+                          <span className="mt-0.5 px-2 py-0.5 rounded-full bg-white/95 border border-[#EAE4DC] text-[10px] font-bold text-[#1F242D] shadow-xs whitespace-nowrap">
+                            {r.senderName}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-          {screen === 'ninja-fruits' && (
-            <motion.div
-              key="ninja-fruits-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <NinjaFruitsGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                handTrackerStatus={handTrackerStatus}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                localHandMetricsRef={localHandMetricsRef}
-                partnerHandMetricsRef={partnerHandMetricsRef}
-                bestScore={ninjaBestScore}
-                onUpdateBestScore={handleUpdateNinjaBestScore}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
-                registerPeerHandler={registerPeerHandler}
-                onLocalPointerHandChange={handleLocalPointerHandChange}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
+                {/* Slide-over Live Chat Drawer inside Parcheesi */}
+                {chatOpen && (
+                  <LiveChatPanel
+                    messages={chatMessages}
+                    localRole={role}
+                    onSendMessage={sendChatMessage}
+                    onSendReaction={sendQuickReaction}
+                    variant="drawer"
+                    onClose={() => setChatOpen(false)}
+                  />
+                )}
+              </motion.div>
+            </GameErrorBoundary>
           )}
+        </div>
+      )}
 
-          {screen === 'air-hockey' && (
-            <motion.div
-              key="air-hockey-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <AirHockeyGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                handTrackerStatus={handTrackerStatus}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                localHandMetricsRef={localHandMetricsRef}
-                partnerHandMetricsRef={partnerHandMetricsRef}
-                onRecordVictory={handleRecordAirHockeyVictory}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
-                registerPeerHandler={registerPeerHandler}
-                onLocalPointerHandChange={handleLocalPointerHandChange}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
+      {/* Explicit Leave Room Confirmation Modal (replaces window.confirm) */}
+      <LeaveRoomModal
+        open={leaveModalOpen}
+        onCancel={() => setLeaveModalOpen(false)}
+        onConfirm={handleConfirmLeaveRoom}
+      />
 
-          {screen === 'stare-duel' && (
-            <motion.div
-              key="stare-duel-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <StareDuelGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                trackerStatus={trackerStatus}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                bestStareSec={stareBestSec}
-                onUpdateBestStare={handleUpdateBestStare}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                registerPeerHandler={registerPeerHandler}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-
-          {screen === 'miam-mania' && (
-            <motion.div
-              key="miam-mania-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <MiamManiaGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                trackerStatus={trackerStatus}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                bestScore={miamBestScore}
-                onUpdateBestScore={handleUpdateMiamBestScore}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
-                registerPeerHandler={registerPeerHandler}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-
-
-          {screen === 'whisper-secrets' && (
-            <motion.div
-              key="whisper-secrets-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <WhisperSecretsGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                sfxMuted={sfxMuted}
-                trackerStatus={trackerStatus}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
-                registerPeerHandler={registerPeerHandler}
-                onUpdateBestHeat={handleUpdateWhisperBestHeat}
-              />
-            </motion.div>
-          )}
-
-          {screen === 'slingshot-duo' && (
-            <motion.div
-              key="slingshot-duo-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <SlingshotDuoGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                handTrackerStatus={handTrackerStatus}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                localHandMetricsRef={localHandMetricsRef}
-                bestScore={slingshotBestScore}
-                onUpdateBestScore={handleUpdateSlingshotBestScore}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
-                registerPeerHandler={registerPeerHandler}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-
-          {screen === 'xo-neon' && (
-            <motion.div
-              key="xo-neon-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 flex flex-col"
-            >
-              <XoNeonGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                handTrackerStatus={handTrackerStatus}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                localHandMetricsRef={localHandMetricsRef}
-                onRecordVictory={handleRecordXoVictory}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                onSendPeerRealtime={handleSendPeerRealtime}
-                registerPeerHandler={registerPeerHandler}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-
-          {screen === 'parchisi-duo' && (
-            <motion.div
-              key="parchisi-duo-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 min-h-0 flex flex-col overflow-hidden"
-            >
-              <ParchisiDuoGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                micMuted={micMuted}
-                handTrackerStatus={handTrackerStatus}
-                handDiceEnabled={parchisiHandDiceEnabled}
-                onToggleHandDice={setParchisiHandDiceEnabled}
-                localFaceMetricsRef={localMetricsRef}
-                partnerFaceMetricsRef={partnerMetricsRef}
-                localHandMetricsRef={localHandMetricsRef}
-                onRecordVictory={handleRecordParchisiVictory}
-                onVideoRef={handleVideoRef}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                registerPeerHandler={registerPeerHandler}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-
-          {screen === 'music-quiz' && (
-            <motion.div
-              key="music-quiz-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 min-h-0 flex flex-col overflow-hidden"
-            >
-              <MusicQuizGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                sfxMuted={sfxMuted}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                onRecordScore={handleRecordMusicQuizScore}
-                onSendPeerMessage={handleSendPeerMessage}
-                registerPeerHandler={registerPeerHandler}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-
-          {screen === 'freeze-dance' && (
-            <motion.div
-              key="freeze-dance-view"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="flex-1 min-h-0 flex flex-col overflow-hidden"
-            >
-              <FreezeDanceGameView
-                localName={playerName}
-                partnerName={partnerName}
-                connectionMode={connectionMode}
-                localStream={localStream}
-                remoteStream={remoteStream}
-                cameraEnabled={cameraEnabled}
-                sfxMuted={sfxMuted}
-                localMetricsRef={localMetricsRef}
-                partnerMetricsRef={partnerMetricsRef}
-                onRecordVictory={handleRecordFreezeDanceVictory}
-                onRequestCamera={requestLocalMedia}
-                onSendPeerMessage={handleSendPeerMessage}
-                registerPeerHandler={registerPeerHandler}
-                onReturnToHub={handleReturnToHub}
-              />
-            </motion.div>
-          )}
-        </GameErrorBoundary>
-        <MediaPipeLoadingOverlay visible={isMediaPipeWarming} />
-        <ToastStack toasts={toasts} />
-      </div>
+      <ToastStack toasts={toasts} />
     </MotionConfig>
   );
 }

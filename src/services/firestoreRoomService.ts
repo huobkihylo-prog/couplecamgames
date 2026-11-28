@@ -11,9 +11,16 @@ import {
   updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
-import type { ParchisiDiceCount, PeerMessage, ScreenView } from '../types/duoplay';
+import type {
+  ActiveGame,
+  ParchisiDiceCount,
+  PeerMessage,
+  RoomChatMessage,
+  RoomRole,
+} from '../types/duoplay';
 import {
   db,
+  ensureAnonymousAuth,
   formatUserFriendlyFirestoreError,
   handleFirestoreError,
   OperationType,
@@ -28,7 +35,7 @@ import {
   stripUndefinedDeep,
 } from '../utils/roomCode';
 
-export type RoomRole = 'host' | 'guest';
+export type { RoomRole };
 
 export interface SdpPayload {
   type: 'offer' | 'answer';
@@ -38,17 +45,27 @@ export interface SdpPayload {
 export interface FirestoreRoomDoc {
   hostName: string;
   guestName: string;
-  status: 'waiting' | 'connected' | 'closed';
-  currentGame: string;
+  status: 'waiting' | 'connected' | 'playing' | 'closed';
+  activeGame: ActiveGame;
   scores: Record<string, number>;
   diceCount: ParchisiDiceCount;
   offer?: SdpPayload | null;
   answer?: SdpPayload | null;
   webrtcGen: number;
-  hostHasStream: boolean;
-  guestHasStream: boolean;
+  hostHasAudio: boolean;
+  guestHasAudio: boolean;
+  hostMicMuted: boolean;
+  guestMicMuted: boolean;
   createdAt?: unknown;
   updatedAt?: unknown;
+}
+
+export interface FirestoreChatDoc {
+  sender: RoomRole;
+  senderName: string;
+  text: string;
+  kind: 'text' | 'reaction';
+  createdAt?: unknown;
 }
 
 export interface FirestoreRoomMessageDoc {
@@ -69,10 +86,18 @@ export interface FirestoreCandidateDoc {
   createdAt?: unknown;
 }
 
-export interface HostRoomStateSnapshot {
-  currentGame?: ScreenView;
-  scores?: Record<string, number>;
-  diceCount?: ParchisiDiceCount;
+export interface RoomStateSummary {
+  code: string;
+  hostName: string;
+  guestName: string;
+  status: FirestoreRoomDoc['status'];
+  activeGame: ActiveGame;
+  diceCount: ParchisiDiceCount;
+  scores: Record<string, number>;
+  hostHasAudio: boolean;
+  guestHasAudio: boolean;
+  hostMicMuted: boolean;
+  guestMicMuted: boolean;
 }
 
 export interface FirestoreRoomCallbacks {
@@ -81,15 +106,12 @@ export interface FirestoreRoomCallbacks {
     message?: string,
   ) => void;
   onRoomCodeChange?: (code: string) => void;
+  onRoomState?: (summary: RoomStateSummary) => void;
   onRemoteStream: (stream: MediaStream | null) => void;
   onMessage: (msg: PeerMessage) => void;
-  getHostRoomState?: () => HostRoomStateSnapshot;
+  onChatMessage?: (msg: RoomChatMessage, isFromRemote: boolean, isInitialHistory: boolean) => void;
 }
 
-/**
- * Pluggable transport adapter so pure unit tests can exercise the full Host/Guest
- * room lifecycle, messaging, and WebRTC signaling deterministically without live network calls.
- */
 export interface RoomSnapshotMeta {
   hasPendingWrites?: boolean;
   fromCache?: boolean;
@@ -102,6 +124,12 @@ export interface FirestoreTransportAdapter {
   subscribeRoom: (
     code: string,
     onData: (room: FirestoreRoomDoc | null, meta?: RoomSnapshotMeta) => void,
+    onError: (err: unknown) => void,
+  ) => Unsubscribe;
+  addChat: (code: string, data: FirestoreChatDoc) => Promise<void>;
+  subscribeChat: (
+    code: string,
+    onAdded: (id: string, msg: FirestoreChatDoc) => void,
     onError: (err: unknown) => void,
   ) => Unsubscribe;
   addMessage: (code: string, data: FirestoreRoomMessageDoc) => Promise<void>;
@@ -119,9 +147,22 @@ export interface FirestoreTransportAdapter {
   serverNow: () => unknown;
 }
 
+function timestampToMs(ts: unknown): number {
+  if (typeof ts === 'number' && Number.isFinite(ts)) return ts;
+  if (ts && typeof ts === 'object' && 'toMillis' in ts && typeof (ts as { toMillis: () => number }).toMillis === 'function') {
+    try {
+      return (ts as { toMillis: () => number }).toMillis();
+    } catch {
+      return Date.now();
+    }
+  }
+  return Date.now();
+}
+
 const DEFAULT_FIRESTORE_ADAPTER: FirestoreTransportAdapter = {
   async getRoom(code) {
     const path = `rooms/${code}`;
+    await ensureAnonymousAuth();
     try {
       const snap = await getDoc(doc(db, 'rooms', code));
       return snap.exists() ? (snap.data() as FirestoreRoomDoc) : null;
@@ -131,6 +172,7 @@ const DEFAULT_FIRESTORE_ADAPTER: FirestoreTransportAdapter = {
   },
   async createRoom(code, data) {
     const path = `rooms/${code}`;
+    await ensureAnonymousAuth();
     try {
       await setDoc(doc(db, 'rooms', code), data);
     } catch (err) {
@@ -140,7 +182,7 @@ const DEFAULT_FIRESTORE_ADAPTER: FirestoreTransportAdapter = {
   async updateRoom(code, patch) {
     const path = `rooms/${code}`;
     try {
-      // Strictly use updateDoc (partial merge) so status, hostName, guestName, offer & answer are never overwritten
+      // Strictly use updateDoc (partial merge) so hostName, guestName, activeGame, offer & answer are never overwritten
       const cleanPatch: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(patch)) {
         if (v !== undefined) {
@@ -165,6 +207,35 @@ const DEFAULT_FIRESTORE_ADAPTER: FirestoreTransportAdapter = {
       (err) => {
         try {
           handleFirestoreError(err, OperationType.GET, path);
+        } catch (wrapped) {
+          onError(wrapped);
+        }
+      },
+    );
+  },
+  async addChat(code, data) {
+    const path = `rooms/${code}/chat`;
+    try {
+      await addDoc(collection(db, 'rooms', code, 'chat'), data);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, path);
+    }
+  },
+  subscribeChat(code, onAdded, onError) {
+    const path = `rooms/${code}/chat`;
+    const q = query(collection(db, 'rooms', code, 'chat'), orderBy('createdAt', 'asc'));
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        for (const change of snapshot.docChanges()) {
+          if (change.type === 'added') {
+            onAdded(change.doc.id, change.doc.data() as FirestoreChatDoc);
+          }
+        }
+      },
+      (err) => {
+        try {
+          handleFirestoreError(err, OperationType.LIST, path);
         } catch (wrapped) {
           onError(wrapped);
         }
@@ -234,19 +305,18 @@ const DEFAULT_FIRESTORE_ADAPTER: FirestoreTransportAdapter = {
   },
 };
 
-const REALTIME_DATACHANNEL_INTERVAL_MS = 32; // ~30fps over direct WebRTC DataChannel
-const REALTIME_FIRESTORE_FALLBACK_INTERVAL_MS = 320; // Quota-safe ~3Hz fallback over Firestore
 const ICE_DISCONNECT_RESTART_MS = 3500;
 
 /**
- * Cloud Firestore + Native WebRTC (`RTCPeerConnection`) Room Manager.
+ * Unbreakable Cloud Firestore + Audio-Only Native WebRTC (`RTCPeerConnection`) Room Manager.
  *
- * - Zero PeerJS dependency.
- * - Instant room entry (< 1s) independent of camera/mic permissions via `rooms/{code}`.
- * - Lossless real-time game events via `rooms/{code}/messages` (`addDoc` + `onSnapshot`).
- * - Background native `RTCPeerConnection` with Firestore SDP (`offer`/`answer`) and
- *   trickle ICE (`rooms/{code}/candidates`), hot-camera `replaceTrack` / renegotiation,
- *   and automatic `restartIce()` on video drops.
+ * - Zero video tracks, zero video transceivers, zero MediaPipe.
+ * - Both Host (immediately after creating) and Guest (after joining) land directly in the
+ *   Room Menu (`activeGame: null`). Parcheesi NEVER auto-starts when Guest joins.
+ * - Host explicitly controls `activeGame` (`null` <-> `'parcheesi'`) and `diceCount` (`1 | 2`)
+ *   via non-destructive `updateDoc()`.
+ * - Live Chat & Quick Reactions persist in `rooms/{code}/chat` across Room Menu & Parcheesi.
+ * - Supports `resumeSession()` for automatic reconnect after page refresh / mobile hiccups.
  */
 export class FirestoreRoomService {
   private callbacks: FirestoreRoomCallbacks;
@@ -259,27 +329,31 @@ export class FirestoreRoomService {
   private localName = 'Moi';
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
+  private localMicMuted = false;
   private hasEnteredRoom = false;
+  private guestJoinedNotified = false;
+  private latestRoom: FirestoreRoomDoc | null = null;
 
   // Firestore listeners
   private unsubRoom: Unsubscribe | null = null;
+  private unsubChat: Unsubscribe | null = null;
   private unsubMessages: Unsubscribe | null = null;
   private unsubCandidates: Unsubscribe | null = null;
+  private seenChatIds = new Set<string>();
   private seenMessageIds = new Set<string>();
   private seenCandidateIds = new Set<string>();
+  private initialChatHydrated = false;
   private initialMessagesHydrated = false;
 
-  // Native WebRTC state
+  // Audio-only Native WebRTC state
   private pc: RTCPeerConnection | null = null;
-  private dataChannel: RTCDataChannel | null = null;
   private webrtcGen = 0;
   private appliedOfferGen = -1;
   private appliedAnswerGen = -1;
   private hasRemoteDescription = false;
   private pendingRemoteCandidates: RTCIceCandidateInit[] = [];
   private iceRestartTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastRealtimeSendByType = new Map<string, number>();
-  private lastKnownGuestHasStream = false;
+  private lastKnownGuestHasAudio = false;
 
   constructor(
     callbacks: FirestoreRoomCallbacks,
@@ -306,6 +380,23 @@ export class FirestoreRoomService {
     return this.activeRoomCode;
   }
 
+  private emitRoomSummary(code: string, room: FirestoreRoomDoc): void {
+    this.latestRoom = room;
+    this.callbacks.onRoomState?.({
+      code,
+      hostName: room.hostName || 'Hôte',
+      guestName: room.guestName || '',
+      status: room.status,
+      activeGame: room.activeGame === 'parcheesi' ? 'parcheesi' : null,
+      diceCount: room.diceCount === 1 ? 1 : 2,
+      scores: room.scores ?? {},
+      hostHasAudio: Boolean(room.hostHasAudio),
+      guestHasAudio: Boolean(room.guestHasAudio),
+      hostMicMuted: Boolean(room.hostMicMuted),
+      guestMicMuted: Boolean(room.guestMicMuted),
+    });
+  }
+
   private clearIceRestartTimer(): void {
     if (this.iceRestartTimer !== null) {
       clearTimeout(this.iceRestartTimer);
@@ -317,22 +408,10 @@ export class FirestoreRoomService {
     this.clearIceRestartTimer();
     this.hasRemoteDescription = false;
     this.pendingRemoteCandidates = [];
-    if (this.dataChannel) {
-      try {
-        this.dataChannel.onmessage = null;
-        this.dataChannel.onopen = null;
-        this.dataChannel.onclose = null;
-        this.dataChannel.close();
-      } catch {
-        // Ignore close errors
-      }
-      this.dataChannel = null;
-    }
     if (this.pc) {
       try {
         this.pc.onicecandidate = null;
         this.pc.ontrack = null;
-        this.pc.ondatachannel = null;
         this.pc.oniceconnectionstatechange = null;
         this.pc.onconnectionstatechange = null;
         this.pc.close();
@@ -344,41 +423,33 @@ export class FirestoreRoomService {
   }
 
   private unsubscribeAll(): void {
-    if (this.unsubRoom) {
-      try {
-        this.unsubRoom();
-      } catch {
-        // Ignore
+    for (const unsub of [this.unsubRoom, this.unsubChat, this.unsubMessages, this.unsubCandidates]) {
+      if (unsub) {
+        try {
+          unsub();
+        } catch {
+          // Ignore
+        }
       }
-      this.unsubRoom = null;
     }
-    if (this.unsubMessages) {
-      try {
-        this.unsubMessages();
-      } catch {
-        // Ignore
-      }
-      this.unsubMessages = null;
-    }
-    if (this.unsubCandidates) {
-      try {
-        this.unsubCandidates();
-      } catch {
-        // Ignore
-      }
-      this.unsubCandidates = null;
-    }
+    this.unsubRoom = null;
+    this.unsubChat = null;
+    this.unsubMessages = null;
+    this.unsubCandidates = null;
   }
 
   /**
-   * Host creates `rooms/{code}` via `setDoc()` and listens in real time via `onSnapshot()`.
+   * Host creates `rooms/{code}` in Room Menu (`activeGame: null`, `status: 'waiting'`)
+   * and enters the Room Menu IMMEDIATELY so they see the code, mic, chat, dice selector, and Parcheesi card.
    */
   public async createHostRoom(
     code: string,
     hostName: string,
-    stream: MediaStream | null,
+    audioStream: MediaStream | null,
+    micMuted = false,
+    diceCount: ParchisiDiceCount = 2,
     attempt = 0,
-  ): Promise<void> {
+  ): Promise<string | null> {
     this.destroy({ closeRemoteDoc: false });
     const gen = this.sessionGen;
     const cleanCode = normalizeRoomCode(code) || generateRoomCode();
@@ -387,69 +458,71 @@ export class FirestoreRoomService {
     this.role = 'host';
     this.activeRoomCode = cleanCode;
     this.localName = cleanHostName;
-    this.localStream = stream;
+    this.localStream = audioStream;
+    this.localMicMuted = micMuted;
     this.hasEnteredRoom = false;
+    this.guestJoinedNotified = false;
     this.webrtcGen = 0;
     this.appliedOfferGen = -1;
     this.appliedAnswerGen = -1;
-    this.lastKnownGuestHasStream = false;
+    this.lastKnownGuestHasAudio = false;
 
     this.callbacks.onStatusChange('creating', `Ouverture du salon ${cleanCode}...`);
 
     try {
-      // Avoid colliding with an already-existing room doc (regenerate fresh 4-char code)
       const existing = await this.adapter.getRoom(cleanCode);
-      if (gen !== this.sessionGen) return;
+      if (gen !== this.sessionGen) return null;
 
       if (existing && attempt < 3) {
         const freshCode = generateRoomCode();
         this.callbacks.onRoomCodeChange?.(freshCode);
-        await this.createHostRoom(freshCode, cleanHostName, stream, attempt + 1);
-        return;
+        return this.createHostRoom(freshCode, cleanHostName, audioStream, micMuted, diceCount, attempt + 1);
       }
 
-      const snapshot = this.callbacks.getHostRoomState?.() ?? {};
       const roomDoc: FirestoreRoomDoc = {
         hostName: cleanHostName,
         guestName: '',
         status: 'waiting',
-        currentGame: snapshot.currentGame && snapshot.currentGame !== 'lobby' ? snapshot.currentGame : 'hub',
-        scores: stripUndefinedDeep(snapshot.scores ?? {}),
-        diceCount: snapshot.diceCount === 1 ? 1 : 2,
+        activeGame: null,
+        scores: {},
+        diceCount: diceCount === 1 ? 1 : 2,
         offer: null,
         answer: null,
         webrtcGen: 0,
-        hostHasStream: Boolean(stream),
-        guestHasStream: false,
+        hostHasAudio: Boolean(audioStream && audioStream.getAudioTracks().length > 0),
+        guestHasAudio: false,
+        hostMicMuted: micMuted,
+        guestMicMuted: false,
         createdAt: this.adapter.serverNow(),
         updatedAt: this.adapter.serverNow(),
       };
 
       await this.adapter.createRoom(cleanCode, roomDoc);
-      if (gen !== this.sessionGen) return;
+      if (gen !== this.sessionGen) return null;
 
-      this.callbacks.onStatusChange(
-        'waiting',
-        `Salon ${cleanCode} ouvert — en attente de ton/ta partenaire.`,
-      );
-
+      this.callbacks.onRoomCodeChange?.(cleanCode);
+      this.emitRoomSummary(cleanCode, roomDoc);
+      this.enterRoomSession(cleanCode, gen, 'waiting');
       this.attachRoomListener(cleanCode, gen);
+      return cleanCode;
     } catch (err) {
-      if (gen !== this.sessionGen) return;
+      if (gen !== this.sessionGen) return null;
       this.destroy({ closeRemoteDoc: false });
       this.callbacks.onStatusChange('error', formatUserFriendlyFirestoreError(err));
+      return null;
     }
   }
 
   /**
-   * Guest verifies `rooms/{code}` with `getDoc()` and updates `guestName` + `status: 'connected'`
-   * via `updateDoc()` so entry into the Hub takes < 1 second, independent of camera/mic.
+   * Guest verifies `rooms/{code}` and joins into the Room Menu (`activeGame` is NEVER mutated by Guest).
+   * Parcheesi NEVER auto-starts on Guest join.
    */
   public async joinGuestRoom(
     code: string,
     guestName: string,
-    stream: MediaStream | null,
-  ): Promise<void> {
+    audioStream: MediaStream | null,
+    micMuted = false,
+  ): Promise<boolean> {
     this.destroy({ closeRemoteDoc: false });
     const gen = this.sessionGen;
     const cleanCode = normalizeRoomCode(code);
@@ -457,13 +530,14 @@ export class FirestoreRoomService {
 
     if (cleanCode.length !== 4) {
       this.callbacks.onStatusChange('error', ERR_ROOM_NOT_FOUND);
-      return;
+      return false;
     }
 
     this.role = 'guest';
     this.activeRoomCode = cleanCode;
     this.localName = cleanGuestName;
-    this.localStream = stream;
+    this.localStream = audioStream;
+    this.localMicMuted = micMuted;
     this.hasEnteredRoom = false;
     this.webrtcGen = 0;
     this.appliedOfferGen = -1;
@@ -473,65 +547,160 @@ export class FirestoreRoomService {
 
     try {
       const room = await this.adapter.getRoom(cleanCode);
-      if (gen !== this.sessionGen) return;
+      if (gen !== this.sessionGen) return false;
 
       if (!room || room.status === 'closed') {
         this.destroy({ closeRemoteDoc: false });
         this.callbacks.onStatusChange('error', ERR_ROOM_NOT_FOUND);
-        return;
+        return false;
       }
 
-      // Immediately update guestName + status='connected' -> Guest enters Hub in < 1s!
+      const nextStatus: FirestoreRoomDoc['status'] =
+        room.activeGame === 'parcheesi' ? 'playing' : 'connected';
+      const hasAudio = Boolean(audioStream && audioStream.getAudioTracks().length > 0);
+
       await this.adapter.updateRoom(cleanCode, {
         guestName: cleanGuestName,
-        status: 'connected',
-        guestHasStream: Boolean(stream),
+        status: nextStatus,
+        guestHasAudio: hasAudio,
+        guestMicMuted: micMuted,
         updatedAt: this.adapter.serverNow(),
       });
-      if (gen !== this.sessionGen) return;
+      if (gen !== this.sessionGen) return false;
 
-      // Notify app of Host name and active game immediately
-      this.callbacks.onMessage({
-        type: 'JOIN_ACCEPTED',
-        code: cleanCode,
-        hostName: room.hostName || 'Hôte',
-        currentGame: (room.currentGame as ScreenView) || 'hub',
-        scores: room.scores ?? {},
-        hasStream: Boolean(room.hostHasStream),
-      });
-      this.callbacks.onMessage({
-        type: 'HELLO',
-        name: room.hostName || 'Hôte',
-        role: 'host',
-        hasStream: Boolean(room.hostHasStream),
-      });
+      const updatedRoom: FirestoreRoomDoc = {
+        ...room,
+        guestName: cleanGuestName,
+        status: nextStatus,
+        guestHasAudio: hasAudio,
+        guestMicMuted: micMuted,
+      };
 
-      this.enterRoomSession(cleanCode, gen);
+      this.callbacks.onRoomCodeChange?.(cleanCode);
+      this.emitRoomSummary(cleanCode, updatedRoom);
+      this.enterRoomSession(cleanCode, gen, 'connected');
       this.attachRoomListener(cleanCode, gen);
 
-      // If Host already published an offer, answer it right away in the background
+      // If Host already published an audio WebRTC offer, answer in background
       if (room.offer && room.webrtcGen > 0) {
         void this.handleGuestIncomingOffer(cleanCode, room.offer, room.webrtcGen, gen);
       }
+      return true;
     } catch (err) {
-      if (gen !== this.sessionGen) return;
+      if (gen !== this.sessionGen) return false;
       this.destroy({ closeRemoteDoc: false });
       this.callbacks.onStatusChange('error', formatUserFriendlyFirestoreError(err));
+      return false;
     }
   }
 
-  private enterRoomSession(code: string, gen: number): void {
+  /**
+   * Auto-reconnect helper used after page refresh or brief mobile hiccup (`sessionStorage`).
+   * Restores the exact room screen (Room Menu or active Parcheesi match) without destroying room data.
+   */
+  public async resumeSession(
+    code: string,
+    role: RoomRole,
+    playerName: string,
+    audioStream: MediaStream | null,
+    micMuted = false,
+  ): Promise<boolean> {
+    this.destroy({ closeRemoteDoc: false });
+    const gen = this.sessionGen;
+    const cleanCode = normalizeRoomCode(code);
+    if (cleanCode.length !== 4) return false;
+
+    const cleanName = sanitizePlayerName(playerName, role === 'host' ? 'Hôte' : 'Invité');
+    this.role = role;
+    this.activeRoomCode = cleanCode;
+    this.localName = cleanName;
+    this.localStream = audioStream;
+    this.localMicMuted = micMuted;
+    this.hasEnteredRoom = false;
+    this.webrtcGen = 0;
+    this.appliedOfferGen = -1;
+    this.appliedAnswerGen = -1;
+
+    try {
+      const room = await this.adapter.getRoom(cleanCode);
+      if (gen !== this.sessionGen) return false;
+      if (!room || room.status === 'closed') {
+        this.destroy({ closeRemoteDoc: false });
+        return false;
+      }
+
+      const hasAudio = Boolean(audioStream && audioStream.getAudioTracks().length > 0);
+      this.webrtcGen = typeof room.webrtcGen === 'number' ? room.webrtcGen : 0;
+      this.guestJoinedNotified = Boolean(room.guestName);
+      this.lastKnownGuestHasAudio = Boolean(room.guestHasAudio);
+
+      const audioPatch =
+        role === 'host'
+          ? { hostHasAudio: hasAudio, hostMicMuted: micMuted, updatedAt: this.adapter.serverNow() }
+          : {
+              guestName: cleanName,
+              status: room.activeGame === 'parcheesi' ? 'playing' : 'connected',
+              guestHasAudio: hasAudio,
+              guestMicMuted: micMuted,
+              updatedAt: this.adapter.serverNow(),
+            };
+
+      await this.adapter.updateRoom(cleanCode, audioPatch).catch(() => {});
+      if (gen !== this.sessionGen) return false;
+
+      const restoredRoom: FirestoreRoomDoc = {
+        ...room,
+        ...(role === 'host'
+          ? { hostHasAudio: hasAudio, hostMicMuted: micMuted }
+          : {
+              guestName: cleanName,
+              status: room.activeGame === 'parcheesi' ? 'playing' : 'connected',
+              guestHasAudio: hasAudio,
+              guestMicMuted: micMuted,
+            }),
+      };
+
+      this.callbacks.onRoomCodeChange?.(cleanCode);
+      this.emitRoomSummary(cleanCode, restoredRoom);
+      this.enterRoomSession(
+        cleanCode,
+        gen,
+        role === 'host' && !restoredRoom.guestName ? 'waiting' : 'connected',
+      );
+      this.attachRoomListener(cleanCode, gen);
+
+      // Re-establish audio-only WebRTC cleanly after refresh
+      if (role === 'host' && restoredRoom.guestName) {
+        void this.startHostWebRtcOffer(cleanCode, gen, false);
+      } else if (role === 'guest' && restoredRoom.offer && restoredRoom.webrtcGen > 0) {
+        void this.handleGuestIncomingOffer(cleanCode, restoredRoom.offer, restoredRoom.webrtcGen, gen);
+      }
+      return true;
+    } catch {
+      if (gen !== this.sessionGen) return false;
+      this.destroy({ closeRemoteDoc: false });
+      return false;
+    }
+  }
+
+  private enterRoomSession(
+    code: string,
+    gen: number,
+    initialStatus: 'waiting' | 'connected',
+  ): void {
     if (gen !== this.sessionGen || this.hasEnteredRoom) return;
     this.hasEnteredRoom = true;
+    this.seenChatIds.clear();
     this.seenMessageIds.clear();
     this.seenCandidateIds.clear();
+    this.initialChatHydrated = false;
     this.initialMessagesHydrated = false;
 
-    // Subscribe to real-time game messages & ICE candidates
+    this.attachChatListener(code, gen);
     this.attachMessagesListener(code, gen);
     this.attachCandidatesListener(code, gen);
 
-    this.callbacks.onStatusChange('connected');
+    this.callbacks.onStatusChange(initialStatus);
   }
 
   private attachRoomListener(code: string, gen: number): void {
@@ -539,17 +708,11 @@ export class FirestoreRoomService {
       code,
       (room, meta) => {
         if (gen !== this.sessionGen) return;
+        // Ignore latency-compensated local writes and transient null snapshots -> zero accidental disconnects
+        if (meta?.hasPendingWrites) return;
+        if (!room) return;
 
-        // Ignore local latency-compensated snapshots (hasPendingWrites) or temporarily null/incomplete docs
-        // so switching games or updating scores NEVER ejects players back to the Lobby.
-        if (meta?.hasPendingWrites) {
-          return;
-        }
-        if (!room) {
-          return;
-        }
-
-        // ONLY leave the room when `status === 'closed'` is explicitly confirmed from Firestore
+        // ONLY exit room when `status === 'closed'` is explicitly confirmed by Firestore
         if (room.status === 'closed') {
           if (this.hasEnteredRoom) {
             this.hasEnteredRoom = false;
@@ -561,24 +724,21 @@ export class FirestoreRoomService {
           return;
         }
 
+        this.emitRoomSummary(code, room);
+
         if (this.role === 'host') {
-          // Guest just joined!
-          if (room.status === 'connected' && room.guestName && !this.hasEnteredRoom) {
-            this.lastKnownGuestHasStream = Boolean(room.guestHasStream);
-            this.callbacks.onMessage({
-              type: 'HELLO',
-              name: room.guestName,
-              role: 'guest',
-              hasStream: Boolean(room.guestHasStream),
-            });
-            this.enterRoomSession(code, gen);
-            // Start non-blocking background WebRTC video/audio + DataChannel offer
+          const hasGuest = Boolean(room.guestName) && (room.status === 'connected' || room.status === 'playing');
+          if (hasGuest && !this.guestJoinedNotified) {
+            this.guestJoinedNotified = true;
+            this.lastKnownGuestHasAudio = Boolean(room.guestHasAudio);
+            this.callbacks.onStatusChange('connected');
+            // Start non-blocking background audio-only WebRTC offer
             void this.startHostWebRtcOffer(code, gen, false);
             return;
           }
 
-          if (this.hasEnteredRoom) {
-            // Apply Guest WebRTC answer once per webrtcGen
+          if (this.guestJoinedNotified) {
+            // Apply Guest audio WebRTC answer once per webrtcGen
             if (
               room.answer &&
               room.webrtcGen === this.webrtcGen &&
@@ -588,17 +748,16 @@ export class FirestoreRoomService {
               void this.handleHostIncomingAnswer(room.answer, gen);
             }
 
-            // If Guest enabled camera mid-game after joining without one, renegotiate cleanly
-            const guestNowHasStream = Boolean(room.guestHasStream);
-            if (guestNowHasStream && !this.lastKnownGuestHasStream) {
-              this.lastKnownGuestHasStream = true;
+            // If Guest enabled mic after joining without one, renegotiate audio cleanly
+            const guestNowHasAudio = Boolean(room.guestHasAudio);
+            if (guestNowHasAudio && !this.lastKnownGuestHasAudio) {
+              this.lastKnownGuestHasAudio = true;
               void this.startHostWebRtcOffer(code, gen, false);
             } else {
-              this.lastKnownGuestHasStream = guestNowHasStream;
+              this.lastKnownGuestHasAudio = guestNowHasAudio;
             }
           }
         } else if (this.role === 'guest') {
-          // Apply Host WebRTC offer whenever Host publishes a new webrtcGen (initial, hot-cam, or ICE restart)
           if (
             this.hasEnteredRoom &&
             room.offer &&
@@ -611,14 +770,45 @@ export class FirestoreRoomService {
       },
       (err) => {
         if (gen !== this.sessionGen) return;
-        // Once inside an active room, never kick players back to Lobby on a transient listener error
+        // Once inside an active room, NEVER eject players back to Home on transient listener errors
         if (this.hasEnteredRoom) {
-          console.warn('[CoupleCam Firestore] Transient room listener error (session kept alive):', err);
+          console.warn('[Parcheesi Firestore] Transient room listener error (session kept alive):', err);
           return;
         }
         this.callbacks.onStatusChange('error', formatUserFriendlyFirestoreError(err));
       },
     );
+  }
+
+  private attachChatListener(code: string, gen: number): void {
+    this.unsubChat = this.adapter.subscribeChat(
+      code,
+      (id, chatDoc) => {
+        if (gen !== this.sessionGen) return;
+        if (this.seenChatIds.has(id)) return;
+        this.seenChatIds.add(id);
+
+        const msg: RoomChatMessage = {
+          id,
+          sender: chatDoc.sender === 'guest' ? 'guest' : 'host',
+          senderName: chatDoc.senderName || (chatDoc.sender === 'guest' ? 'Invité' : 'Hôte'),
+          text: String(chatDoc.text ?? ''),
+          kind: chatDoc.kind === 'reaction' ? 'reaction' : 'text',
+          createdAtMs: timestampToMs(chatDoc.createdAt),
+        };
+        const isFromRemote = msg.sender !== this.role;
+        this.callbacks.onChatMessage?.(msg, isFromRemote, !this.initialChatHydrated);
+      },
+      (err) => {
+        if (gen !== this.sessionGen) return;
+        console.warn('[Parcheesi Firestore] Chat listener error:', err);
+      },
+    );
+    setTimeout(() => {
+      if (gen === this.sessionGen) {
+        this.initialChatHydrated = true;
+      }
+    }, 650);
   }
 
   private attachMessagesListener(code: string, gen: number): void {
@@ -630,14 +820,15 @@ export class FirestoreRoomService {
         if (this.seenMessageIds.has(id)) return;
         this.seenMessageIds.add(id);
 
-        // Ignore our own echoes
         if (msgDoc.sender === this.role) return;
 
-        // Ignore stale messages from long before we joined (if createdAt is a Firestore Timestamp)
         if (!this.initialMessagesHydrated) {
-          const ts = msgDoc.createdAt as { toMillis?: () => number } | undefined;
-          if (ts && typeof ts.toMillis === 'function' && ts.toMillis() < joinedAtMs) {
-            return;
+          const ms = timestampToMs(msgDoc.createdAt);
+          if (ms < joinedAtMs) {
+            // Still allow latest PARCHISI_STATE replay on reconnect if within last 15 min
+            if (msgDoc.payload?.type !== 'PARCHISI_STATE') {
+              return;
+            }
           }
         }
 
@@ -648,10 +839,9 @@ export class FirestoreRoomService {
       },
       (err) => {
         if (gen !== this.sessionGen) return;
-        console.warn('[CoupleCam Firestore] Messages listener error:', err);
+        console.warn('[Parcheesi Firestore] Messages listener error:', err);
       },
     );
-    // Mark initial hydration window finished shortly after subscription attaches
     setTimeout(() => {
       if (gen === this.sessionGen) {
         this.initialMessagesHydrated = true;
@@ -677,28 +867,30 @@ export class FirestoreRoomService {
         };
 
         if (this.pc && this.hasRemoteDescription) {
-          void this.pc.addIceCandidate(init).catch(() => {
-            // Ignore late/incompatible candidates during ICE restart
-          });
+          void this.pc.addIceCandidate(init).catch(() => {});
         } else {
           this.pendingRemoteCandidates.push(init);
         }
       },
       (err) => {
         if (gen !== this.sessionGen) return;
-        console.warn('[CoupleCam Firestore] Candidates listener error:', err);
+        console.warn('[Parcheesi Firestore] Candidates listener error:', err);
       },
     );
   }
 
-  private createConfiguredPeerConnection(code: string, gen: number, negotiationGen: number): RTCPeerConnection | null {
+  private createConfiguredPeerConnection(
+    code: string,
+    gen: number,
+    negotiationGen: number,
+  ): RTCPeerConnection | null {
     if (typeof RTCPeerConnection === 'undefined') {
       return null;
     }
 
     const pc = this.peerConnectionFactory({
       iceServers: buildIceServers(),
-      iceCandidatePoolSize: 8,
+      iceCandidatePoolSize: 6,
     });
 
     pc.onicecandidate = (event) => {
@@ -713,13 +905,13 @@ export class FirestoreRoomService {
           candidate: serialized,
           createdAt: this.adapter.serverNow(),
         })
-        .catch(() => {
-          // Non-fatal: trickle candidate failed to write
-        });
+        .catch(() => {});
     };
 
     pc.ontrack = (event) => {
       if (gen !== this.sessionGen || this.pc !== pc) return;
+      // Strictly audio-only: ignore any non-audio track
+      if (event.track && event.track.kind !== 'audio') return;
       const incomingStream = event.streams?.[0] ?? null;
       if (incomingStream) {
         this.remoteStream = incomingStream;
@@ -758,55 +950,20 @@ export class FirestoreRoomService {
       }
     };
 
-    pc.ondatachannel = (event) => {
-      if (gen !== this.sessionGen || this.pc !== pc) return;
-      this.attachDataChannel(event.channel, gen);
-    };
-
     return pc;
   }
 
-  private attachDataChannel(channel: RTCDataChannel, gen: number): void {
-    this.dataChannel = channel;
-    channel.onmessage = (event) => {
-      if (gen !== this.sessionGen) return;
-      try {
-        const parsed = JSON.parse(String(event.data)) as PeerMessage;
-        if (parsed && typeof parsed === 'object' && 'type' in parsed) {
-          this.callbacks.onMessage(parsed);
-        }
-      } catch {
-        // Ignore malformed packets
-      }
-    };
-  }
-
-  private syncTracksOntoPeerConnection(pc: RTCPeerConnection, isOfferer: boolean): void {
+  /**
+   * Audio-only track synchronization. Never attaches video tracks or video transceivers.
+   */
+  private syncAudioTrackOntoPeerConnection(pc: RTCPeerConnection, isOfferer: boolean): void {
     const stream = this.localStream;
-    const videoTrack = stream?.getVideoTracks()[0] ?? null;
     const audioTrack = stream?.getAudioTracks()[0] ?? null;
 
     if (typeof pc.getTransceivers === 'function' && pc.getTransceivers().length > 0) {
-      const transceivers = pc.getTransceivers();
-      const videoTr = transceivers.find(
-        (t) => t.receiver?.track?.kind === 'video' || t.sender?.track?.kind === 'video',
-      );
-      const audioTr = transceivers.find(
-        (t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio',
-      );
-      if (videoTr) {
-        if (videoTrack) {
-          videoTr.direction = 'sendrecv';
-          void videoTr.sender.replaceTrack(videoTrack).catch(() => {});
-        } else {
-          videoTr.direction = 'recvonly';
-        }
-      } else if (videoTrack && stream) {
-        pc.addTrack(videoTrack, stream);
-      } else if (isOfferer && typeof pc.addTransceiver === 'function') {
-        pc.addTransceiver('video', { direction: 'recvonly' });
-      }
-
+      const audioTr = pc
+        .getTransceivers()
+        .find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
       if (audioTr) {
         if (audioTrack) {
           audioTr.direction = 'sendrecv';
@@ -814,21 +971,14 @@ export class FirestoreRoomService {
         } else {
           audioTr.direction = 'recvonly';
         }
-      } else if (audioTrack && stream) {
-        pc.addTrack(audioTrack, stream);
-      } else if (isOfferer && typeof pc.addTransceiver === 'function') {
-        pc.addTransceiver('audio', { direction: 'recvonly' });
+        return;
       }
-      return;
     }
 
-    if (stream) {
-      if (videoTrack) pc.addTrack(videoTrack, stream);
-      if (audioTrack) pc.addTrack(audioTrack, stream);
-    }
-    if (isOfferer && typeof pc.addTransceiver === 'function') {
-      if (!videoTrack) pc.addTransceiver('video', { direction: 'recvonly' });
-      if (!audioTrack) pc.addTransceiver('audio', { direction: 'recvonly' });
+    if (audioTrack && stream) {
+      pc.addTrack(audioTrack, stream);
+    } else if (isOfferer && typeof pc.addTransceiver === 'function') {
+      pc.addTransceiver('audio', { direction: 'recvonly' });
     }
   }
 
@@ -863,13 +1013,9 @@ export class FirestoreRoomService {
       const pc = this.createConfiguredPeerConnection(code, gen, nextGen);
       if (!pc) return;
       this.pc = pc;
-      if (typeof pc.createDataChannel === 'function') {
-        const dc = pc.createDataChannel('couplecam-realtime', { ordered: false, maxRetransmits: 0 });
-        this.attachDataChannel(dc, gen);
-      }
-      this.syncTracksOntoPeerConnection(pc, true);
+      this.syncAudioTrackOntoPeerConnection(pc, true);
     } else {
-      this.syncTracksOntoPeerConnection(this.pc, true);
+      this.syncAudioTrackOntoPeerConnection(this.pc, true);
     }
 
     const pc = this.pc;
@@ -888,11 +1034,12 @@ export class FirestoreRoomService {
         offer: { type: 'offer', sdp: offer.sdp.slice(0, 20000) },
         answer: null,
         webrtcGen: nextGen,
-        hostHasStream: Boolean(this.localStream),
+        hostHasAudio: Boolean(this.localStream && this.localStream.getAudioTracks().length > 0),
+        hostMicMuted: this.localMicMuted,
         updatedAt: this.adapter.serverNow(),
       });
     } catch (err) {
-      console.warn('[CoupleCam WebRTC][Host] Offer negotiation failed (non-blocking):', err);
+      console.warn('[Parcheesi WebRTC][Host] Audio offer failed (non-blocking):', err);
     }
   }
 
@@ -905,7 +1052,7 @@ export class FirestoreRoomService {
       this.hasRemoteDescription = true;
       await this.flushPendingCandidates(pc, gen);
     } catch (err) {
-      console.warn('[CoupleCam WebRTC][Host] Failed to apply answer:', err);
+      console.warn('[Parcheesi WebRTC][Host] Failed to apply audio answer:', err);
     }
   }
 
@@ -933,7 +1080,7 @@ export class FirestoreRoomService {
       if (gen !== this.sessionGen || this.pc !== pc) return;
       this.hasRemoteDescription = true;
 
-      this.syncTracksOntoPeerConnection(pc, false);
+      this.syncAudioTrackOntoPeerConnection(pc, false);
 
       const answer = await pc.createAnswer();
       if (gen !== this.sessionGen || this.pc !== pc) return;
@@ -942,26 +1089,24 @@ export class FirestoreRoomService {
 
       await this.adapter.updateRoom(code, {
         answer: { type: 'answer', sdp: answer.sdp.slice(0, 20000) },
-        guestHasStream: Boolean(this.localStream),
+        guestHasAudio: Boolean(this.localStream && this.localStream.getAudioTracks().length > 0),
+        guestMicMuted: this.localMicMuted,
         updatedAt: this.adapter.serverNow(),
       });
 
       await this.flushPendingCandidates(pc, gen);
     } catch (err) {
-      console.warn('[CoupleCam WebRTC][Guest] Answer negotiation failed (non-blocking):', err);
+      console.warn('[Parcheesi WebRTC][Guest] Audio answer failed (non-blocking):', err);
     }
   }
 
-  /**
-   * Automatically calls `restartIce()` on video disconnect/failure without closing the Firestore room.
-   */
   public triggerIceRestart(code = this.activeRoomCode, gen = this.sessionGen): void {
     if (gen !== this.sessionGen || !this.hasEnteredRoom || !this.pc) return;
     if (typeof this.pc.restartIce === 'function') {
       try {
         this.pc.restartIce();
       } catch {
-        // Ignore restartIce errors
+        // Ignore
       }
     }
     if (this.role === 'host') {
@@ -970,97 +1115,136 @@ export class FirestoreRoomService {
   }
 
   /**
-   * Hot-activates or swaps local webcam/mic tracks mid-session without dropping the room or active game.
+   * Hot-activates or swaps local audio-only microphone track mid-session without dropping the room.
    */
-  public setLocalStream(stream: MediaStream | null): void {
+  public setLocalAudioStream(stream: MediaStream | null, micMuted = this.localMicMuted): void {
     this.localStream = stream;
+    this.localMicMuted = micMuted;
     if (!this.hasEnteredRoom || !this.activeRoomCode) return;
 
     const code = this.activeRoomCode;
     const gen = this.sessionGen;
-    const hasStream = Boolean(stream);
+    const hasAudio = Boolean(stream && stream.getAudioTracks().length > 0);
 
-    // Update Firestore stream flag (also notifies Host to renegotiate if Guest turned camera ON mid-game)
     void this.adapter
       .updateRoom(code, {
-        ...(this.role === 'host' ? { hostHasStream: hasStream } : { guestHasStream: hasStream }),
+        ...(this.role === 'host'
+          ? { hostHasAudio: hasAudio, hostMicMuted: micMuted }
+          : { guestHasAudio: hasAudio, guestMicMuted: micMuted }),
         updatedAt: this.adapter.serverNow(),
       })
-      .catch(() => {
-        // Non-fatal
-      });
+      .catch(() => {});
 
-    if (!stream || !this.pc) {
-      if (stream && this.role === 'host') {
+    if (!hasAudio || !stream) return;
+
+    if (!this.pc) {
+      if (this.role === 'host' && this.guestJoinedNotified) {
         void this.startHostWebRtcOffer(code, gen, false);
       }
       return;
     }
 
-    const newVideo = stream.getVideoTracks()[0] ?? null;
     const newAudio = stream.getAudioTracks()[0] ?? null;
     const senders = typeof this.pc.getSenders === 'function' ? this.pc.getSenders() : [];
-    const videoSender = senders.find((s) => s.track?.kind === 'video');
     const audioSender = senders.find((s) => s.track?.kind === 'audio');
 
-    if (videoSender && newVideo) {
-      void videoSender.replaceTrack(newVideo).catch(() => {});
-      if (audioSender && newAudio) {
-        void audioSender.replaceTrack(newAudio).catch(() => {});
-      }
+    if (audioSender && newAudio) {
+      void audioSender.replaceTrack(newAudio).catch(() => {});
       return;
     }
 
-    // Player joined without camera and just enabled it -> renegotiate tracks cleanly
-    if (this.role === 'host') {
+    if (this.role === 'host' && this.guestJoinedNotified) {
       void this.startHostWebRtcOffer(code, gen, false);
     }
-    // For Guest, updating `guestHasStream: true` above automatically triggers Host's renegotiation offer!
   }
 
   /**
-   * Syncs room-level metadata (`currentGame`, `scores`, `diceCount`) onto `rooms/{code}`.
+   * Syncs local mute indicator to Firestore so the partner's Pastel Voice Avatar reflects mute state live.
    */
-  public syncRoomMetadata(patch: {
-    currentGame?: ScreenView;
-    scores?: Record<string, number>;
-    diceCount?: ParchisiDiceCount;
-  }): void {
+  public syncMicMuted(muted: boolean): void {
+    this.localMicMuted = muted;
     if (!this.hasEnteredRoom || !this.activeRoomCode) return;
-    const updatePatch: Record<string, unknown> = {
+    void this.adapter
+      .updateRoom(this.activeRoomCode, {
+        ...(this.role === 'host' ? { hostMicMuted: muted } : { guestMicMuted: muted }),
+        updatedAt: this.adapter.serverNow(),
+      })
+      .catch(() => {});
+  }
+
+  /**
+   * Host-only: launches Parcheesi simultaneously on both Host & Guest via non-destructive `updateDoc`.
+   */
+  public async startParcheesi(diceCount: ParchisiDiceCount): Promise<void> {
+    if (!this.hasEnteredRoom || !this.activeRoomCode || this.role !== 'host') return;
+    const safeDice: ParchisiDiceCount = diceCount === 1 ? 1 : 2;
+    await this.adapter.updateRoom(this.activeRoomCode, {
+      activeGame: 'parcheesi',
+      status: 'playing',
+      diceCount: safeDice,
       updatedAt: this.adapter.serverNow(),
-    };
-    if (patch.currentGame && patch.currentGame !== 'lobby') {
-      updatePatch.currentGame = patch.currentGame;
-    }
-    if (patch.scores) {
-      updatePatch.scores = stripUndefinedDeep(patch.scores);
-    }
-    if (patch.diceCount === 1 || patch.diceCount === 2) {
-      updatePatch.diceCount = patch.diceCount;
-    }
-    void this.adapter.updateRoom(this.activeRoomCode, updatePatch).catch(() => {
-      // Non-fatal metadata sync failure
     });
   }
 
   /**
-   * Sends an authoritative game event via Firestore `rooms/{code}/messages` (`addDoc`)
-   * so moves, dice rolls, scores, and emoji reactions are never lost.
+   * Host-only: returns both Host & Guest smoothly to the Room Menu WITHOUT closing the room or voice call.
+   */
+  public async returnToRoomMenu(): Promise<void> {
+    if (!this.hasEnteredRoom || !this.activeRoomCode || this.role !== 'host') return;
+    const hasGuest = Boolean(this.latestRoom?.guestName) || this.guestJoinedNotified;
+    await this.adapter.updateRoom(this.activeRoomCode, {
+      activeGame: null,
+      status: hasGuest ? 'connected' : 'waiting',
+      updatedAt: this.adapter.serverNow(),
+    });
+  }
+
+  /**
+   * Host-only: updates Parcheesi 1-Dice / 2-Dice preference live in Firestore Room Menu & game.
+   */
+  public syncDiceCount(diceCount: ParchisiDiceCount): void {
+    if (!this.hasEnteredRoom || !this.activeRoomCode || this.role !== 'host') return;
+    const safeDice: ParchisiDiceCount = diceCount === 1 ? 1 : 2;
+    void this.adapter
+      .updateRoom(this.activeRoomCode, {
+        diceCount: safeDice,
+        updatedAt: this.adapter.serverNow(),
+      })
+      .catch(() => {});
+  }
+
+  /**
+   * Appends a Live Chat message or Quick Reaction into `rooms/{code}/chat`.
+   */
+  public async sendChatMessage(
+    text: string,
+    kind: 'text' | 'reaction' = 'text',
+  ): Promise<void> {
+    if (!this.hasEnteredRoom || !this.activeRoomCode) return;
+    const trimmed = text.trim().slice(0, 280);
+    if (!trimmed) return;
+    await this.adapter.addChat(this.activeRoomCode, {
+      sender: this.role,
+      senderName: sanitizePlayerName(this.localName, this.role === 'host' ? 'Hôte' : 'Invité'),
+      text: trimmed,
+      kind,
+      createdAt: this.adapter.serverNow(),
+    });
+  }
+
+  /**
+   * Sends an authoritative Parcheesi game event via `rooms/{code}/messages`.
    */
   public sendEvent(msg: PeerMessage): void {
     if (!this.hasEnteredRoom || !this.activeRoomCode) return;
     const cleanPayload = stripUndefinedDeep(msg);
 
-    // Keep room-level document in sync for game switches and Parcheesi diceCount
-    if (cleanPayload.type === 'SELECT_GAME') {
-      this.syncRoomMetadata({ currentGame: cleanPayload.game });
-    } else if (cleanPayload.type === 'RETURN_HUB') {
-      this.syncRoomMetadata({ currentGame: 'hub' });
-    } else if (cleanPayload.type === 'PARCHISI_CONFIG' || cleanPayload.type === 'PARCHISI_START') {
-      if (cleanPayload.diceCount === 1 || cleanPayload.diceCount === 2) {
-        this.syncRoomMetadata({ diceCount: cleanPayload.diceCount });
-      }
+    if (
+      this.role === 'host' &&
+      (cleanPayload.type === 'PARCHISI_CONFIG' || cleanPayload.type === 'PARCHISI_START') &&
+      (cleanPayload.diceCount === 1 || cleanPayload.diceCount === 2)
+    ) {
+      this.syncDiceCount(cleanPayload.diceCount);
     }
 
     void this.adapter
@@ -1070,46 +1254,17 @@ export class FirestoreRoomService {
         createdAt: this.adapter.serverNow(),
       })
       .catch((err) => {
-        console.warn('[CoupleCam Firestore] Failed to send event:', err);
+        console.warn('[Parcheesi Firestore] Failed to send Parcheesi event:', err);
       });
   }
 
-  /**
-   * Alias preserving the requested `sendData` API surface.
-   */
   public sendData(msg: PeerMessage): void {
     this.sendEvent(msg);
   }
 
   /**
-   * Sends high-frequency ephemeral frames (FACE_FRAME, HAND_FRAME, cursor, physics sync)
-   * over native WebRTC DataChannel at ~30fps when open, falling back to throttled Firestore messages.
-   */
-  public sendRealtime(msg: PeerMessage): void {
-    if (!this.hasEnteredRoom || !this.activeRoomCode) return;
-
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    const lastAt = this.lastRealtimeSendByType.get(msg.type) ?? 0;
-
-    if (this.dataChannel && this.dataChannel.readyState === 'open') {
-      if (now - lastAt < REALTIME_DATACHANNEL_INTERVAL_MS) return;
-      this.lastRealtimeSendByType.set(msg.type, now);
-      try {
-        this.dataChannel.send(JSON.stringify(msg));
-        return;
-      } catch {
-        // Fall through to throttled Firestore fallback
-      }
-    }
-
-    // Fallback when WebRTC DataChannel is not open: throttled Firestore message
-    if (now - lastAt < REALTIME_FIRESTORE_FALLBACK_INTERVAL_MS) return;
-    this.lastRealtimeSendByType.set(msg.type, now);
-    this.sendEvent(msg);
-  }
-
-  /**
-   * Cleanly destroys listeners, closes RTCPeerConnection, and optionally marks the room as closed.
+   * Cleanly destroys listeners, closes audio RTCPeerConnection, and ONLY closes remote doc
+   * when `closeRemoteDoc: true` (explicit confirmed Leave Room).
    */
   public destroy(options?: { closeRemoteDoc?: boolean }): void {
     const prevCode = this.activeRoomCode;
@@ -1117,8 +1272,10 @@ export class FirestoreRoomService {
 
     this.sessionGen += 1;
     this.hasEnteredRoom = false;
+    this.guestJoinedNotified = false;
     this.activeRoomCode = '';
-    this.lastRealtimeSendByType.clear();
+    this.latestRoom = null;
+    this.seenChatIds.clear();
     this.seenMessageIds.clear();
     this.seenCandidateIds.clear();
     this.unsubscribeAll();
@@ -1129,11 +1286,10 @@ export class FirestoreRoomService {
       void this.adapter
         .updateRoom(prevCode, {
           status: 'closed',
+          activeGame: null,
           updatedAt: this.adapter.serverNow(),
         })
-        .catch(() => {
-          // Ignore close errors if room was never created or already closed
-        });
+        .catch(() => {});
     }
   }
 }
